@@ -16,9 +16,10 @@ system_prompt: none
 batch_size: 32
 top_k_tokens: 5
 progress_every: 2000
-# bf16 on GPU: different batch shapes give slightly different rounding, so the
-# tolerance is looser than locally; a real padding/masking bug is far larger.
-batching_check: {n_prompts: 16, tolerance: 0.3}
+# bf16 on GPU: different batch shapes give different rounding, which compounds
+# over 64 layers (first 32B run: max 0.25 nats over 16 prompts). A real
+# padding/masking bug shows up as several nats or NaN; fp32 locally gives ~1e-5.
+batching_check: {n_prompts: 16, tolerance: 1.0}
 
 models:
   - name: allenai/Olmo-3.1-32B-Instruct

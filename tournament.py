@@ -66,6 +66,15 @@ def score(model, tokenizer, items, batch_size, top_k=5):
     return results
 
 
+def append_csv(path, rows):
+    new = not path.exists()
+    with open(path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        if new:
+            w.writeheader()
+        w.writerows(rows)
+
+
 def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rng):
     """Score a few prompts of mixed lengths alone and together in one padded
     batch; padding/masking bugs show up as a mismatch. Returns the max
@@ -120,13 +129,18 @@ def main():
     out_dir = Path("outputs") / run.id
     out_dir.mkdir(parents=True, exist_ok=True)
     yaml.safe_dump({**cfg, "wandb_run": run.path}, open(out_dir / "config.yaml", "w"))
+    # Results are appended after each condition and synced to W&B as they change,
+    # so a crash (or a failed batching check) keeps every finished condition.
+    # Recover with: analyze.py on a dir holding results.csv + config.yaml.
+    results_path = out_dir / "results.csv"
+    run.save(str(out_dir / "config.yaml"), base_path=str(out_dir), policy="now")
 
     # Every unordered pair of task indices; each is scored in both orders.
     pairs = list(itertools.combinations(range(len(tasks)), 2))
     ordered = pairs + [(b, a) for a, b in pairs]
     print(f"{len(tasks)} tasks, {len(pairs)} pairs, {len(ordered)} prompts per condition")
 
-    rows, probe_rows, examples = [], [], {}
+    rows, examples = [], {}
     for m in cfg["models"]:
         stage = m["stage"]
         print(f"Loading {m['name']} on {device} ({dtype})", flush=True)
@@ -155,8 +169,9 @@ def main():
                       f"ETA {(len(items) - len(scored)) / rate / 60:.1f} min", flush=True)
             run.summary[f"{stage}/{condition}/seconds"] = time.time() - start
 
+            new_rows = []
             for (a, b), s in zip(ordered, scored):
-                rows.append(dict(
+                new_rows.append(dict(
                     model=m["name"], stage=stage, condition=condition,
                     first=tasks[a]["id"], second=tasks[b]["id"],
                     logp_first=s["logp_first"], logp_second=s["logp_second"],
@@ -165,24 +180,23 @@ def main():
                     outcome_mass=math.exp(s["logp_first"]) + math.exp(s["logp_second"]),
                     prompt_tokens=s["prompt_tokens"], top_tokens=s["top_tokens"],
                 ))
+            append_csv(results_path, new_rows)
+            if not rows:
+                run.save(str(results_path), base_path=str(out_dir), policy="live")
+            rows += new_rows
 
         if m.get("phrasing_probe"):
-            probe_rows += [[stage] + r for r in phrasing_probe(
+            probe_rows = [[stage] + r for r in phrasing_probe(
                 model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, m["phrasing_probe"], rng)]
+            run.log({f"phrasing_probe/{stage}": wandb.Table(
+                columns=["stage", "first", "second", "sample", "completion"], data=probe_rows)})
 
         del model
         gc.collect()
         if device == "cuda":
             torch.cuda.empty_cache()
 
-    with open(out_dir / "results.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
-        w.writeheader()
-        w.writerows(rows)
-    log = {"results": wandb.Table(columns=list(rows[0]), data=[list(r.values()) for r in rows])}
-    if probe_rows:
-        log["phrasing_probe"] = wandb.Table(columns=["stage", "first", "second", "sample", "completion"], data=probe_rows)
-    run.log(log)
+    run.log({"results": wandb.Table(columns=list(rows[0]), data=[list(r.values()) for r in rows])})
     prompts_art = wandb.Artifact("example-prompts", type="prompts")
     with prompts_art.new_file("examples.yaml") as f:
         yaml.safe_dump(examples, f, allow_unicode=True, width=10_000)
