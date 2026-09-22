@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+outputs/
+wandb/
+.env
+# upstream task source, only needed for `make_tasks.py extract`
+probing-persona-preferences/
