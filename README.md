@@ -21,8 +21,13 @@ Each gives pairwise comparisons, from which we fit per-task utilities
   log-odds cancels any first-slot bias (position, heads/tails); utilities are
   least-squares fits to those per-pair effects (`analyze.py`).
 - Split-half reliability per condition gives the ceiling for the
-  between-condition correlation.
-- The base model runs the coinflip condition as a control.
+  between-condition correlation; additive R^2 says how well one preference
+  scale explains the pairwise effects.
+- The base model runs both conditions. Post-training shifts
+  (instruct - base, per condition) are correlated across conditions, which
+  removes what pretraining already puts into both (e.g. task length effects).
+- Correlations are also reported over non-harmful tasks only, so a single
+  extreme cluster can't carry them.
 - Batched scoring is checked against unbatched on every run, before each condition.
 
 ## Running

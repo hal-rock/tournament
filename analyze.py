@@ -9,12 +9,21 @@ and both presentation orders:
 The swap cancels any first-slot bias (position, heads/tails) that is the same
 in both orders, even if it varies across pairs. Utilities are least-squares
 fits of u_a - u_b = effect, centered at zero (Bradley-Terry on the log-odds
-themselves; with a full round-robin, u_a is just a's mean effect).
+themselves; with a full round-robin, u_a is just a's mean effect). Additive R^2
+is the share of the effects' sum of squares that u_a - u_b explains: low means
+choices depend on the specific pairing, not one preference scale.
 
-Reliability is split-half: fit utilities on two random halves of the pairs,
-correlate, and Spearman-Brown correct to the full set. A correlation between
-conditions can't exceed roughly sqrt(rel_x * rel_y), so it is also reported
-disattenuated by that ceiling.
+Measures are either one (stage, condition)'s utilities, or a post-training
+shift, e.g. instruct-base/coinflip = instruct/coinflip - base/coinflip.
+Correlating the shifts across conditions (difference-in-differences) removes
+whatever the base model already puts into both, such as length effects.
+
+Reliability is split-half: fit on two random halves of the pairs (the same
+halves for every stage and condition, so shifts split consistently), correlate,
+and Spearman-Brown correct to the full set. A correlation between measures
+can't exceed roughly sqrt(rel_x * rel_y), so it is also reported disattenuated.
+Correlations are also given over non-harmful tasks only, in case one extreme
+cluster drives the full-set r.
 
 Usage: uv run python analyze.py outputs/<run_id>            (local run dir)
        uv run python analyze.py entity/project/<run_id> [--update-wandb]
@@ -38,6 +47,10 @@ import yaml
 N_SPLITS = 50
 N_BOOTSTRAP = 2000
 NUMERIC = ("logp_first", "logp_second", "log_odds", "outcome_mass", "prompt_tokens")
+BASELINE_STAGE = "base"
+# Tasks left out of the "benign" correlations.
+HARM_TOPICS = {"harmful_request"}
+HARM_ORIGINS = {"BAILBENCH"}
 # Categorical slots 1-5 of the dataviz reference palette, in fixed order, plus
 # a marker per origin so identity never rests on color alone.
 ORIGIN_STYLE = {
@@ -68,6 +81,28 @@ def fit_utilities(ids, effects):
     return u - u.mean()
 
 
+def additive_r2(ids, effects, u):
+    """Share of sum(effect^2) explained by u_a - u_b (uncentered: the fit has no intercept)."""
+    idx = {t: i for i, t in enumerate(ids)}
+    e = np.array([x[2] for x in effects])
+    pred = np.array([u[idx[a]] - u[idx[b]] for a, b, *_ in effects])
+    return float(1 - ((e - pred) ** 2).sum() / (e ** 2).sum())
+
+
+def define_measures(keys, baseline=BASELINE_STAGE):
+    """{name: {(stage, condition): coefficient}}: one measure per (stage, condition),
+    plus stage-minus-baseline shifts for each condition both were run in."""
+    measures = {"/".join(k): {k: 1.0} for k in sorted(keys)}
+    for stage, cond in sorted(keys):
+        if stage != baseline and (baseline, cond) in keys:
+            measures[f"{stage}-{baseline}/{cond}"] = {(stage, cond): 1.0, (baseline, cond): -1.0}
+    return measures
+
+
+def combine(measure, utils_by_key):
+    return sum(c * utils_by_key[k] for k, c in measure.items())
+
+
 def pearson(x, y):
     return float(np.corrcoef(x, y)[0, 1])
 
@@ -76,17 +111,18 @@ def spearman(x, y):
     return pearson(np.argsort(np.argsort(x)), np.argsort(np.argsort(y)))
 
 
-def split_half(ids, effects, rng):
-    """Mean split-half Pearson r over random halves of the pairs, and its Spearman-Brown correction."""
-    rs = []
+def split_half(ids, effects, measures, rng):
+    """{name: (mean split-half r, Spearman-Brown reliability)} for every measure.
+    Each split puts every task pair in one half, identically for all (stage, condition)."""
+    pairs = sorted({(a, b) for eff in effects.values() for a, b, *_ in eff})
+    rs = collections.defaultdict(list)
     for _ in range(N_SPLITS):
-        perm = rng.permutation(len(effects))
-        half = len(effects) // 2
-        u1 = fit_utilities(ids, [effects[k] for k in perm[:half]])
-        u2 = fit_utilities(ids, [effects[k] for k in perm[half:]])
-        rs.append(pearson(u1, u2))
-    r = float(np.mean(rs))
-    return r, 2 * r / (1 + r)
+        in_first = dict(zip(pairs, rng.permutation(len(pairs)) < len(pairs) // 2))
+        halves = [{k: fit_utilities(ids, [e for e in eff if in_first[e[:2]] == h]) for k, eff in effects.items()}
+                  for h in (True, False)]
+        for name, m in measures.items():
+            rs[name].append(pearson(combine(m, halves[0]), combine(m, halves[1])))
+    return {name: (float(np.mean(r)), 2 * np.mean(r) / (1 + np.mean(r))) for name, r in rs.items()}
 
 
 def bootstrap_r(x, y, rng):
@@ -96,7 +132,7 @@ def bootstrap_r(x, y, rng):
     return tuple(np.percentile(rs, [2.5, 97.5]))
 
 
-def scatter(key_x, u_x, key_y, u_y, origins, stats):
+def scatter(name_x, u_x, name_y, u_y, origins, stats):
     fig, ax = plt.subplots(figsize=(6.5, 5.5))
     for origin, (color, marker) in ORIGIN_STYLE.items():
         m = np.array([o == origin for o in origins])
@@ -105,15 +141,20 @@ def scatter(key_x, u_x, key_y, u_y, origins, stats):
                        edgecolors="white", linewidths=0.8, zorder=3)
     ax.axhline(0, color="#cccccc", lw=0.8, zorder=1)
     ax.axvline(0, color="#cccccc", lw=0.8, zorder=1)
-    ax.set_xlabel(f"{'/'.join(key_x)} utility (log-odds)")
-    ax.set_ylabel(f"{'/'.join(key_y)} utility (log-odds)")
+    ax.set_xlabel(f"{name_x} utility (log-odds)")
+    ax.set_ylabel(f"{name_y} utility (log-odds)")
     ax.set_title(f"r = {stats['pearson']:.2f} [{stats['pearson_ci_low']:.2f}, {stats['pearson_ci_high']:.2f}], "
-                 f"Spearman {stats['spearman']:.2f}, n = {len(u_x)} tasks", fontsize=10, color="#444444")
+                 f"Spearman {stats['spearman']:.2f}, benign r = {stats['pearson_benign']:.2f}, n = {len(u_x)}",
+                 fontsize=10, color="#444444")
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     ax.legend(frameon=False, fontsize=9)
     fig.tight_layout()
     return fig
+
+
+def fmt(v, width=8, prec=2):
+    return f"{v:{width}.{prec}f}" if v is not None else f"{'-':>{width}}"
 
 
 def analyze(rows, tasks, out_dir, seed=0):
@@ -123,51 +164,66 @@ def analyze(rows, tasks, out_dir, seed=0):
     rng = np.random.default_rng(seed)
     by_id = {t["id"]: t for t in tasks}
     effects = pair_effects(rows)
-    ids = sorted({a for eff in effects.values() for a, b, *_ in eff} | {b for eff in effects.values() for a, b, *_ in eff})
+    ids = sorted({t for eff in effects.values() for a, b, *_ in eff for t in (a, b)})
     origins = [by_id[t]["origin"] for t in ids]
+    benign = np.array([by_id[t]["topic"] not in HARM_TOPICS and by_id[t]["origin"] not in HARM_ORIGINS for t in ids])
 
-    summary, utils = {}, {}
-    print(f"\n{'stage/condition':24} {'pairs':>6} {'util sd':>8} {'slot bias':>10} {'split-half':>11} {'reliab.':>8} {'min mass':>9}")
-    for key, eff in sorted(effects.items()):
-        u = fit_utilities(ids, eff)
-        r_half, rel = split_half(ids, eff, rng)
-        biases = [e[3] for e in eff]
-        masses = [r["outcome_mass"] for r in rows if (r["stage"], r["condition"]) == key]
-        name = "/".join(key)
-        utils[key] = u
-        summary.update({
-            f"{name}/n_pairs": len(eff), f"{name}/utility_sd": float(u.std()),
-            f"{name}/slot_bias_mean": float(np.mean(biases)), f"{name}/slot_bias_sd": float(np.std(biases)),
-            f"{name}/split_half_r": r_half, f"{name}/reliability": rel,
-            f"{name}/outcome_mass_mean": float(np.mean(masses)), f"{name}/outcome_mass_min": float(np.min(masses)),
-        })
-        print(f"{name:24} {len(eff):6d} {u.std():8.2f} {np.mean(biases):10.2f} {r_half:11.2f} {rel:8.2f} {np.min(masses):9.3f}")
+    utils_by_key = {k: fit_utilities(ids, eff) for k, eff in effects.items()}
+    measures = define_measures(set(effects))
+    utils = {name: combine(m, utils_by_key) for name, m in measures.items()}
+    reliability = split_half(ids, effects, measures, rng)
+
+    summary = {}
+    print(f"\n{'measure':24} {'pairs':>6} {'util sd':>8} {'slot bias':>10} {'add. R2':>8} "
+          f"{'split-half':>11} {'reliab.':>8} {'min mass':>9}")
+    for name, m in measures.items():
+        u, (r_half, rel) = utils[name], reliability[name]
+        s = {"utility_sd": float(u.std()), "split_half_r": r_half, "reliability": rel}
+        if len(m) == 1:
+            (key,) = m
+            eff = effects[key]
+            masses = [r["outcome_mass"] for r in rows if (r["stage"], r["condition"]) == key]
+            s.update(n_pairs=len(eff), slot_bias_mean=float(np.mean([e[3] for e in eff])),
+                     slot_bias_sd=float(np.std([e[3] for e in eff])), additive_r2=additive_r2(ids, eff, u),
+                     outcome_mass_mean=float(np.mean(masses)), outcome_mass_min=float(np.min(masses)))
+        summary.update({f"{name}/{k}": v for k, v in s.items()})
+        print(f"{name:24} {s.get('n_pairs', '-'):>6} {fmt(s['utility_sd'])} {fmt(s.get('slot_bias_mean'), 10)} "
+              f"{fmt(s.get('additive_r2'))} {fmt(r_half, 11)} {fmt(rel)} {fmt(s.get('outcome_mass_min'), 9, 3)}")
 
     corr_rows, figures = [], {}
-    for kx, ky in itertools.combinations(sorted(utils), 2):
-        x, y = utils[kx], utils[ky]
-        rel_x, rel_y = summary[f"{'/'.join(kx)}/reliability"], summary[f"{'/'.join(ky)}/reliability"]
+    for nx, ny in itertools.combinations(measures, 2):
+        if set(measures[nx]) & set(measures[ny]):
+            continue  # a shift vs one of its own components is correlated by construction
+        x, y = utils[nx], utils[ny]
+        rel_x, rel_y = reliability[nx][1], reliability[ny][1]
         lo, hi = bootstrap_r(x, y, rng)
         stats = dict(
-            x="/".join(kx), y="/".join(ky), pearson=pearson(x, y), pearson_ci_low=lo, pearson_ci_high=hi,
-            spearman=spearman(x, y),
+            x=nx, y=ny, pearson=pearson(x, y), pearson_ci_low=lo, pearson_ci_high=hi, spearman=spearman(x, y),
             # Undefined when either reliability is <= 0 (pure noise).
             pearson_disattenuated=pearson(x, y) / np.sqrt(rel_x * rel_y) if min(rel_x, rel_y) > 0 else float("nan"),
+            n_benign=int(benign.sum()),
+            pearson_benign=pearson(x[benign], y[benign]) if benign.sum() >= 3 else float("nan"),
+            spearman_benign=spearman(x[benign], y[benign]) if benign.sum() >= 3 else float("nan"),
             sd_ratio_y_over_x=float(y.std() / x.std()),
         )
         corr_rows.append(stats)
-        tag = f"{stats['x']}_vs_{stats['y']}".replace("/", "-")
-        fig = scatter(kx, x, ky, y, origins, stats)
+        tag = f"{nx}_vs_{ny}".replace("/", "-")
+        fig = scatter(nx, x, ny, y, origins, stats)
         fig.savefig(out_dir / f"scatter_{tag}.png", dpi=150)
-        figures[f"scatter/{tag}"] = fig
-    print(f"\n{'x':22} {'y':22} {'pearson':>8} {'95% CI':>15} {'spearman':>9} {'disatt.':>8} {'sd y/x':>7}")
+        plt.close(fig)
+        figures[f"scatter/{tag}"] = out_dir / f"scatter_{tag}.png"
+    print(f"\n{'x':22} {'y':22} {'pearson':>8} {'95% CI':>15} {'spearman':>9} {'disatt.':>8} "
+          f"{'benign r':>9} {'sd y/x':>7}")
     for c in corr_rows:
         print(f"{c['x']:22} {c['y']:22} {c['pearson']:8.2f} [{c['pearson_ci_low']:5.2f},{c['pearson_ci_high']:5.2f}] "
-              f"{c['spearman']:9.2f} {c['pearson_disattenuated']:8.2f} {c['sd_ratio_y_over_x']:7.2f}")
+              f"{c['spearman']:9.2f} {c['pearson_disattenuated']:8.2f} {c['pearson_benign']:9.2f} "
+              f"{c['sd_ratio_y_over_x']:7.2f}")
+    print(f"(benign = {int(benign.sum())} of {len(ids)} tasks, excluding topics {sorted(HARM_TOPICS)} "
+          f"and origins {sorted(HARM_ORIGINS)})")
 
     util_rows = [
-        dict(id=t, origin=by_id[t]["origin"], topic=by_id[t]["topic"],
-             **{"/".join(k): float(u[i]) for k, u in utils.items()}, prompt=by_id[t]["prompt"])
+        dict(id=t, origin=by_id[t]["origin"], topic=by_id[t]["topic"], n_chars=len(by_id[t]["prompt"]),
+             **{name: float(u[i]) for name, u in utils.items()}, prompt=by_id[t]["prompt"])
         for i, t in enumerate(ids)
     ]
     group_rows = []
@@ -175,10 +231,10 @@ def analyze(rows, tasks, out_dir, seed=0):
         for g in sorted({r[field] or "none" for r in util_rows}):
             members = [r for r in util_rows if (r[field] or "none") == g]
             group_rows.append(dict(field=field, group=g, n=len(members),
-                                   **{"/".join(k): float(np.mean([r["/".join(k)] for r in members])) for k in utils}))
-    print(f"\nMean utility by origin:\n{'origin':12} {'n':>3} " + " ".join(f"{'/'.join(k):>22}" for k in sorted(utils)))
+                                   **{name: float(np.mean([r[name] for r in members])) for name in utils}))
+    print(f"\nMean utility by origin:\n{'origin':12} {'n':>3} " + " ".join(f"{name:>22}" for name in utils))
     for g in (g for g in group_rows if g["field"] == "origin"):
-        print(f"{g['group']:12} {g['n']:3d} " + " ".join(f"{g['/'.join(k)]:22.2f}" for k in sorted(utils)))
+        print(f"{g['group']:12} {g['n']:3d} " + " ".join(f"{g[name]:22.2f}" for name in utils))
 
     for name, table in (("utilities", util_rows), ("correlations", corr_rows), ("group_means", group_rows)):
         with open(out_dir / f"{name}.csv", "w", newline="") as f:
@@ -193,11 +249,12 @@ def log_to_wandb(run, result):
     import wandb
     run.summary.update(result["summary"])
     for c in result["correlations"]:
-        for k in ("pearson", "spearman", "pearson_disattenuated", "pearson_ci_low", "pearson_ci_high"):
+        for k in ("pearson", "spearman", "pearson_disattenuated", "pearson_ci_low", "pearson_ci_high",
+                  "pearson_benign", "spearman_benign"):
             run.summary[f"corr/{c['x']}_vs_{c['y']}/{k}"] = c[k]
     log = {name: wandb.Table(columns=list(result[name][0]), data=[list(r.values()) for r in result[name]])
            for name in ("utilities", "correlations", "group_means")}
-    log.update({name: wandb.Image(fig) for name, fig in result["figures"].items()})
+    log.update({name: wandb.Image(str(path)) for name, path in result["figures"].items()})
     run.log(log)
 
 
