@@ -33,5 +33,11 @@ cd tournament
 git pull --ff-only
 uv sync
 
-uv run python -c "import torch; print('CUDA:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+# torch from PyPI is built for CUDA 13, so the pod's driver must support CUDA >= 13.0.
+uv run python -c "
+import sys, torch
+if not torch.cuda.is_available():
+    sys.exit('No usable GPU: the pod driver is probably too old for torch ' + torch.__version__ + ' (CUDA ' + str(torch.version.cuda) + '). Pick a pod with CUDA >= 13.0.')
+print('CUDA OK:', torch.cuda.get_device_name(0), '| torch', torch.__version__, '| CUDA', torch.version.cuda)
+"
 echo "Setup done. Next: cd /workspace/tournament && uv run python tournament.py configs/olmo3-32b.yaml"

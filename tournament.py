@@ -111,6 +111,10 @@ def main():
     system_prompt = cfg.get("system_prompt", "none")
     batch_size = cfg["batch_size"]
     rng = random.Random(cfg.get("seed", 0))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    if cfg.get("require_gpu") and device != "cuda":
+        raise SystemExit("require_gpu is set but torch sees no usable GPU (check the CUDA warning above)")
     run = wandb.init(project=cfg["wandb_project"], name=cfg.get("run_name"), job_type="tournament",
                      config={**cfg, "n_tasks": len(tasks)})
     out_dir = Path("outputs") / run.id
@@ -122,8 +126,6 @@ def main():
     ordered = pairs + [(b, a) for a, b in pairs]
     print(f"{len(tasks)} tasks, {len(pairs)} pairs, {len(ordered)} prompts per condition")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.bfloat16 if device == "cuda" else torch.float32
     rows, probe_rows, examples = [], [], {}
     for m in cfg["models"]:
         stage = m["stage"]

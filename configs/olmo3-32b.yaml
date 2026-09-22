@@ -8,6 +8,8 @@ wandb_project: tournament
 run_name: olmo3-32b-n100
 tasks_file: data/tasks_n100_max500_seed0.jsonl
 seed: 0
+# Fail instead of silently falling back to CPU (e.g. driver too old for the torch build).
+require_gpu: true
 
 system_prompt: none
 
