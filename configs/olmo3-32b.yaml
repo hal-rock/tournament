@@ -1,0 +1,28 @@
+# OLMo 3 32B: final Instruct checkpoint in both conditions, plus the base model
+# in the coinflip condition as a control (no preference expected there).
+# 100 tasks -> 4950 pairs -> 9900 prompts per condition, ~30k forward passes.
+# Needs one 80GB GPU and disk for two 32B checkpoints.
+wandb_project: tournament
+run_name: olmo3-32b-n100
+tasks_file: data/tasks_n100_max500_seed0.jsonl
+seed: 0
+
+system_prompt: none
+
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# bf16 on GPU: different batch shapes give slightly different rounding, so the
+# tolerance is looser than locally; a real padding/masking bug is far larger.
+batching_check: {n_prompts: 16, tolerance: 0.3}
+
+models:
+  - name: allenai/Olmo-3.1-32B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}
+  - name: allenai/Olmo-3-1125-32B
+    stage: base
+    # Borrow the Instruct template so base and Instruct prompts are token-identical.
+    chat_template_from: allenai/Olmo-3.1-32B-Instruct
+    conditions: [coinflip]

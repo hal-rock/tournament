@@ -1,0 +1,29 @@
+# Local CPU smoke test: OLMo 2 1B on 10 tasks (45 pairs). Tests the plumbing
+# only; the 1B showed no coinflip effect in ../coinflip, so don't read the numbers.
+wandb_project: tournament
+run_name: local-olmo2-1b-n10
+tasks_file: data/tasks_n10_max500_seed0.jsonl
+seed: 0
+
+# "none" drops the template's system block, "default" keeps it, any other
+# string is used as the system message. Same for every model and condition.
+system_prompt: none
+
+batch_size: 4
+top_k_tokens: 5
+progress_every: 40
+# Before each condition, score a few prompts alone and in one padded batch and
+# fail if log-odds differ by more than this (fp32 on CPU should agree to ~1e-4).
+batching_check: {n_prompts: 8, tolerance: 0.01}
+
+models:
+  - name: allenai/OLMo-2-0425-1B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]
+    # Sample the start of the unprefilled Assistant reply for a few pairs.
+    phrasing_probe: {n_pairs: 3, n_samples: 2, max_new_tokens: 12}
+  - name: allenai/OLMo-2-0425-1B
+    stage: base
+    # Base models ship without a chat template; borrow the instruct one.
+    chat_template_from: allenai/OLMo-2-0425-1B-Instruct
+    conditions: [coinflip]

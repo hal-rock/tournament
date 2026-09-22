@@ -11,6 +11,32 @@ them:
 Each gives pairwise comparisons, from which we fit per-task utilities
 (Bradley-Terry).
 
+## Design
+
+- Prompts (`prompts.py`) share the opening sentence and the "Task A / Task B"
+  layout. The Assistant's turn is prefilled with "I'll do Task" and we read
+  P(" A") vs P(" B"); the coinflip Human turn is cut at "it came up" and we read
+  P(" heads") vs P(" tails"). No system prompt.
+- Every pair is scored in both orders. Halving the difference of the two
+  log-odds cancels any first-slot bias (position, heads/tails); utilities are
+  least-squares fits to those per-pair effects (`analyze.py`).
+- Split-half reliability per condition gives the ceiling for the
+  between-condition correlation.
+- The base model runs the coinflip condition as a control.
+- Batched scoring is checked against unbatched on every run, before each condition.
+
+## Running
+
+```
+uv sync
+uv run pytest                                            # prompts + analysis on synthetic data
+uv run python tournament.py configs/local.yaml           # CPU smoke test, OLMo 2 1B, 10 tasks
+uv run python tournament.py configs/olmo3-32b.yaml       # 80GB GPU, see scripts/pod_setup.sh
+uv run python analyze.py entity/tournament/<run_id>      # re-run the analysis on a finished run
+```
+
+Results go to W&B (project `tournament`) and to `outputs/<run_id>/`.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
