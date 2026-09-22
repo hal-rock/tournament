@@ -1,6 +1,8 @@
-# OLMo 3 32B: final Instruct checkpoint in both conditions, plus the base model
-# in the coinflip condition as a control (no preference expected there).
-# 100 tasks -> 4950 pairs -> 9900 prompts per condition, ~30k forward passes.
+# OLMo 3 32B: final Instruct checkpoint and base model, each in both
+# conditions. Base coinflip is the control (no preference expected); base
+# assistant gives the pretraining prior for the Assistant, so post-training
+# shifts can be compared across roles.
+# 100 tasks -> 4950 pairs -> 9900 prompts per condition, ~40k forward passes.
 # Needs one 80GB GPU and disk for two 32B checkpoints.
 wandb_project: tournament
 run_name: olmo3-32b-n100
@@ -25,4 +27,4 @@ models:
     stage: base
     # Borrow the Instruct template so base and Instruct prompts are token-identical.
     chat_template_from: allenai/Olmo-3.1-32B-Instruct
-    conditions: [coinflip]
+    conditions: [assistant, coinflip]
