@@ -48,7 +48,9 @@ condition finishes; the analysis tables and plots are logged to the run.
 `report.py` condenses the analysis into a few figures and tables on bleedthrough:
 Assistant-coinflip correlation and slope by stage, the stage x stage correlation
 matrix, per-origin slopes and offsets from a common slope, what the pre-DPO
-coinflip utilities track, and the tasks that most over- or under-bleed. It reads
+coinflip utilities track, the tasks that most over- or under-bleed, and the
+non-Assistant part of the coinflip (coinflip minus its fit on the Assistant
+utilities): what explains it, and its means by origin and topic. It reads
 only the fitted utilities, so it runs in seconds on a laptop.
 
 Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,

@@ -22,6 +22,13 @@ stage's coinflip and the focus stage's Assistant utilities: how much of the focu
 coinflip is the earlier coinflip structure carried over (and rescaled) versus a new
 Assistant-aligned part. It is given over all tasks and over benign ones.
 
+The non-Assistant coinflip utility of a stage is its coinflip utility minus the pooled
+least-squares fit on the same stage's Assistant utility (no origin or length terms, so
+those effects stay in it, to be explained). Its variance is partitioned by adjusted R^2
+over blocks of predictors (the previous stage's coinflip, origin, topic, log length),
+each alone and added in that order; group means over origins and topics hold the fit
+fixed and bootstrap within each group.
+
 CIs are 95% percentile bootstraps over tasks, resampled within origin to match how the
 task set was drawn (fixed source quotas). They hold the fitted utilities fixed, so they
 leave out the utilities' own noise (small: see split-half reliability).
@@ -113,6 +120,33 @@ def decomposition(y, pre, assistant):
     r_pre, r_asst = pearson(pre, y), pearson(assistant, y)
     coef, r2_both = ols(y, pre, assistant)
     return np.array([r_pre, r_asst, pearson(pre, assistant), r_pre ** 2, r_asst ** 2, r2_both, *coef])
+
+
+def nonassistant(c, a):
+    """Coinflip utility minus its pooled least-squares fit on Assistant utility, centered."""
+    resid = c - ols(c, a)[0][0] * a
+    return resid - resid.mean()
+
+
+def dummies(labels):
+    return [(labels == v).astype(float) for v in np.unique(labels)]
+
+
+def adjusted_r2(y, blocks):
+    """Adjusted R^2 of y on the columns of all blocks plus an intercept; parameters are
+    counted by rank, so redundant dummies (e.g. topic within origin) cost nothing extra."""
+    cols = [col for b in blocks for col in b]
+    if not cols:
+        return 0.0
+    X = np.column_stack([*cols, np.ones(len(y))])
+    r2 = ols(y, *cols)[1]
+    p = np.linalg.matrix_rank(X) - 1
+    return float(1 - (1 - r2) * (len(y) - 1) / (len(y) - p - 1))
+
+
+def group_mean_ci(x, rng, n_boot):
+    boots = [x[rng.integers(0, len(x), len(x))].mean() for _ in range(n_boot)]
+    return (float(x.mean()), *(float(v) for v in np.percentile(boots, [2.5, 97.5])))
 
 
 def with_ci(stat, n, resamples):
@@ -301,6 +335,38 @@ def plot_pre_stage(pre, focus, U, origins, correlates):
     return fig
 
 
+def plot_nonassistant_groups(group_rows, show_stages, focus):
+    """Group means (95% CI): the focus stage's Assistant utility on the left, the
+    non-Assistant coinflip utility of each shown stage on the right."""
+    n_origin = sum(r["kind"] == "origin" for r in group_rows)
+    y = np.arange(len(group_rows))[::-1].astype(float)
+    y[n_origin:] -= 0.6  # gap between the origin and topic blocks
+    fig, (ax_a, ax_r) = plt.subplots(1, 2, figsize=(12, 0.3 * len(group_rows) + 1.8), sharey=True,
+                                     gridspec_kw=dict(width_ratios=[1, 1.3]))
+
+    def draw(ax, key, color, marker, label, dy):
+        est, lo, hi = (np.array([r[f"{key}{suffix}"] for r in group_rows]) for suffix in ("", "_ci_low", "_ci_high"))
+        ax.errorbar(est, y + dy, xerr=[est - lo, hi - est], fmt=marker, color=color, ms=6, elinewidth=1.5,
+                    mec="white", mew=0.8, label=label, zorder=3)
+
+    draw(ax_a, f"{focus}/assistant", INK_2, "o", None, 0)
+    for k, s in enumerate(show_stages):
+        draw(ax_r, f"{s}/nonassistant", SERIES[k], "os"[k], s, (k - (len(show_stages) - 1) / 2) * 0.25)
+    ax_a.set_yticks(y, [f"{r['group'].lower()} ({r['n']})" for r in group_rows])
+    for ax in (ax_a, ax_r):
+        ax.axvline(0, color=RULE, lw=0.8, zorder=1)
+        ax.axhline(y[n_origin - 1] - 0.8, color=RULE, lw=0.8, zorder=1)
+        style(ax)
+    ax_a.set_xlabel(f"{focus} Assistant utility (log-odds)")
+    ax_r.set_xlabel("non-Assistant coinflip utility (log-odds)")
+    ax_a.set_title("Assistant", fontsize=11)
+    ax_r.set_title("Coinflip minus its fit on the same stage's Assistant utility", fontsize=11)
+    ax_r.legend(frameon=False, fontsize=9)
+    fig.suptitle("Group means by origin (top) and topic (bottom), task counts in parentheses", fontsize=11)
+    fig.tight_layout()
+    return fig
+
+
 def fmt_ci(t, prec=2):
     return f"{t[0]:.{prec}f} [{t[1]:.{prec}f}, {t[2]:.{prec}f}]"
 
@@ -342,12 +408,47 @@ def report(rows, summary, out_dir, seed=0, n_boot=N_BOOTSTRAP):
                 **{f"{name}{suffix}": float(f[name][j][k]) for name in ("offset", "origin_slope")
                    for j, suffix in enumerate(("", "_ci_low", "_ci_high"))}))
 
+    focus = FOCUS_STAGE if FOCUS_STAGE in stages else stages[-1]
+    topics = np.array([r["topic"] or "none" for r in rows])
+    resid = {s: nonassistant(U[f"{s}/coinflip"], U[f"{s}/assistant"]) for s in stages}
+    partition_rows = []
+    for k, s in enumerate(stages):
+        prev = [U[f"{stages[k - 1]}/coinflip"]] if k else None
+        blocks = dict(previous_coinflip=prev, origin=dummies(origins), topic=dummies(topics), log_length=[loglen])
+        row = dict(stage=s, previous_stage=stages[k - 1] if k else "",
+                   share_of_coinflip_variance=1 - pearson(U[f"{s}/coinflip"], U[f"{s}/assistant"]) ** 2,
+                   sd=float(resid[s].std()))
+        included = []
+        for name, b in blocks.items():
+            row[f"alone_{name}"] = adjusted_r2(resid[s], [b]) if b else float("nan")
+            included += [b] if b else []
+            row[f"cumulative_{name}"] = adjusted_r2(resid[s], included) if b else float("nan")
+        row["unexplained"] = 1 - adjusted_r2(resid[s], included)
+        partition_rows.append(row)
+
+    group_rng = np.random.default_rng(seed + 1)
+    group_rows = []
+    for kind, labels in (("origin", origins), ("topic", topics)):
+        for g in sorted(set(labels), key=lambda g: -resid[focus][labels == g].mean()):
+            m = labels == g
+            row = dict(kind=kind, group=g, n=int(m.sum()))
+            for s in stages:
+                for name, v in ((f"{s}/assistant", U[f"{s}/assistant"]), (f"{s}/nonassistant", resid[s])):
+                    est, lo, hi = group_mean_ci(v[m], group_rng, n_boot)
+                    row.update({name: est, f"{name}_ci_low": lo, f"{name}_ci_high": hi})
+            group_rows.append(row)
+    nonassistant_rows = [dict(id=rows[i]["id"], origin=rows[i]["origin"], topic=rows[i]["topic"],
+                              **{f"{s}/nonassistant": float(resid[s][i]) for s in stages}, prompt=rows[i]["prompt"])
+                         for i in np.argsort(-resid[focus])]
+
     M = np.array([[pearson(U[f"{sa}/assistant"], U[f"{sc}/coinflip"]) for sc in stages] for sa in stages])
     figures = {
         "bleedthrough_by_stage": plot_by_stage(stages, per_stage),
         "cross_stage_r": plot_cross_stage(stages, M),
         "scatter_by_stage": plot_scatter_by_stage(stages, U, origins, per_stage),
-        "task_types": plot_task_types(stages, groups, per_stage, FOCUS_STAGE if FOCUS_STAGE in stages else stages[-1]),
+        "task_types": plot_task_types(stages, groups, per_stage, focus),
+        "nonassistant_groups": plot_nonassistant_groups(
+            group_rows, [s for s in (PRE_STAGE, FOCUS_STAGE) if s in stages] or [focus], focus),
     }
 
     residual_rows = []
@@ -384,7 +485,8 @@ def report(rows, summary, out_dir, seed=0, n_boot=N_BOOTSTRAP):
         fig.savefig(paths[f"report/{name}"], dpi=150)
         plt.close(fig)
     tables = dict(stage_summary=stage_rows, origin_offsets=offset_rows, decomposition=decomposition_rows,
-                  residuals=residual_rows)
+                  residuals=residual_rows, nonassistant_partition=partition_rows, nonassistant_groups=group_rows,
+                  nonassistant_tasks=nonassistant_rows)
     for name, table in tables.items():
         if table:
             with open(out_dir / f"{name}.csv", "w", newline="") as fh:
@@ -426,6 +528,28 @@ def report(rows, summary, out_dir, seed=0, n_boot=N_BOOTSTRAP):
                 continue
             print(f"  {r['residual']:+.2f} {r['origin']:11} {r['topic']:18} A={r['assistant']:+6.1f} "
                   f"C={r['coinflip']:+.2f}  {r['prompt'][:80]!r}")
+    blocks = ("previous_coinflip", "origin", "topic", "log_length")
+    print("\nNon-Assistant coinflip utility: share of coinflip variance, then adjusted R^2 of each block "
+          "alone / cumulative in this order:")
+    print(f"{'stage':10} {'share':>6} {'sd':>6}  " + " ".join(f"{b:>18}" for b in blocks) + f" {'unexplained':>12}")
+    for r in partition_rows:
+        cells = [f"{r[f'alone_{b}']:.2f} / {r[f'cumulative_{b}']:.2f}" for b in blocks]
+        print(f"{r['stage']:10} {r['share_of_coinflip_variance']:6.2f} {r['sd']:6.3f}  "
+              + " ".join(f"{c:>18}" for c in cells) + f" {r['unexplained']:12.2f}")
+    shown = [s for s in (PRE_STAGE, FOCUS_STAGE) if s in stages] or [focus]
+    print(f"\nGroup means of non-Assistant coinflip utility (95% CI); {focus} Assistant utility for reference:")
+    print(f"{'group':28} {'n':>4} {focus + ' assistant':>16} " + " ".join(f"{s + ' non-asst':>22}" for s in shown))
+    for r in group_rows:
+        cells = [fmt_ci(tuple(r[f"{s}/nonassistant{x}"] for x in ("", "_ci_low", "_ci_high"))) for s in shown]
+        print(f"{r['kind'][0]}:{r['group'].lower():26} {r['n']:4d} {r[f'{focus}/assistant']:16.2f} "
+              + " ".join(f"{c:>22}" for c in cells))
+    print(f"\nTasks with the highest / lowest {focus} non-Assistant coinflip utility:")
+    for r in nonassistant_rows[:N_EXTREME] + [None] + nonassistant_rows[-N_EXTREME:]:
+        if r is None:
+            print("   ...")
+            continue
+        print(f"  {r[f'{focus}/nonassistant']:+.2f} ({' '.join(f'{s} {r[f'{s}/nonassistant']:+.2f}' for s in shown if s != focus)})"
+              f" {r['origin']:11} {r['topic']:18} {r['prompt'][:70]!r}")
     print(f"\nWrote report to {out_dir}")
     return dict(tables=tables, figures=paths)
 

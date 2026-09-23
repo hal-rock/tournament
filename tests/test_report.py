@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from report import (DECOMPOSITION_STATS, decomposition, offset_model, report, stage_analysis, stages_of,
-                    stratified_resamples)
+from report import (DECOMPOSITION_STATS, adjusted_r2, decomposition, dummies, nonassistant, offset_model, report,
+                    stage_analysis, stages_of, stratified_resamples)
 
 GROUPS = ["ALPACA", "BAILBENCH", "MATH"]
 OFFSETS = {"ALPACA": 0.0, "BAILBENCH": 0.3, "MATH": -0.3}
@@ -57,6 +57,22 @@ def test_decomposition_recovers_carried_over_and_new_parts():
     assert abs(stats["r_predictors"]) < 0.05
 
 
+def test_nonassistant_is_uncorrelated_with_assistant(synthetic):
+    _, _, a, c, _ = synthetic
+    resid = nonassistant(c, a)
+    assert abs(np.corrcoef(resid, a)[0, 1]) < 1e-8
+    assert resid.mean() == pytest.approx(0, abs=1e-12)
+
+
+def test_adjusted_r2_counts_parameters_by_rank(synthetic):
+    rng, origins, _, _, _ = synthetic
+    y = np.array([{"ALPACA": 0.0, "BAILBENCH": 1.0, "MATH": -1.0}[o] for o in origins]) + rng.normal(0, 1, len(origins))
+    origin = dummies(origins)
+    # The same dummies twice span nothing new, so they must not be penalized twice.
+    assert adjusted_r2(y, [origin, origin]) == pytest.approx(adjusted_r2(y, [origin]))
+    assert abs(adjusted_r2(rng.normal(0, 1, len(origins)), [origin])) < 0.05
+
+
 def test_stages_skip_shifts():
     measures = ["base/assistant", "base/coinflip", "dpo/assistant", "dpo/coinflip",
                 "dpo-base/assistant", "dpo-base/coinflip", "sft/assistant"]
@@ -75,8 +91,12 @@ def test_report_writes_figures_and_tables(synthetic, tmp_path):
     result = report(rows, {}, tmp_path, n_boot=20)
     assert {p.name for p in result["figures"].values()} == {
         "bleedthrough_by_stage.png", "cross_stage_r.png", "scatter_by_stage.png", "task_types.png",
-        "pre_stage_coinflip.png"}
+        "pre_stage_coinflip.png", "nonassistant_groups.png"}
     assert all(p.exists() for p in result["figures"].values())
     assert [r["stage"] for r in result["tables"]["stage_summary"]] == ["base", "sft", "dpo"]
     assert len(result["tables"]["residuals"]) == len(rows)
     assert [r["subset"] for r in result["tables"]["decomposition"]] == ["all", "benign"]
+    partition = {r["stage"]: r for r in result["tables"]["nonassistant_partition"]}
+    assert np.isnan(partition["base"]["alone_previous_coinflip"])
+    assert partition["dpo"]["previous_stage"] == "sft"
+    assert {r["kind"] for r in result["tables"]["nonassistant_groups"]} == {"origin", "topic"}
