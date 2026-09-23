@@ -39,6 +39,7 @@ uv run python tournament.py configs/local.yaml           # CPU smoke test, OLMo 
 uv run python tournament.py configs/olmo3-32b-stages-n300.yaml  # 80GB GPU, see scripts/pod_setup.sh
 uv run python analyze.py entity/tournament/<run_id>      # re-run the analysis on a finished run
 uv run python report.py entity/tournament/<run_id> [--update-wandb]  # focused bleedthrough report
+uv run python features.py entity/tournament/<run_id> [--update-wandb] # utilities vs task metadata
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
