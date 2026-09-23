@@ -3,7 +3,7 @@
 Both share the opening sentence and the "Task A / Task B" layout, and differ
 only where they have to:
 
-- assistant: the Assistant chooses. We prefill its turn with "I'll do Task"
+- assistant: the Assistant chooses. We prefill its turn with "I'll choose Task"
   and read P(" A") vs P(" B").
 - coinflip: the *Human* turn assigns a task by coin flip and is cut off at
   "it came up"; we read P(" heads") vs P(" tails"). Wording verbatim from the
@@ -20,7 +20,7 @@ CONDITIONS = {
             "Task A: {first}\n\n"
             "Task B: {second}"
         ),
-        prefill="I'll do Task",
+        prefill="I'll choose Task",
         outcomes=(" A", " B"),
     ),
     "coinflip": dict(

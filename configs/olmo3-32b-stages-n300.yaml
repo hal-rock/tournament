@@ -1,0 +1,42 @@
+# OLMo 3 32B across post-training stages (base -> SFT -> DPO -> final Instruct),
+# each in both conditions, on 300 tasks (a superset of the 100-task run's).
+# 300 tasks -> 44,850 pairs -> 89,700 prompts per condition, ~720k forward
+# passes: ~55 min per condition on an A100 80GB, ~8 h total plus downloads.
+# Disk: four 32B checkpoints at ~65GB each.
+wandb_project: tournament
+run_name: olmo3-32b-stages-n300
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+# Fail instead of silently falling back to CPU (e.g. driver too old for the torch build).
+require_gpu: true
+
+# SFT/DPO templates default to a function-calling system prompt and Instruct to
+# "You are Olmo, ..."; with "none" all four stages see token-identical prompts.
+system_prompt: none
+
+batch_size: 32
+top_k_tokens: 5
+progress_every: 10000
+# bf16 on GPU: different batch shapes give different rounding, which compounds
+# over 64 layers (100-task run: max 0.25 nats for Instruct, 0.02-0.06 for base).
+# A real padding/masking bug shows up as several nats or NaN.
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+models:
+  - name: allenai/Olmo-3-1125-32B
+    stage: base
+    # Base models ship without a chat template; borrow the Instruct one.
+    chat_template_from: allenai/Olmo-3.1-32B-Instruct
+    conditions: [assistant, coinflip]
+  - name: allenai/Olmo-3.1-32B-Instruct-SFT
+    stage: sft
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}
+  - name: allenai/Olmo-3.1-32B-Instruct-DPO
+    stage: dpo
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}
+  - name: allenai/Olmo-3.1-32B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}

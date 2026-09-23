@@ -11,6 +11,7 @@ Usage: uv run python tournament.py configs/local.yaml
 
 import csv
 import gc
+import gzip
 import itertools
 import json
 import math
@@ -66,12 +67,11 @@ def score(model, tokenizer, items, batch_size, top_k=5):
     return results
 
 
-def append_csv(path, rows):
-    new = not path.exists()
-    with open(path, "a", newline="") as f:
+def write_csv_gz(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
-        if new:
-            w.writeheader()
+        w.writeheader()
         w.writerows(rows)
 
 
@@ -129,10 +129,10 @@ def main():
     out_dir = Path("outputs") / run.id
     out_dir.mkdir(parents=True, exist_ok=True)
     yaml.safe_dump({**cfg, "wandb_run": run.path}, open(out_dir / "config.yaml", "w"))
-    # Results are appended after each condition and synced to W&B as they change,
-    # so a crash (or a failed batching check) keeps every finished condition.
-    # Recover with: analyze.py on a dir holding results.csv + config.yaml.
-    results_path = out_dir / "results.csv"
+    # Each finished condition is written to results/<stage>__<condition>.csv.gz and
+    # uploaded to the W&B run's files right away, so a crash (or a failed batching
+    # check) keeps it. (Too many rows for a W&B table at 300 tasks.) Recover with
+    # analyze.py on the run dir or the W&B run path.
     run.save(str(out_dir / "config.yaml"), base_path=str(out_dir), policy="now")
 
     # Every unordered pair of task indices; each is scored in both orders.
@@ -180,10 +180,11 @@ def main():
                     outcome_mass=math.exp(s["logp_first"]) + math.exp(s["logp_second"]),
                     prompt_tokens=s["prompt_tokens"], top_tokens=s["top_tokens"],
                 ))
-            append_csv(results_path, new_rows)
-            if not rows:
-                run.save(str(results_path), base_path=str(out_dir), policy="live")
-            rows += new_rows
+            path = out_dir / "results" / f"{stage}__{condition}.csv.gz"
+            write_csv_gz(path, new_rows)
+            run.save(str(path), base_path=str(out_dir), policy="now")
+            # Keep what the analysis needs in memory; top_tokens is only for spot checks.
+            rows += [{k: v for k, v in r.items() if k != "top_tokens"} for r in new_rows]
 
         if m.get("phrasing_probe"):
             probe_rows = [[stage] + r for r in phrasing_probe(
@@ -196,13 +197,13 @@ def main():
         if device == "cuda":
             torch.cuda.empty_cache()
 
-    run.log({"results": wandb.Table(columns=list(rows[0]), data=[list(r.values()) for r in rows])})
     prompts_art = wandb.Artifact("example-prompts", type="prompts")
     with prompts_art.new_file("examples.yaml") as f:
         yaml.safe_dump(examples, f, allow_unicode=True, width=10_000)
     run.log_artifact(prompts_art)
 
-    log_to_wandb(run, analyze(rows, tasks, out_dir / "analysis", seed=cfg.get("seed", 0)))
+    log_to_wandb(run, analyze(rows, tasks, out_dir / "analysis", seed=cfg.get("seed", 0),
+                              stage_order=[m["stage"] for m in cfg["models"]]))
     run.finish()
 
 

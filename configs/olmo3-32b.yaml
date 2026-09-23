@@ -1,3 +1,4 @@
+# Run y7pafps7 (prefill was "I'll do Task" then; now "I'll choose Task").
 # OLMo 3 32B: final Instruct checkpoint and base model, each in both
 # conditions. Base coinflip is the control (no preference expected); base
 # assistant gives the pretraining prior for the Assistant, so post-training

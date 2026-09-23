@@ -5,7 +5,8 @@ import itertools
 import numpy as np
 import pytest
 
-from analyze import additive_r2, analyze, define_measures, fit_utilities, pair_effects, pearson, split_half
+from analyze import (additive_r2, analyze, define_measures, fit_utilities, pair_effects, partial_r, pearson,
+                     split_half)
 
 
 def synthetic_rows(ids, utils, slot_bias, noise, rng, stage="instruct", condition="assistant"):
@@ -20,7 +21,7 @@ def synthetic_rows(ids, utils, slot_bias, noise, rng, stage="instruct", conditio
 
 def make_tasks(ids, harmful=()):
     return [dict(id=t, origin="BAILBENCH" if t in harmful else ("MATH" if k % 2 else "ALPACA"),
-                 topic="harmful_request" if t in harmful else "math", prompt="p") for k, t in enumerate(ids)]
+                 topic="harmful_request" if t in harmful else "math", prompt="p" * (k + 1)) for k, t in enumerate(ids)]
 
 
 @pytest.fixture
@@ -34,8 +35,8 @@ def test_recovers_utilities_and_bias(setup):
     rng, ids, u = setup
     rows = synthetic_rows(ids, u, slot_bias=1.5, noise=0.3, rng=rng)
     (eff,) = pair_effects(rows).values()
-    assert len(eff) == len(ids) * (len(ids) - 1) // 2
-    assert np.mean([e[3] for e in eff]) == pytest.approx(1.5, abs=0.05)
+    assert len(eff["pairs"]) == len(ids) * (len(ids) - 1) // 2
+    assert eff["bias"].mean() == pytest.approx(1.5, abs=0.05)
     assert pearson(fit_utilities(ids, eff), u) > 0.99
 
 
@@ -43,7 +44,7 @@ def test_round_robin_fit_is_mean_effect(setup):
     rng, ids, u = setup
     (eff,) = pair_effects(synthetic_rows(ids, u, 0.0, 1.0, rng)).values()
     sums = {t: 0.0 for t in ids}
-    for a, b, e, _ in eff:
+    for (a, b), e in zip(eff["pairs"], eff["effect"]):
         sums[a] += e
         sums[b] -= e
     expected = np.array([sums[t] / len(ids) for t in ids])  # divide by n, not n-1: u has mean zero
@@ -54,7 +55,7 @@ def test_reliability_high_for_signal_low_for_noise(setup):
     rng, ids, u = setup
     effects = {**pair_effects(synthetic_rows(ids, u, 0.0, 0.5, rng, condition="signal")),
                **pair_effects(synthetic_rows(ids, np.zeros(len(ids)), 0.0, 0.5, rng, condition="noise"))}
-    rel = split_half(ids, effects, define_measures(set(effects)), rng)
+    rel = split_half(ids, effects, define_measures(list(effects)), rng)
     assert rel["instruct/signal"][1] > 0.95
     assert rel["instruct/noise"][1] < 0.5
 
@@ -69,7 +70,7 @@ def test_additive_r2_detects_pair_specific_effects(setup):
 
 
 def test_define_measures_adds_shifts_against_base():
-    keys = {("instruct", "assistant"), ("instruct", "coinflip"), ("base", "coinflip")}
+    keys = [("instruct", "assistant"), ("instruct", "coinflip"), ("base", "coinflip")]
     m = define_measures(keys)
     assert m["instruct-base/coinflip"] == {("instruct", "coinflip"): 1.0, ("base", "coinflip"): -1.0}
     assert "instruct-base/assistant" not in m  # no base/assistant to subtract
@@ -107,3 +108,19 @@ def test_benign_correlation_ignores_harmful_cluster(setup, tmp_path):
     assert c["pearson"] > 0.8
     assert c["n_benign"] == 25
     assert abs(c["pearson_benign"]) < 0.5
+
+
+def test_fit_handles_incomplete_designs(setup):
+    rng, ids, u = setup
+    (eff,) = pair_effects(synthetic_rows(ids, u, 0.0, 0.1, rng)).values()
+    keep = rng.random(len(eff["pairs"])) < 0.3
+    sub = dict(pairs=[p for p, k in zip(eff["pairs"], keep) if k], effect=eff["effect"][keep])
+    assert pearson(fit_utilities(ids, sub), u) > 0.99
+
+
+def test_partial_r_removes_shared_confound():
+    rng = np.random.default_rng(0)
+    z = rng.normal(size=500)
+    x, y = z + 0.3 * rng.normal(size=500), z + 0.3 * rng.normal(size=500)
+    assert pearson(x, y) > 0.8
+    assert abs(partial_r(x, y, z)) < 0.15

@@ -28,7 +28,7 @@ def test_assistant_prefill_follows_closed_user_turn(tok):
     assert "Task A: FIRST\n\nTask B: SECOND" in p
     assert "system" not in p
     header = "<|im_start|>assistant\n" if tok.name_or_path == OLMO3 else "<|assistant|>\n"
-    assert p.endswith(header + "I'll do Task")
+    assert p.endswith(header + "I'll choose Task")
     assert build_prompt("assistant", "FIRST", "SECOND", tok, prefill=False).endswith(header)
 
 

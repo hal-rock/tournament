@@ -14,7 +14,7 @@ Each gives pairwise comparisons, from which we fit per-task utilities
 ## Design
 
 - Prompts (`prompts.py`) share the opening sentence and the "Task A / Task B"
-  layout. The Assistant's turn is prefilled with "I'll do Task" and we read
+  layout. The Assistant's turn is prefilled with "I'll choose Task" and we read
   P(" A") vs P(" B"); the coinflip Human turn is cut at "it came up" and we read
   P(" heads") vs P(" tails"). No system prompt.
 - Every pair is scored in both orders. Halving the difference of the two
@@ -36,11 +36,16 @@ Each gives pairwise comparisons, from which we fit per-task utilities
 uv sync
 uv run pytest                                            # prompts + analysis on synthetic data
 uv run python tournament.py configs/local.yaml           # CPU smoke test, OLMo 2 1B, 10 tasks
-uv run python tournament.py configs/olmo3-32b.yaml       # 80GB GPU, see scripts/pod_setup.sh
+uv run python tournament.py configs/olmo3-32b-stages-n300.yaml  # 80GB GPU, see scripts/pod_setup.sh
 uv run python analyze.py entity/tournament/<run_id>      # re-run the analysis on a finished run
 ```
 
-Results go to W&B (project `tournament`) and to `outputs/<run_id>/`.
+Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
+each uploaded to the W&B run's files (project `tournament`) as soon as that
+condition finishes; the analysis tables and plots are logged to the run.
+
+Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
+prefill "I'll do Task").
 
 ## Tasks
 
