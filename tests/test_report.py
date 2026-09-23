@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from report import offset_model, report, stages_of, stage_analysis, stratified_resamples
+from report import (DECOMPOSITION_STATS, decomposition, offset_model, report, stage_analysis, stages_of,
+                    stratified_resamples)
 
 GROUPS = ["ALPACA", "BAILBENCH", "MATH"]
 OFFSETS = {"ALPACA": 0.0, "BAILBENCH": 0.3, "MATH": -0.3}
@@ -41,6 +42,21 @@ def test_offsets_are_distance_from_common_slope_line(synthetic):
     assert np.all((lo < 0.05) & (0.05 < hi))
 
 
+def test_decomposition_recovers_carried_over_and_new_parts():
+    """y = 1.5 * pre + 0.03 * assistant, with the predictors independent: each alone explains
+    its own share of the variance, both together all of it."""
+    rng = np.random.default_rng(2)
+    pre, assistant = rng.normal(0, 0.1, 5000), rng.normal(0, 5, 5000)
+    stats = dict(zip(DECOMPOSITION_STATS, decomposition(1.5 * pre + 0.03 * assistant, pre, assistant)))
+    assert stats["coef_pre"] == pytest.approx(1.5)
+    assert stats["coef_assistant"] == pytest.approx(0.03)
+    assert stats["r2_both"] == pytest.approx(1.0)
+    share_pre = 1.5 ** 2 * 0.1 ** 2 / (1.5 ** 2 * 0.1 ** 2 + 0.03 ** 2 * 5 ** 2)
+    assert stats["r2_pre"] == pytest.approx(share_pre, abs=0.03)
+    assert stats["r2_assistant"] == pytest.approx(1 - share_pre, abs=0.03)
+    assert abs(stats["r_predictors"]) < 0.05
+
+
 def test_stages_skip_shifts():
     measures = ["base/assistant", "base/coinflip", "dpo/assistant", "dpo/coinflip",
                 "dpo-base/assistant", "dpo-base/coinflip", "sft/assistant"]
@@ -63,3 +79,4 @@ def test_report_writes_figures_and_tables(synthetic, tmp_path):
     assert all(p.exists() for p in result["figures"].values())
     assert [r["stage"] for r in result["tables"]["stage_summary"]] == ["base", "sft", "dpo"]
     assert len(result["tables"]["residuals"]) == len(rows)
+    assert [r["subset"] for r in result["tables"]["decomposition"]] == ["all", "benign"]

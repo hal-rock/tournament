@@ -17,6 +17,11 @@ origins, no length) below beta means differences between origins bleed through l
 than differences within them. Residuals from the model rank the tasks that over- or
 under-bleed relative to others of their origin.
 
+The decomposition table regresses the focus stage's coinflip utilities on the previous
+stage's coinflip and the focus stage's Assistant utilities: how much of the focus
+coinflip is the earlier coinflip structure carried over (and rescaled) versus a new
+Assistant-aligned part. It is given over all tasks and over benign ones.
+
 CIs are 95% percentile bootstraps over tasks, resampled within origin to match how the
 task set was drawn (fixed source quotas). They hold the fitted utilities fixed, so they
 leave out the utilities' own noise (small: see split-half reliability).
@@ -90,10 +95,24 @@ def within_slope(a, c, loglen, mask):
     return np.linalg.lstsq(X, c[mask], rcond=None)[0][0]
 
 
-def r_squared(c, *covariates):
-    X = np.column_stack([*covariates, np.ones(len(c))])
-    resid = c - X @ np.linalg.lstsq(X, c, rcond=None)[0]
-    return float(1 - (resid ** 2).sum() / ((c - c.mean()) ** 2).sum())
+def ols(y, *covariates):
+    """Least squares with an intercept: (coefficients of the covariates, R^2)."""
+    X = np.column_stack([*covariates, np.ones(len(y))])
+    coef = np.linalg.lstsq(X, y, rcond=None)[0]
+    resid = y - X @ coef
+    return coef[:-1], float(1 - (resid ** 2).sum() / ((y - y.mean()) ** 2).sum())
+
+
+DECOMPOSITION_STATS = ("r_pre", "r_assistant", "r_predictors", "r2_pre", "r2_assistant", "r2_both",
+                       "coef_pre", "coef_assistant")
+
+
+def decomposition(y, pre, assistant):
+    """y ~ pre + assistant: each predictor's r with y and with each other, R^2 of each
+    alone and both together, and the raw coefficients (y units per predictor unit)."""
+    r_pre, r_asst = pearson(pre, y), pearson(assistant, y)
+    coef, r2_both = ols(y, pre, assistant)
+    return np.array([r_pre, r_asst, pearson(pre, assistant), r_pre ** 2, r_asst ** 2, r2_both, *coef])
 
 
 def with_ci(stat, n, resamples):
@@ -129,7 +148,7 @@ def stage_analysis(a, c, loglen, origins, benign, groups, resamples):
         x_group=np.array([a[origins == g].mean() for g in groups]),
         y_group=np.array([y[origins == g].mean() for g in groups]),
         line_intercept=y.mean() - beta * a.mean(),
-        r2_slope_length=r_squared(c, a, loglen),
+        r2_slope_length=ols(c, a, loglen)[1],
         r2_with_origin=float(1 - (resid ** 2).sum() / ((c - c.mean()) ** 2).sum()),
     )
     return out
@@ -340,6 +359,7 @@ def report(rows, summary, out_dir, seed=0, n_boot=N_BOOTSTRAP):
                               coinflip=float(U[f"{FOCUS_STAGE}/coinflip"][i]), residual=float(f["residual"][i]),
                               prompt=rows[i]["prompt"]) for i in order]
 
+    decomposition_rows = []
     if PRE_STAGE in stages and FOCUS_STAGE in stages:
         target = U[f"{PRE_STAGE}/coinflip"]
         candidates = {"log task length": loglen, **{m: U[m] for m in (
@@ -349,12 +369,22 @@ def report(rows, summary, out_dir, seed=0, n_boot=N_BOOTSTRAP):
                       for name, x in candidates.items()}
         figures["pre_stage_coinflip"] = plot_pre_stage(PRE_STAGE, FOCUS_STAGE, U, origins, correlates)
 
+        names = dict(target=f"{FOCUS_STAGE}/coinflip", pre=f"{PRE_STAGE}/coinflip", assistant=f"{FOCUS_STAGE}/assistant")
+        y, pre, asst = (U[names[k]] for k in ("target", "pre", "assistant"))
+        for subset, mask in (("all", np.ones(len(y), bool)), ("benign", benign)):
+            est, lo, hi = with_ci(lambda i: decomposition(y[i][mask[i]], pre[i][mask[i]], asst[i][mask[i]]),
+                                  len(y), resamples)
+            decomposition_rows.append(dict(subset=subset, n=int(mask.sum()), **names, **{
+                f"{name}{suffix}": float(v[j]) for j, name in enumerate(DECOMPOSITION_STATS)
+                for suffix, v in (("", est), ("_ci_low", lo), ("_ci_high", hi))}))
+
     paths = {}
     for name, fig in figures.items():
         paths[f"report/{name}"] = out_dir / f"{name}.png"
         fig.savefig(paths[f"report/{name}"], dpi=150)
         plt.close(fig)
-    tables = dict(stage_summary=stage_rows, origin_offsets=offset_rows, residuals=residual_rows)
+    tables = dict(stage_summary=stage_rows, origin_offsets=offset_rows, decomposition=decomposition_rows,
+                  residuals=residual_rows)
     for name, table in tables.items():
         if table:
             with open(out_dir / f"{name}.csv", "w", newline="") as fh:
@@ -378,6 +408,16 @@ def report(rows, summary, out_dir, seed=0, n_boot=N_BOOTSTRAP):
             o, sl = per_stage[s]["offset"], per_stage[s]["origin_slope"]
             cells.append(f"{o[0][k]:+.2f} [{o[1][k]:+.2f},{o[2][k]:+.2f}] ({sl[0][k]:.3f})")
         print(f"{s:10} " + " ".join(f"{c:>24}" for c in cells))
+    if decomposition_rows:
+        d = decomposition_rows[0]
+        print(f"\n{d['target']} ~ {d['pre']} (pre) + {d['assistant']} (asst):")
+        print(f"{'subset':8} {'n':>4} {'r pre':>6} {'r asst':>7} {'r pre,asst':>11} {'R2 pre':>7} {'R2 asst':>8} "
+              f"{'R2 both':>8}  {'coef pre':22} {'coef asst':22}")
+        for d in decomposition_rows:
+            ci = {k: (d[k], d[f"{k}_ci_low"], d[f"{k}_ci_high"]) for k in ("coef_pre", "coef_assistant")}
+            print(f"{d['subset']:8} {d['n']:4d} {d['r_pre']:6.2f} {d['r_assistant']:7.2f} {d['r_predictors']:11.2f} "
+                  f"{d['r2_pre']:7.2f} {d['r2_assistant']:8.2f} {d['r2_both']:8.2f}  "
+                  f"{fmt_ci(ci['coef_pre']):22} {fmt_ci(ci['coef_assistant'], 4):22}")
     if residual_rows:
         print(f"\n{FOCUS_STAGE}: tasks furthest above / below the offset model (coinflip residual):")
         for r in residual_rows[:N_EXTREME] + [None] + residual_rows[-N_EXTREME:]:
