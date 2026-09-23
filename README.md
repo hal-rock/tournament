@@ -38,14 +38,22 @@ uv run pytest                                            # prompts + analysis on
 uv run python tournament.py configs/local.yaml           # CPU smoke test, OLMo 2 1B, 10 tasks
 uv run python tournament.py configs/olmo3-32b-stages-n300.yaml  # 80GB GPU, see scripts/pod_setup.sh
 uv run python analyze.py entity/tournament/<run_id>      # re-run the analysis on a finished run
+uv run python report.py entity/tournament/<run_id> [--update-wandb]  # focused bleedthrough report
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
 each uploaded to the W&B run's files (project `tournament`) as soon as that
 condition finishes; the analysis tables and plots are logged to the run.
 
+`report.py` condenses the analysis into a few figures and tables on bleedthrough:
+Assistant-coinflip correlation and slope by stage, the stage x stage correlation
+matrix, per-origin slopes and offsets from a common slope, what the pre-DPO
+coinflip utilities track, and the tasks that most over- or under-bleed. It reads
+only the fitted utilities, so it runs in seconds on a laptop.
+
 Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
-prefill "I'll do Task").
+prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
+base/SFT/DPO/Instruct).
 
 ## Tasks
 

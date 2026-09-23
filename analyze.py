@@ -280,6 +280,7 @@ def analyze(rows, tasks, out_dir, seed=0, stage_order=None):
             w = csv.DictWriter(f, fieldnames=list(table[0]))
             w.writeheader()
             w.writerows(table)
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=1))
     print(f"\nWrote analysis to {out_dir}")
     return dict(summary=summary, utilities=util_rows, correlations=corr_rows, group_means=group_rows, figures=figures)
 
