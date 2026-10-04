@@ -55,9 +55,10 @@ def score(model, tokenizer, items, batch_size, top_k=5):
         with torch.no_grad():
             logits = model(
                 input_ids=input_ids.to(model.device), attention_mask=mask.to(model.device),
-                logits_to_keep=keep.to(model.device),
+                logits_to_keep=keep,  # on CPU: it indexes hidden states on whichever GPU holds the last layer
             ).logits
-        logits = logits[torch.arange(len(batch)), torch.searchsorted(keep, last).to(logits.device)].float()
+        rows = torch.arange(len(batch), device=logits.device)  # logits sit on the model's last GPU
+        logits = logits[rows, torch.searchsorted(keep, last).to(logits.device)].float()
         logp = torch.log_softmax(logits, dim=-1).cpu()
         top = logp.topk(top_k)
         for row, k in enumerate(batch):
@@ -135,10 +136,10 @@ def load_model(name, device, dtype):
     if device != "cuda":
         return AutoModelForCausalLM.from_pretrained(name, dtype=dtype, device_map=device).eval()
     model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, device_map="auto").eval()
-    placement = set(getattr(model, "hf_device_map", {}).values())
-    if placement & {"cpu", "disk"}:
-        raise SystemExit(f"{name} does not fit on the visible GPUs (device map: {sorted(map(str, placement))})")
-    print(f"  placed on {len(placement)} device(s): {sorted(map(str, placement))}", flush=True)
+    placement = {str(t.device) for t in itertools.chain(model.parameters(), model.buffers())}
+    if placement & {"cpu", "meta"}:
+        raise SystemExit(f"{name} does not fit on the visible GPUs (devices: {sorted(placement)})")
+    print(f"  placed on {len(placement)} device(s): {sorted(placement)}", flush=True)
     return model
 
 

@@ -27,7 +27,8 @@ for cfg in "$@"; do
     name=$(basename "$cfg" .yaml)
     echo "[$(date -u +%FT%TZ)] JOB $cfg"
     uv run python tournament.py "$cfg" > "logs/$name.log" 2>&1
-    echo "[$(date -u +%FT%TZ)] JOB_EXIT $cfg $?"
+    status=$?
+    echo "[$(date -u +%FT%TZ)] JOB_EXIT $cfg $status"
     rm -rf "$HF_HOME"/hub  # free disk between configs (blobs live in hub/blobs)
 done
 echo "[$(date -u +%FT%TZ)] ALL_DONE"
