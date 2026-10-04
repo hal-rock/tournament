@@ -1,0 +1,29 @@
+# Llama 70B: 3.1 base vs. 3.3 Instruct (3.3 Instruct was post-trained from the 3.1
+# base; Meta released no 3.3 base). Ungated unsloth mirrors, as in
+# ../coinflip/configs/llama-70b.yaml. "none" strips the template's date lines.
+# 2x H200 (141 GB in bf16), ~300 GB of disk.
+wandb_project: tournament
+group: models
+run_name: llama-70b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# A fixed random third of the 44,850 pairs, the same for every model (see select_pairs);
+# the OLMo 3 32B run d8ysbybo scored all pairs and is restricted to these in models.py.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# bf16 rounding differs by batch shape; a padding/masking bug shows up as several
+# nats or NaN (see configs/olmo3-32b-stages-n300.yaml).
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+models:
+  - name: unsloth/Llama-3.1-70B
+    stage: base
+    chat_template_from: unsloth/Llama-3.3-70B-Instruct
+    conditions: [assistant, coinflip]
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]

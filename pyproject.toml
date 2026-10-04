@@ -14,6 +14,12 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
+# GPU pods only: flash-linear-attention kernels for Qwen 3.5's linear-attention layers;
+# kernels keeps DeepSeek V4's FP8/FP4 weights quantized (range transformers 5.17 accepts).
+gpu = [
+    "flash-linear-attention>=0.5.2",
+    "kernels>=0.16,<0.17",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -1,0 +1,32 @@
+# DeepSeek V4 Flash (~284B MoE): base vs. post-trained, as in
+# ../coinflip/configs/deepseek-v4-flash.yaml. Weights stay in their released FP8
+# (base) / FP4-expert (instruct) formats (needs the gpu group's kernels package).
+# No Jinja template: turn markers from encoding/README.md in the repo, chat
+# (non-thinking) mode, checked against its encoder in tests/test_prompts.py.
+# 4x H200, ~460 GB of disk.
+wandb_project: tournament
+group: models
+run_name: deepseek-v4-flash
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# A fixed random third of the 44,850 pairs, the same for every model (see select_pairs);
+# the OLMo 3 32B run d8ysbybo scored all pairs and is restricted to these in models.py.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# bf16 rounding differs by batch shape; a padding/masking bug shows up as several
+# nats or NaN (see configs/olmo3-32b-stages-n300.yaml).
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+models:
+  - name: deepseek-ai/DeepSeek-V4-Flash-Base
+    stage: base
+    turn_format: &dsv4 {user: "<｜begin▁of▁sentence｜><｜User｜>", reply: "<｜Assistant｜></think>"}
+    conditions: [assistant, coinflip]
+  - name: deepseek-ai/DeepSeek-V4-Flash
+    stage: instruct
+    turn_format: *dsv4
+    conditions: [assistant, coinflip]

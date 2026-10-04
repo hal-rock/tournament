@@ -13,6 +13,8 @@ In both, the task listed first is the one the first outcome token picks, so
 per-pair log-odds are always log P(first) - log P(second).
 """
 
+import re
+
 CONDITIONS = {
     "assistant": dict(
         body=(
@@ -37,33 +39,66 @@ CONDITIONS = {
 SENTINEL = "<<<CUT_HERE>>>"
 
 
-def _strip_system(rendered):
+# Default system blocks that templates inject on their own, by format: OLMo / Qwen
+# (ChatML) and Llama 3 (knowledge-cutoff and date lines). Each matches one block.
+SYSTEM_BLOCKS = [
+    re.compile(r"<\|im_start\|>system\n.*?<\|im_end\|>\n", re.S),
+    re.compile(r"<\|start_header_id\|>system<\|end_header_id\|>.*?<\|eot_id\|>", re.S),
+]
+
+
+def _strip_system(rendered, content):
     """Templates that inject a default system block have no flag to disable it,
     so cut the block off. Deliberately strict: fail loudly on a template we have
     not checked."""
-    if rendered.startswith("<|im_start|>system"):
-        return rendered[rendered.index("<|im_end|>\n") + len("<|im_end|>\n"):]
-    if "system" in rendered[:rendered.index(SENTINEL)]:
+    for pattern in SYSTEM_BLOCKS:
+        rendered = pattern.sub("", rendered, count=1)
+    if "system" in rendered[:rendered.index(content)]:  # template text only, not the tasks
         raise ValueError("cannot strip system block from this chat template")
     return rendered
 
 
-def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True):
+def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format):
+    """The conversation as text, user content still ending in SENTINEL, plus the
+    Assistant header if has_reply."""
+    if turn_format is not None:
+        # Models released without a Jinja template (DeepSeek V4): literal text that opens
+        # a user turn with no system prompt, and that closes it and opens the reply.
+        assert system_prompt == "none", "turn_format only supports system_prompt: none"
+        (message,) = messages
+        return turn_format["user"] + message["content"] + (turn_format["reply"] if has_reply else "")
+    if system_prompt not in ("default", "none"):
+        messages = [{"role": "system", "content": system_prompt}] + messages
+    # enable_thinking=False selects each template's non-thinking reply, so the prefill is the
+    # answer itself: Qwen 3.5 and GLM-4.5 open it with an empty <think></think> block (GLM also
+    # appends "/nothink" to the user turn), Gemma 4 with an empty thought channel. Other
+    # templates ignore it.
+    rendered = template_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=has_reply,
+                                                      enable_thinking=False)
+    if system_prompt == "none":
+        rendered = _strip_system(rendered, messages[-1]["content"])
+    if has_reply and rendered.endswith("<think></think>"):
+        # GLM-4.5 puts a newline between the empty think block and the answer (it is in the
+        # template's rendering of past Assistant turns, not in the generation prompt).
+        rendered += "\n"
+    return rendered
+
+
+def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
+                 turn_format=None):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
     the system block, any other string is used as the system message.
     prefill=False leaves the assistant turn empty (for sampling free-form choices).
+    turn_format: {"user": ..., "reply": ...} literal turn markers, used instead of
+    the chat template (see _render).
     """
     spec = CONDITIONS[condition]
     body = spec["body"].format(first=first.strip(), second=second.strip())
-    messages = [{"role": "user", "content": body + SENTINEL}]
-    if system_prompt not in ("default", "none"):
-        messages.insert(0, {"role": "system", "content": system_prompt})
     has_reply = spec["prefill"] is not None
-    rendered = template_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=has_reply)
-    if system_prompt == "none":
-        rendered = _strip_system(rendered)
+    rendered = _render([{"role": "user", "content": body + SENTINEL}], template_tokenizer, has_reply,
+                       system_prompt, turn_format)
 
     if not has_reply:
         # Cut inside the user turn, so the model continues the Human's message.

@@ -1,0 +1,29 @@
+# Gemma 4 31B (dense): base vs. instruct, as in ../coinflip/configs/gemma4-31b.yaml.
+# The template has no default system prompt; its non-thinking reply opens with an
+# empty thought channel. 1x H200 (62 GB in bf16), ~150 GB of disk.
+wandb_project: tournament
+group: models
+run_name: gemma4-31b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# A fixed random third of the 44,850 pairs, the same for every model (see select_pairs);
+# the OLMo 3 32B run d8ysbybo scored all pairs and is restricted to these in models.py.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# bf16 rounding differs by batch shape; a padding/masking bug shows up as several
+# nats or NaN (see configs/olmo3-32b-stages-n300.yaml).
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+models:
+  - name: google/gemma-4-31B
+    stage: base
+    # Base models ship without a chat template; borrow the instruct one.
+    chat_template_from: google/gemma-4-31B-it
+    conditions: [assistant, coinflip]
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    conditions: [assistant, coinflip]

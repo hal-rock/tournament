@@ -32,9 +32,11 @@ from prompts import build_prompt, outcome_token_ids
 def score(model, tokenizer, items, batch_size, top_k=5):
     """items: [(prompt_text, (first_id, second_id))]. Returns one dict per item, in order.
 
-    Batches are left-padded (so the last position is the real last token for
-    every row) and length-sorted to keep padding small. Position ids are
-    counted from each row's first real token.
+    Batches are right-padded and length-sorted to keep padding small. Under a causal
+    mask the real tokens never see the padding, so every row is computed exactly as
+    it would be alone, whatever the model does with attention_mask or positions
+    (DeepSeek V4, for one, compresses KV over windows of absolute positions, which
+    left padding would shift). Logits are kept only at each row's last real token.
     """
     encoded = [tokenizer(p, add_special_tokens=False).input_ids for p, _ in items]
     order = sorted(range(len(items)), key=lambda k: len(encoded[k]))
@@ -46,14 +48,16 @@ def score(model, tokenizer, items, batch_size, top_k=5):
         input_ids = torch.full((len(batch), width), pad_id, dtype=torch.long)
         mask = torch.zeros((len(batch), width), dtype=torch.long)
         for row, k in enumerate(batch):
-            input_ids[row, width - len(encoded[k]):] = torch.tensor(encoded[k])
-            mask[row, width - len(encoded[k]):] = 1
-        positions = (mask.cumsum(-1) - 1).clamp(min=0)
+            input_ids[row, :len(encoded[k])] = torch.tensor(encoded[k])
+            mask[row, :len(encoded[k])] = 1
+        last = mask.sum(-1) - 1
+        keep = last.unique()  # sorted; few distinct lengths per length-sorted batch
         with torch.no_grad():
             logits = model(
                 input_ids=input_ids.to(model.device), attention_mask=mask.to(model.device),
-                position_ids=positions.to(model.device), logits_to_keep=1,
-            ).logits[:, -1].float()
+                logits_to_keep=keep.to(model.device),
+            ).logits
+        logits = logits[torch.arange(len(batch)), torch.searchsorted(keep, last).to(logits.device)].float()
         logp = torch.log_softmax(logits, dim=-1).cpu()
         top = logp.topk(top_k)
         for row, k in enumerate(batch):
@@ -93,11 +97,12 @@ def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rn
     return worst
 
 
-def phrasing_probe(model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, probe_cfg, rng):
+def phrasing_probe(model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, probe_cfg, rng,
+                   turn_format=None):
     """Sample the start of the Assistant's reply with no prefill, for a few random pairs."""
     chosen = rng.sample(pairs, min(probe_cfg["n_pairs"], len(pairs)))
     prompts = [build_prompt("assistant", tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer,
-                            system_prompt, prefill=False) for a, b in chosen]
+                            system_prompt, prefill=False, turn_format=turn_format) for a, b in chosen]
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     enc = tokenizer(prompts, add_special_tokens=False, padding=True, padding_side="left",
                     return_tensors="pt").to(model.device)
@@ -114,6 +119,29 @@ def phrasing_probe(model, tokenizer, template_tokenizer, tasks, pairs, system_pr
     return rows
 
 
+def select_pairs(n_tasks, max_pairs=None, seed=0):
+    """Unordered pairs of task indices: all of them, or a random max_pairs of them.
+    The draw depends only on (n_tasks, max_pairs, seed), so runs on the same task file
+    with the same settings score the same pairs whatever else their configs change."""
+    pairs = list(itertools.combinations(range(n_tasks), 2))
+    if max_pairs is None or max_pairs >= len(pairs):
+        return pairs
+    return sorted(random.Random(f"pairs/{seed}").sample(pairs, max_pairs))
+
+
+def load_model(name, device, dtype):
+    """On GPU, spread the model over all visible GPUs (one GPU if it fits there), and
+    refuse to run with layers offloaded to CPU or disk: that is orders of magnitude slower."""
+    if device != "cuda":
+        return AutoModelForCausalLM.from_pretrained(name, dtype=dtype, device_map=device).eval()
+    model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, device_map="auto").eval()
+    placement = set(getattr(model, "hf_device_map", {}).values())
+    if placement & {"cpu", "disk"}:
+        raise SystemExit(f"{name} does not fit on the visible GPUs (device map: {sorted(map(str, placement))})")
+    print(f"  placed on {len(placement)} device(s): {sorted(map(str, placement))}", flush=True)
+    return model
+
+
 def main():
     cfg = yaml.safe_load(open(sys.argv[1]))
     tasks = read_jsonl(cfg["tasks_file"])
@@ -124,8 +152,9 @@ def main():
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
     if cfg.get("require_gpu") and device != "cuda":
         raise SystemExit("require_gpu is set but torch sees no usable GPU (check the CUDA warning above)")
+    # group/tags tie together runs analyzed jointly (e.g. one run per model size; see scale.py).
     run = wandb.init(project=cfg["wandb_project"], name=cfg.get("run_name"), job_type="tournament",
-                     config={**cfg, "n_tasks": len(tasks)})
+                     group=cfg.get("group"), tags=cfg.get("tags"), config={**cfg, "n_tasks": len(tasks)})
     out_dir = Path("outputs") / run.id
     out_dir.mkdir(parents=True, exist_ok=True)
     yaml.safe_dump({**cfg, "wandb_run": run.path}, open(out_dir / "config.yaml", "w"))
@@ -135,8 +164,8 @@ def main():
     # analyze.py on the run dir or the W&B run path.
     run.save(str(out_dir / "config.yaml"), base_path=str(out_dir), policy="now")
 
-    # Every unordered pair of task indices; each is scored in both orders.
-    pairs = list(itertools.combinations(range(len(tasks)), 2))
+    # Unordered pairs of task indices (all, or a max_pairs subsample); each is scored in both orders.
+    pairs = select_pairs(len(tasks), cfg.get("max_pairs"), cfg.get("seed", 0))
     ordered = pairs + [(b, a) for a, b in pairs]
     print(f"{len(tasks)} tasks, {len(pairs)} pairs, {len(ordered)} prompts per condition")
 
@@ -146,11 +175,12 @@ def main():
         print(f"Loading {m['name']} on {device} ({dtype})", flush=True)
         tokenizer = AutoTokenizer.from_pretrained(m["name"])
         template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]))
-        model = AutoModelForCausalLM.from_pretrained(m["name"], dtype=dtype, device_map=device).eval()
+        model = load_model(m["name"], device, dtype)
 
         for condition in m["conditions"]:
             outcome_ids = tuple(outcome_token_ids(condition, tokenizer))
-            items = [(build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt),
+            items = [(build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
+                                   turn_format=m.get("turn_format")),
                       outcome_ids) for a, b in ordered]
             examples[f"{stage}/{condition}"] = items[0][0]
             print(f"\n[{stage}/{condition}] example prompt:\n{items[0][0]}\n", flush=True)
@@ -188,7 +218,8 @@ def main():
 
         if m.get("phrasing_probe"):
             probe_rows = [[stage] + r for r in phrasing_probe(
-                model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, m["phrasing_probe"], rng)]
+                model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, m["phrasing_probe"], rng,
+                m.get("turn_format"))]
             run.log({f"phrasing_probe/{stage}": wandb.Table(
                 columns=["stage", "first", "second", "sample", "completion"], data=probe_rows)})
 

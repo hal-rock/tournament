@@ -1,0 +1,21 @@
+# Local CPU smoke test for the Qwen 3.5 path (hybrid linear attention, thinking
+# template, base with borrowed template): 0.8B on 10 tasks. Plumbing only.
+wandb_project: tournament
+run_name: local-qwen3.5-0.8b-n10
+tasks_file: data/tasks_n10_max500_seed0.jsonl
+seed: 0
+system_prompt: none
+max_pairs: 30  # of 45: exercises the subsampled path
+batch_size: 4
+top_k_tokens: 5
+progress_every: 40
+batching_check: {n_prompts: 8, tolerance: 0.001}
+
+models:
+  - name: Qwen/Qwen3.5-0.8B
+    stage: instruct
+    conditions: [assistant, coinflip]
+  - name: Qwen/Qwen3.5-0.8B-Base
+    stage: base
+    chat_template_from: Qwen/Qwen3.5-0.8B
+    conditions: [assistant, coinflip]
