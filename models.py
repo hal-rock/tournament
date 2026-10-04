@@ -19,6 +19,9 @@ instruct stages computes the report.py bleedthrough stats:
   utilities with the *other* post-trained models' Assistant utilities. Well below r,
   the coinflip tracks this model's own Assistant; about equal, it tracks preferences
   post-trained models share;
+- assistant_harm_gap, coinflip_harm_gap: mean utility of non-harmful tasks minus
+  harmful ones (BailBench and harmful_request), in nats: the benign-vs-harmful
+  contrast that the ../coinflip task pairs measure;
 - coinflip_effect: the Assistant-framing effect on the Sonnet 4.5 system-card task
   pairs from ../coinflip (RESULTS.md), for comparison.
 
@@ -103,6 +106,12 @@ def run_rows(model, rows, summary, seed=0, n_boot=N_BOOTSTRAP):
                    coinflip_effect=COINFLIP_EFFECT[model].get(stage, float("nan")))
         for k in CI_STATS:
             row.update({k: float(stats[k][0]), f"{k}_ci_low": float(stats[k][1]), f"{k}_ci_high": float(stats[k][2])})
+        # Benign minus harmful mean utility: the contrast the ../coinflip task pairs measure.
+        gap = with_ci(lambda i: np.array([u[i][benign[i]].mean() - u[i][~benign[i]].mean() for u in (a, c)]),
+                      len(a), resamples)
+        for j, cond in enumerate(("assistant", "coinflip")):
+            row.update({f"{cond}_harm_gap": float(gap[0][j]), f"{cond}_harm_gap_ci_low": float(gap[1][j]),
+                        f"{cond}_harm_gap_ci_high": float(gap[2][j])})
         sa, sc = U.get(f"{stage}-base/assistant"), U.get(f"{stage}-base/coinflip")
         shift = (with_ci(lambda i: np.array([pearson(sa[i], sc[i])]), len(a), resamples)
                  if sa is not None and sc is not None else [np.array([np.nan])] * 3)
@@ -293,12 +302,12 @@ def main():
         fig.savefig(out_dir / f"{name}.png", dpi=150, bbox_inches="tight")
 
     print(f"\n{'model':20} {'stage':9} {'r':>6} {'95% CI':>14} {'r benign':>9} {'r shift':>8} {'r other':>8} "
-          f"{'slope':>7} {'coin sd':>8} {'asst sd':>8} {'coin rel':>9} {'coin mass':>10} {'coinflip':>9}")
+          f"{'slope':>7} {'coin sd':>8} {'asst sd':>8} {'coin rel':>9} {'coin mass':>10} {'coin gap':>9} {'coinflip':>9}")
     for r in table:
         print(f"{r['label']:20} {r['stage']:9} {r['r']:6.2f} [{r['r_ci_low']:5.2f}, {r['r_ci_high']:5.2f}] "
               f"{r['r_benign']:9.2f} {r['r_shift']:8.2f} {r['r_other_assistant']:8.2f} {r['slope_within']:7.3f} "
               f"{r['coinflip_utility_sd']:8.3f} {r['assistant_utility_sd']:8.2f} {r['coinflip_reliability']:9.3f} "
-              f"{r['coinflip_outcome_mass_mean']:10.2f} {r['coinflip_effect']:9.2f}")
+              f"{r['coinflip_outcome_mass_mean']:10.2f} {r['coinflip_harm_gap']:9.2f} {r['coinflip_effect']:9.2f}")
     for title, (labels, M) in mats.items():
         print(f"\n{title}, Pearson r:\n{'':20} " + " ".join(f"{lab[:8]:>8}" for lab in labels))
         for lab, row in zip(labels, M):

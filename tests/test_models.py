@@ -36,6 +36,10 @@ def test_run_rows_recovers_slope_and_shift():
     assert inst["r_shift"] > 0.95  # shifts: 0.05 * asst + noise vs asst
     assert inst["r_disattenuated"] == pytest.approx(inst["r"] / 0.99)
     assert np.isnan(by_stage["base"]["r_shift"])  # no base-minus-base shift
+    U, _, benign, _ = task_arrays(utility_rows(0.05, with_base=True))
+    gap = U["instruct/coinflip"][benign].mean() - U["instruct/coinflip"][~benign].mean()
+    assert inst["coinflip_harm_gap"] == pytest.approx(gap)
+    assert inst["coinflip_harm_gap_ci_low"] <= gap <= inst["coinflip_harm_gap_ci_high"]
 
 
 def test_run_without_base_has_instruct_row_only():
