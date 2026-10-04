@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from models import cross_model, other_assistant_r, plot_cross_model, plot_models, plot_vs_coinflip, run_rows
-from report import task_arrays
+from models import consensus_stats, cross_model, plot_cross_model, plot_models, plot_vs_coinflip, run_rows
+from report import stratified_resamples, task_arrays
 
 ORIGINS = ["ALPACA"] * 40 + ["MATH"] * 40 + ["BAILBENCH"] * 20
 
@@ -48,14 +48,19 @@ def test_run_without_base_has_instruct_row_only():
     assert np.isnan(row["r_shift"]) and np.isnan(row["r_disattenuated"])
 
 
-def test_own_versus_other_models_assistant():
-    # Model X's coinflip follows its own Assistant utilities, which are unrelated to Y's.
-    rng = np.random.default_rng(99)  # not a seed utility_rows uses, so independent of X
-    U = {"X": task_arrays(utility_rows(0.05, False, seed=1))[0],
-         "Y": task_arrays(utility_rows(0.05, False, seed=2, asst=rng.normal(0, 3, len(ORIGINS))))[0]}
-    own = np.corrcoef(U["X"]["instruct/assistant"], U["X"]["instruct/coinflip"])[0, 1]
-    other = other_assistant_r(U)
-    assert own > 0.9 and abs(other["X"]) < 0.3
+def test_own_preferences_beyond_consensus():
+    """X's coinflip follows X's own Assistant quirks; Z's follows only what all models share."""
+    rng = np.random.default_rng(99)
+    n = len(ORIGINS)
+    shared = rng.normal(0, 3, n)
+    asst = {m: shared + rng.normal(0, 1, n) for m in ("X", "Y", "Z")}
+    coin = {"X": 0.05 * asst["X"] + rng.normal(0, 0.01, n), "Y": 0.05 * asst["Y"] + rng.normal(0, 0.01, n),
+            "Z": 0.05 * shared + rng.normal(0, 0.01, n)}
+    U = {m: {"instruct/assistant": asst[m], "instruct/coinflip": coin[m]} for m in asst}
+    out = consensus_stats(U, stratified_resamples(np.array(ORIGINS), rng, 50))
+    assert out["X"]["r_own_given_consensus"][0] > 0.8
+    assert out["Z"]["r_own_given_consensus"][0] < out["X"]["r_own_given_consensus"][0] - 0.3
+    assert out["Z"]["r_consensus"][0] > 0.8
 
 
 def test_cross_model_and_plots(tmp_path):
@@ -68,8 +73,6 @@ def test_cross_model_and_plots(tmp_path):
     assert labels == ["OLMo 3.1 32B", "Gemma 4 31B", "Qwen 3.5 27B"]  # MODEL_INFO order
     assert M[0, 1] > 0.8 and abs(M[0, 2]) < 0.4 and np.allclose(np.diag(M), 1)
     table = [r for m, rows in sources.items() for r in run_rows(m, rows, {}, n_boot=20)]
-    for r in table:
-        r["r_other_assistant"] = float("nan")
     figs = {"models": plot_models(table), "vs": plot_vs_coinflip(table),
             "cross": plot_cross_model({"a": (labels, M), "c": cross_model(utilities, "coinflip")})}
     for name, fig in figs.items():
