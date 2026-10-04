@@ -20,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import wandb
 import yaml
@@ -85,19 +86,22 @@ def write_csv_gz(path, rows):
 
 def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rng):
     """Score a few prompts of mixed lengths alone and together in one padded
-    batch; padding/masking bugs show up as a mismatch. Returns the max
-    |difference| in log-odds, and raises if it exceeds tolerance or is NaN."""
+    batch. A padding/masking bug shifts most prompts, so this raises if the median
+    |difference| in log-odds exceeds tolerance (or any is NaN). bf16 kernels also
+    round differently by batch shape, which some models amplify into rare outliers
+    of a few nats (see configs/models/gemma4-31b.yaml), hence the median. Returns
+    the max |difference|."""
     sample = rng.sample(items, min(n_prompts, len(items)))
     alone = score(model, tokenizer, sample, batch_size=1)
     together = score(model, tokenizer, sample, batch_size=max(batch_size, len(sample)))
     diffs = [abs((x["logp_first"] - x["logp_second"]) - (y["logp_first"] - y["logp_second"]))
              for x, y in zip(alone, together)]
-    worst = max(diffs)
+    worst, median = max(diffs), float(np.median(diffs))
     lengths = [r["prompt_tokens"] for r in alone]
     print(f"  batching check: {len(sample)} prompts, {min(lengths)}-{max(lengths)} tokens, "
-          f"max |log-odds diff| = {worst:.2e} (tolerance {tolerance})", flush=True)
-    if not worst <= tolerance:  # also catches NaN
-        raise RuntimeError(f"batched and unbatched scores differ by {worst} > {tolerance}")
+          f"|log-odds diff| median {median:.2e}, max {worst:.2e} (tolerance on the median {tolerance})", flush=True)
+    if not (median <= tolerance and worst == worst):  # worst == worst is False for NaN
+        raise RuntimeError(f"batched and unbatched scores differ: median {median}, max {worst} (tolerance {tolerance})")
     return worst
 
 

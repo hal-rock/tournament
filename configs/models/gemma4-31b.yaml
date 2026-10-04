@@ -18,9 +18,9 @@ progress_every: 2000
 # coinflip prompts, batch-of-1 vs batch-of-32 log-odds differ by 0.2 nats on average
 # (median 0.125, r = 0.998) but up to 3.6, and a batch of 32 identical, unpadded
 # copies gives the same values as the padded batch, so this is kernel numerics, not
-# padding (the first run, 1.69 > 1.0, stopped at instruct/coinflip). Other models
-# stay within 0.25.
-batching_check: {n_prompts: 16, tolerance: 4.0}
+# padding (the first run, max 1.69 > 1.0, stopped at instruct/coinflip; the
+# check now tests the median, see tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 0.5}
 
 models:
   - name: google/gemma-4-31B

@@ -14,9 +14,10 @@ max_pairs: 15000
 batch_size: 32
 top_k_tokens: 5
 progress_every: 2000
-# bf16 rounding differs by batch shape; a padding/masking bug shows up as several
-# nats or NaN (see configs/olmo3-32b-stages-n300.yaml).
-batching_check: {n_prompts: 16, tolerance: 1.0}
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring:
+# bf16 rounding differs by batch shape (median ~0.1 nats), while a padding/masking
+# bug shifts most prompts by several nats or gives NaN (see tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 0.5}
 
 models:
   - name: Qwen/Qwen3.5-35B-A3B-Base
