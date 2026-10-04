@@ -15,10 +15,14 @@ instruct stages computes the report.py bleedthrough stats:
 - r_shift (instruct rows of runs with a base model): correlation of the post-training
   shifts, instruct-base Assistant vs instruct-base coinflip, which removes structure
   pretraining puts into both conditions;
-- r_other_assistant (instruct rows): mean correlation of the model's coinflip
-  utilities with the *other* post-trained models' Assistant utilities. Well below r,
-  the coinflip tracks this model's own Assistant; about equal, it tracks preferences
-  post-trained models share;
+- r_consensus, r_own_given_consensus (instruct rows): post-trained models' Assistant
+  utilities agree closely (r ~0.8-0.95), so a coinflip can track Assistant
+  preferences without tracking this model's in particular. The consensus is the mean
+  of the other models' z-scored instruct Assistant utilities; r_consensus is its
+  correlation with this model's coinflip, and r_own_given_consensus the partial
+  correlation of this model's own Assistant utilities with its coinflip, holding the
+  consensus fixed (task-bootstrap CIs; own and consensus correlate highly, so CIs
+  are wide);
 - assistant_harm_gap, coinflip_harm_gap: mean utility of non-harmful tasks minus
   harmful ones (BailBench and harmful_request), in nats: the benign-vs-harmful
   contrast that the ../coinflip task pairs measure;
@@ -42,7 +46,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from analyze import N_BOOTSTRAP, ORIGIN_STYLE, analyze, read_jsonl, pearson
+from analyze import N_BOOTSTRAP, ORIGIN_STYLE, analyze, partial_r, pearson, read_jsonl
 from analyze import fetch_wandb as fetch_results
 from report import (DIVERGING, INK, INK_2, RULE, SERIES, fetch_wandb, stage_analysis, stratified_resamples, style,
                     task_arrays, with_ci)
@@ -128,11 +132,20 @@ def cross_model(utilities, condition):
     return [MODEL_INFO[m][0] for m in models], np.corrcoef(X)
 
 
-def other_assistant_r(utilities):
-    """{model: mean r of its instruct coinflip with the other models' instruct Assistant utilities}."""
-    return {m: float(np.mean([pearson(U["instruct/coinflip"], V["instruct/assistant"])
-                              for n, V in utilities.items() if n != m]))
-            for m, U in utilities.items()}
+def consensus_stats(utilities, resamples):
+    """{model: {stat: (estimate, ci_low, ci_high)}} for r_consensus and r_own_given_consensus
+    (see module docstring). utilities: {model: {measure: array}}, all on the same tasks."""
+    z = {m: (U["instruct/assistant"] - U["instruct/assistant"].mean()) / U["instruct/assistant"].std()
+         for m, U in utilities.items()}
+    out = {}
+    for m, U in utilities.items():
+        consensus = np.mean([z[n] for n in z if n != m], axis=0)
+        a, c = U["instruct/assistant"], U["instruct/coinflip"]
+        est, lo, hi = with_ci(lambda i: np.array([pearson(consensus[i], c[i]), partial_r(a[i], c[i], consensus[i])]),
+                              len(a), resamples)
+        out[m] = {name: (float(est[j]), float(lo[j]), float(hi[j]))
+                  for j, name in enumerate(("r_consensus", "r_own_given_consensus"))}
+    return out
 
 
 def plot_models(table):
@@ -168,15 +181,16 @@ def plot_models(table):
 
 
 def plot_cross_model(mats):
-    """Side-by-side heatmaps of model x model r, one per condition."""
-    fig, axes = plt.subplots(1, len(mats), figsize=(6.2 * len(mats), 5.6))
-    for ax, (title, (labels, M)) in zip(np.atleast_1d(axes), mats.items()):
-        im = ax.imshow(M, cmap=DIVERGING, vmin=-1, vmax=1)
+    """Side-by-side heatmaps of model x model r, one per condition, same model order."""
+    fig, axes = plt.subplots(1, len(mats), figsize=(5.4 * len(mats) + 1.6, 5.6))
+    for k, (ax, (title, (labels, M))) in enumerate(zip(np.atleast_1d(axes), mats.items())):
+        # All r here are positive; a 0-1 range keeps the differences visible.
+        im = ax.imshow(M, cmap=DIVERGING, vmin=-1 if M.min() < 0 else 0, vmax=1)
         for i, j in np.ndindex(M.shape):
             ax.text(j, i, f"{M[i, j]:.2f}", ha="center", va="center", fontsize=8.5,
-                    color="white" if abs(M[i, j]) > 0.6 else INK)
+                    color="white" if M[i, j] > 0.75 else INK)
         ax.set_xticks(range(len(labels)), labels, rotation=45, ha="right", fontsize=9)
-        ax.set_yticks(range(len(labels)), labels, fontsize=9)
+        ax.set_yticks(range(len(labels)), labels if k == 0 else [], fontsize=9)
         ax.set_title(title, fontsize=11, color=INK)
         for side in ax.spines.values():
             side.set_visible(False)
@@ -188,7 +202,7 @@ def plot_vs_coinflip(table):
     """Tournament bleedthrough against the ../coinflip effect, one point per (model, stage)."""
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.6))
     for ax, (key, ylabel) in zip(axes, (("r", "r(Assistant, coinflip), 300 tasks"),
-                                        ("slope_within", "within-origin slope, 300 tasks"))):
+                                        ("coinflip_harm_gap", "coinflip utility, benign minus harmful (nats)"))):
         for stage, color in (("base", SERIES[1]), ("instruct", SERIES[0])):
             pts = [r for r in table if r["stage"] == stage and not np.isnan(r["coinflip_effect"])]
             hollow = stage == "base"
@@ -197,15 +211,17 @@ def plot_vs_coinflip(table):
                                                                  [r[f"{key}_ci_high"] - r[key]]],
                             color=color, marker="o", ms=7, elinewidth=1.2, capsize=0,
                             mfc="white" if hollow else color, mec=color if hollow else "white", zorder=3)
-                if stage == "instruct":
-                    ax.annotate(r["label"], (r["coinflip_effect"], r[key]), xytext=(5, 3),
-                                textcoords="offset points", fontsize=8, color=INK_2)
+                if stage == "instruct" and r["coinflip_effect"] > 1:  # the Qwens cluster at 0
+                    left = r["family"] == "DeepSeek"  # next to GLM in the gap panel
+                    ax.annotate(r["label"], (r["coinflip_effect"], r[key]), xytext=(-6, 3) if left else (5, 3),
+                                textcoords="offset points", fontsize=8, color=INK_2, ha="right" if left else "left")
         ax.axhline(0, color=RULE, lw=1, zorder=0)
         ax.axvline(0, color=RULE, lw=1, zorder=0)
         ax.set_xlabel("coinflip effect on system-card tasks (log-odds, ../coinflip)", color=INK_2)
         ax.set_ylabel(ylabel)
         style(ax)
-    fig.suptitle("Tournament bleedthrough vs. the coinflip experiment (filled: post-trained, hollow: base)",
+    fig.suptitle("Tournament bleedthrough vs. the coinflip experiment (filled: post-trained, hollow: base; "
+                 "unlabeled filled points near 0: Qwen 3.5 27B, 35B-A3B, 122B-A10B)",
                  fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
     return fig
@@ -279,9 +295,13 @@ def main():
     for model, (rows, summary) in sources.items():
         table += run_rows(model, rows, summary)
     utilities = {m: task_arrays(rows)[0] for m, (rows, _) in sources.items()}
+    origins = task_arrays(next(iter(sources.values()))[0])[1]
+    consensus = consensus_stats({m: U for m, U in utilities.items() if "instruct/assistant" in U},
+                                stratified_resamples(origins, np.random.default_rng(0), N_BOOTSTRAP))
     for r in table:
-        r["r_other_assistant"] = other_assistant_r(utilities)[r["model"]] if r["stage"] == "instruct" \
-            else float("nan")
+        for name in ("r_consensus", "r_own_given_consensus"):
+            est, lo, hi = consensus[r["model"]][name] if r["stage"] == "instruct" else (float("nan"),) * 3
+            r.update({name: est, f"{name}_ci_low": lo, f"{name}_ci_high": hi})
     table.sort(key=lambda r: (list(MODEL_INFO).index(r["model"]), STAGES.index(r["stage"])))
 
     out_dir = Path("outputs") / "models" / args.group
@@ -301,11 +321,12 @@ def main():
     for name, fig in figures.items():
         fig.savefig(out_dir / f"{name}.png", dpi=150, bbox_inches="tight")
 
-    print(f"\n{'model':20} {'stage':9} {'r':>6} {'95% CI':>14} {'r benign':>9} {'r shift':>8} {'r other':>8} "
+    print(f"\n{'model':20} {'stage':9} {'r':>6} {'95% CI':>14} {'r benign':>9} {'r shift':>8} {'r cons':>7} {'r own|cons':>16} "
           f"{'slope':>7} {'coin sd':>8} {'asst sd':>8} {'coin rel':>9} {'coin mass':>10} {'coin gap':>9} {'coinflip':>9}")
     for r in table:
         print(f"{r['label']:20} {r['stage']:9} {r['r']:6.2f} [{r['r_ci_low']:5.2f}, {r['r_ci_high']:5.2f}] "
-              f"{r['r_benign']:9.2f} {r['r_shift']:8.2f} {r['r_other_assistant']:8.2f} {r['slope_within']:7.3f} "
+              f"{r['r_benign']:9.2f} {r['r_shift']:8.2f} {r['r_consensus']:7.2f} {r['r_own_given_consensus']:5.2f} "
+              f"[{r['r_own_given_consensus_ci_low']:5.2f},{r['r_own_given_consensus_ci_high']:5.2f}] {r['slope_within']:7.3f} "
               f"{r['coinflip_utility_sd']:8.3f} {r['assistant_utility_sd']:8.2f} {r['coinflip_reliability']:9.3f} "
               f"{r['coinflip_outcome_mass_mean']:10.2f} {r['coinflip_harm_gap']:9.2f} {r['coinflip_effect']:9.2f}")
     for title, (labels, M) in mats.items():
