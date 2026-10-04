@@ -14,9 +14,13 @@ max_pairs: 15000
 batch_size: 32
 top_k_tokens: 5
 progress_every: 2000
-# bf16 rounding differs by batch shape; a padding/masking bug shows up as several
-# nats or NaN (see configs/olmo3-32b-stages-n300.yaml).
-batching_check: {n_prompts: 16, tolerance: 1.0}
+# bf16 rounding differs by batch shape, and Gemma 4 31B-it amplifies it: on 512
+# coinflip prompts, batch-of-1 vs batch-of-32 log-odds differ by 0.2 nats on average
+# (median 0.125, r = 0.998) but up to 3.6, and a batch of 32 identical, unpadded
+# copies gives the same values as the padded batch, so this is kernel numerics, not
+# padding (the first run, 1.69 > 1.0, stopped at instruct/coinflip). Other models
+# stay within 0.25.
+batching_check: {n_prompts: 16, tolerance: 4.0}
 
 models:
   - name: google/gemma-4-31B
