@@ -51,14 +51,17 @@ def score(model, tokenizer, items, batch_size, top_k=5):
             input_ids[row, :len(encoded[k])] = torch.tensor(encoded[k])
             mask[row, :len(encoded[k])] = 1
         last = mask.sum(-1) - 1
-        keep = last.unique()  # sorted; few distinct lengths per length-sorted batch
+        # Keep logits for the last n_keep positions, enough to reach every row's last real
+        # token (few, as batches are length-sorted). An int, not a tensor of positions:
+        # accelerate moves tensor arguments to the first GPU, but the hidden states it
+        # indexes sit on the last one.
+        n_keep = int(width - last.min())
         with torch.no_grad():
             logits = model(
-                input_ids=input_ids.to(model.device), attention_mask=mask.to(model.device),
-                logits_to_keep=keep,  # on CPU: it indexes hidden states on whichever GPU holds the last layer
+                input_ids=input_ids.to(model.device), attention_mask=mask.to(model.device), logits_to_keep=n_keep,
             ).logits
-        rows = torch.arange(len(batch), device=logits.device)  # logits sit on the model's last GPU
-        logits = logits[rows, torch.searchsorted(keep, last).to(logits.device)].float()
+        cols = (last - (width - n_keep)).to(logits.device)
+        logits = logits[torch.arange(len(batch), device=logits.device), cols].float()
         logp = torch.log_softmax(logits, dim=-1).cpu()
         top = logp.topk(top_k)
         for row, k in enumerate(batch):

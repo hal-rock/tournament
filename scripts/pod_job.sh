@@ -29,6 +29,8 @@ for cfg in "$@"; do
     uv run python tournament.py "$cfg" > "logs/$name.log" 2>&1
     status=$?
     echo "[$(date -u +%FT%TZ)] JOB_EXIT $cfg $status"
-    rm -rf "$HF_HOME"/hub  # free disk between configs (blobs live in hub/blobs)
+    # Free disk between configs (blobs live in hub/blobs); keep a failed config's
+    # weights for the rerun.
+    [ "$status" = 0 ] && rm -rf "$HF_HOME"/hub
 done
 echo "[$(date -u +%FT%TZ)] ALL_DONE"
