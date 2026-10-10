@@ -1,0 +1,39 @@
+# OLMo 3 7B across post-training stages (base -> SFT -> DPO -> final Instruct), as
+# olmo3-32b-stages-n300.yaml (d8ysbybo) and ../coinflip/configs/olmo3-7b.yaml. In
+# ../coinflip the 7B shows no Assistant effect at any stage, and a weak negative one
+# (toward the dispreferred tasks) from Think SFT on. No 3.1 release at 7B.
+# All 44,850 pairs, as d8ysbybo; prompts are token-identical to its (system block
+# stripped; the 7B templates default to the function-calling system prompt).
+# 1x H200 (15 GB in bf16), ~70 GB of disk.
+wandb_project: tournament
+run_name: olmo3-7b-stages-n300
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+batch_size: 64
+top_k_tokens: 5
+progress_every: 10000
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring:
+# bf16 rounding differs by batch shape (median ~0.1 nats), while a padding/masking
+# bug shifts most prompts by several nats or gives NaN (see tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: allenai/Olmo-3-1025-7B
+    stage: base
+    # Base models ship without a chat template; borrow the Instruct one.
+    chat_template_from: allenai/Olmo-3-7B-Instruct
+    conditions: [assistant, coinflip]
+  - name: allenai/Olmo-3-7B-Instruct-SFT
+    stage: sft
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}
+  - name: allenai/Olmo-3-7B-Instruct-DPO
+    stage: dpo
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}
+  - name: allenai/Olmo-3-7B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}

@@ -46,15 +46,19 @@ MEASURES = ("base/assistant", "instruct/assistant", "think/assistant", "think-in
 
 
 def shift(U, measure):
-    """measure minus the base model's utilities in the same condition (None for base)."""
-    stage, cond = measure.split("/")
-    return None if stage == "base" else U[measure] - U[f"base/{cond}"]
+    """measure minus its base model's utilities in the same condition (None for base). A
+    measure is "<stage>/<condition>", optionally with a model prefix ("7b:sft/coinflip"),
+    whose base is "<prefix>base/<condition>"."""
+    head, cond = measure.split("/")
+    prefix, _, stage = head.rpartition(":")
+    return None if stage == "base" else U[measure] - U[f"{prefix}{':' if prefix else ''}base/{cond}"]
 
 
-def comparison_rows(U, origins, benign, loglen, summary, resamples):
+def comparison_rows(U, origins, benign, loglen, summary, resamples, comparisons=COMPARISONS):
+    """One row per (label, Assistant measure, coinflip measure) in comparisons."""
     groups = [g for g in ORIGIN_STYLE if g in set(origins)]
     out = []
-    for label, am, cm in COMPARISONS:
+    for label, am, cm in comparisons:
         a, c = U[am], U[cm]
         stats = stage_analysis(a, c, loglen, origins, benign, groups, resamples)
         row = dict(comparison=label, assistant=am, coinflip=cm,

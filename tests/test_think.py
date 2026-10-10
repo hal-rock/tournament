@@ -29,3 +29,11 @@ def test_comparison_rows():
     assert abs(rows["think"]["r_shift"]) < 0.3 and abs(rows["think, Assistant in reasoning"]["r_shift"]) < 0.3
     assert np.isnan(rows["base"]["r_shift"])
     assert rows["think"]["coinflip_utility_sd"] == pytest.approx(U["think/coinflip"].std())
+
+
+def test_shift_with_model_prefix():
+    from think import shift
+    U = {"7b:base/coinflip": np.array([1.0, 2.0]), "7b:sft/coinflip": np.array([1.5, 1.0]),
+         "base/coinflip": np.zeros(2)}
+    assert shift(U, "7b:sft/coinflip").tolist() == [0.5, -1.0]
+    assert shift(U, "7b:base/coinflip") is None and shift(U, "base/coinflip") is None

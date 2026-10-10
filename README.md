@@ -46,6 +46,7 @@ uv run python report.py entity/tournament/<run_id> [--update-wandb]  # focused b
 uv run python features.py entity/tournament/<run_id> [--update-wandb] # utilities vs task metadata
 uv run python models.py [--update-wandb]                 # bleedthrough across model families (W&B group "models")
 uv run python think.py [--update-wandb]                  # OLMo 3.1 32B Think next to the Instruct
+uv run python sizes.py                                   # OLMo 3 7B vs. 32B by post-training stage
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -62,7 +63,7 @@ only the fitted utilities, so it runs in seconds on a laptop.
 
 Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
-base/SFT/DPO/Instruct); the model families below.
+base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think and OLMo 3 7B below.
 
 ## Model families
 
@@ -241,6 +242,67 @@ Split-half reliabilities are 0.99-0.999 in every condition. Mean coinflip mass i
   not do. The coinflip, the measure that matters here, is unaffected.
 - One Think checkpoint (3.1, after extended RL). The intermediate Think SFT / DPO
   checkpoints were run only on `../coinflip`'s pairs.
+
+## OLMo 3 7B by post-training stage
+
+In `../coinflip` the 7B Instruct ladder never shows the Assistant effect. Instead it
+has a weak negative one (toward the dispreferred tasks) from its Think SFT on. Run
+`st9cz0uw` (`configs/olmo3-7b-stages-n300.yaml`, 1x H200, 55 min) scores base
+(`Olmo-3-1025-7B`), SFT, DPO and Instruct (`Olmo-3-7B-Instruct*`; there is no 3.1 at
+7B) on all 44,850 pairs. The prompts are token-identical to `d8ysbybo`'s. `report.py`
+gives the per-stage report (`outputs/st9cz0uw/report`), and `sizes.py` sets it beside
+the 32B (`outputs/sizes`, `figures/sizes_by_stage.png`). Reliabilities are 0.999 in
+every condition.
+
+| stage | 7B r [95% CI] | 7B r shift | 7B coinflip benign-harmful | 32B r | 32B r shift | 32B coinflip benign-harmful |
+|---|---|---|---|---|---|---|
+| base | 0.36 [0.26, 0.45] | | 0.07 [0.05, 0.09] | 0.13 | | 0.00 |
+| SFT | -0.37 [-0.45, -0.30] | -0.46 | -0.34 [-0.44, -0.22] | 0.25 | 0.24 | 0.07 |
+| DPO | -0.15 [-0.24, -0.06] | -0.23 | -0.29 [-0.42, -0.14] | 0.65 | 0.66 | 0.38 |
+| Instruct | -0.08 [-0.17, 0.01] | -0.16 | -0.23 [-0.38, -0.06] | 0.63 | 0.65 | 0.38 |
+
+### Findings
+
+1. **The 7B's coinflip runs against its Assistant preferences, and it starts at SFT.**
+   At SFT the coinflip correlates -0.37 with the Assistant utilities (-0.35 on
+   non-harmful tasks, -0.39 with length partialled out, -0.46 in shifts from base),
+   and harmful tasks get *higher* coinflip utility than benign ones (-0.34 nats; -0.30
+   adjusting for length). This is `../coinflip`'s negative effect, extended to the whole
+   task range and much clearer here.
+2. **SFT sets the coinflip, and later stages barely change it.** 7B coinflip
+   utilities correlate 0.95 between SFT and DPO and 0.99 between DPO and Instruct
+   (32B: 0.82 and 1.00). DPO scales them by 1.27 and adds only a small
+   Assistant-aligned part: R^2 0.90 from the SFT coinflip, 0.93 with the DPO Assistant
+   added (coefficient 0.026, vs. the 32B's jump to r = 0.65). The 7B Assistant scale
+   grows 2.5x at DPO with its ordering unchanged (r = 0.99 with SFT). So the negative
+   r shrinks toward zero (-0.15, -0.08) because the Assistant's scale grows while the
+   coinflip stays put, not because the coinflip moves toward the Assistant.
+3. **What the 7B coinflip prefers: long, high-stakes requests over short factual
+   ones.** After SFT it correlates 0.66 with log task length (32B: 0.39). Mean coinflip
+   utility is highest for STRESS-TEST (+0.57), the longest tasks (300 characters on
+   average) and ones the Assistant dislikes (-0.8 to -1.5). It is lowest for Alpaca
+   (-0.30), especially knowledge QA. Origin, topic and length explain 60% of the
+   non-Assistant SFT coinflip variance (`outputs/st9cz0uw/report`). Within origin and
+   length the negative relation is small (partial r -0.15 at SFT, -0.04 at Instruct).
+   Most of the negative r is therefore which *kinds* of task the coinflip favors, not
+   an inversion of the Assistant's task-by-task ranking.
+4. **This is not the 32B Think pattern.** The 32B Think coinflip is uncorrelated with
+   its Assistant (r = -0.07) and largely shares the 32B Instruct-SFT coinflip's structure
+   (r = 0.70). The 7B coinflip anti-correlates with its Assistant and shares little
+   with either 32B coinflip (r = 0.13-0.19 with the Think coinflip, 0.27-0.30 with the
+   32B coinflip at the same stage). By contrast, 7B and 32B Assistant preferences agree
+   (r = 0.81-0.90 by stage).
+5. **The 7B base already has r = 0.36** (32B base: 0.13), nearly all of it between
+   origins: within origin and length it is 0.08. SFT does not carry the base coinflip
+   over (r = -0.15 between them; 32B: 0.41).
+
+### Caveats
+
+- The 7B's coinflip mass on " heads" / " tails" falls to 0.77-0.82 after DPO (min 0.10
+  on single prompts); the 32B's stays at 0.91-0.94.
+- Only the Instruct ladder. `../coinflip` places the 7B's negative turn inside its
+  Think SFT (steps 8-10k), which the Instruct SFT starts from; the 7B Think SFT
+  checkpoints are not run here.
 
 ## Tasks
 
