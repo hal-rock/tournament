@@ -58,7 +58,7 @@ def _strip_system(rendered, content):
     return rendered
 
 
-def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format):
+def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format, close_think=False):
     """The conversation as text, user content still ending in SENTINEL, plus the
     Assistant header if has_reply."""
     if turn_format is not None:
@@ -81,11 +81,18 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format)
         # GLM-4.5 puts a newline between the empty think block and the answer (it is in the
         # template's rendering of past Assistant turns, not in the generation prompt).
         rendered += "\n"
+    if has_reply and close_think:
+        # Think-only templates (OLMo 3 Think) open every reply with "<think>" and have no
+        # non-thinking mode. Close the block empty, so the prefill is the answer itself. One
+        # newline, as in the chat and safety parts of Dolci-Think-SFT (math and code use two).
+        if not rendered.endswith("<think>"):
+            raise ValueError("close_think: the generation prompt does not end in <think>")
+        rendered += "</think>\n"
     return rendered
 
 
 def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
-                 turn_format=None):
+                 turn_format=None, close_think=False):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
@@ -93,12 +100,14 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     prefill=False leaves the assistant turn empty (for sampling free-form choices).
     turn_format: {"user": ..., "reply": ...} literal turn markers, used instead of
     the chat template (see _render).
+    close_think: close a Think-only template's opening "<think>" empty before the
+    prefill; without it the prefill is the first words of the reasoning.
     """
     spec = CONDITIONS[condition]
     body = spec["body"].format(first=first.strip(), second=second.strip())
     has_reply = spec["prefill"] is not None
     rendered = _render([{"role": "user", "content": body + SENTINEL}], template_tokenizer, has_reply,
-                       system_prompt, turn_format)
+                       system_prompt, turn_format, close_think)
 
     if not has_reply:
         # Cut inside the user turn, so the model continues the Human's message.

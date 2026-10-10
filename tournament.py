@@ -106,11 +106,12 @@ def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rn
 
 
 def phrasing_probe(model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, probe_cfg, rng,
-                   turn_format=None):
+                   turn_format=None, close_think=False):
     """Sample the start of the Assistant's reply with no prefill, for a few random pairs."""
     chosen = rng.sample(pairs, min(probe_cfg["n_pairs"], len(pairs)))
     prompts = [build_prompt("assistant", tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer,
-                            system_prompt, prefill=False, turn_format=turn_format) for a, b in chosen]
+                            system_prompt, prefill=False, turn_format=turn_format, close_think=close_think)
+               for a, b in chosen]
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     enc = tokenizer(prompts, add_special_tokens=False, padding=True, padding_side="left",
                     return_tensors="pt").to(model.device)
@@ -188,7 +189,7 @@ def main():
         for condition in m["conditions"]:
             outcome_ids = tuple(outcome_token_ids(condition, tokenizer))
             items = [(build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
-                                   turn_format=m.get("turn_format")),
+                                   turn_format=m.get("turn_format"), close_think=m.get("close_think", False)),
                       outcome_ids) for a, b in ordered]
             examples[f"{stage}/{condition}"] = items[0][0]
             print(f"\n[{stage}/{condition}] example prompt:\n{items[0][0]}\n", flush=True)
@@ -227,7 +228,7 @@ def main():
         if m.get("phrasing_probe"):
             probe_rows = [[stage] + r for r in phrasing_probe(
                 model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, m["phrasing_probe"], rng,
-                m.get("turn_format"))]
+                m.get("turn_format"), m.get("close_think", False))]
             run.log({f"phrasing_probe/{stage}": wandb.Table(
                 columns=["stage", "first", "second", "sample", "completion"], data=probe_rows)})
 

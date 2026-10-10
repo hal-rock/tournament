@@ -11,6 +11,7 @@ from prompts import CONDITIONS, build_prompt, outcome_token_ids
 
 OLMO3 = "allenai/Olmo-3.1-32B-Instruct"
 OLMO3_BASE = "allenai/Olmo-3-1125-32B"
+OLMO3_THINK = "allenai/Olmo-3.1-32B-Think"
 OLMO2 = "allenai/OLMo-2-0425-1B-Instruct"
 QWEN_SMALL = "Qwen/Qwen3.5-0.8B"  # CPU smoke test (configs/local-qwen.yaml)
 QWEN_SMALL_BASE = "Qwen/Qwen3.5-0.8B-Base"
@@ -127,6 +128,20 @@ def test_base_model_with_borrowed_template(base_name, template_name):
         assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
     for condition in CONDITIONS:
         assert outcome_token_ids(condition, base) == outcome_token_ids(condition, template)
+
+
+def test_olmo_think_reply():
+    """OLMo 3 Think opens every reply with "<think>": close_think closes it empty before the
+    prefill, otherwise the prefill starts the reasoning. The coinflip is unaffected."""
+    tok = AutoTokenizer.from_pretrained(OLMO3_THINK)
+    header = "Task B: SECOND<|im_end|>\n<|im_start|>assistant\n<think>"
+    assert render("assistant", tok).endswith(header + "I'll choose Task")
+    assert render("assistant", tok, close_think=True).endswith(header + "</think>\nI'll choose Task")
+    assert render("coinflip", tok, close_think=True) == render("coinflip", tok)
+    assert render("coinflip", tok) == render("coinflip", AutoTokenizer.from_pretrained(OLMO3))
+    assert outcome_token_ids("assistant", tok) == outcome_token_ids("assistant", AutoTokenizer.from_pretrained(OLMO3))
+    with pytest.raises(ValueError):
+        render("assistant", AutoTokenizer.from_pretrained(OLMO3), close_think=True)
 
 
 def test_outcome_tokens_are_single_and_distinct(tok):

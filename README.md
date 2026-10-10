@@ -45,6 +45,7 @@ uv run python analyze.py entity/tournament/<run_id>      # re-run the analysis o
 uv run python report.py entity/tournament/<run_id> [--update-wandb]  # focused bleedthrough report
 uv run python features.py entity/tournament/<run_id> [--update-wandb] # utilities vs task metadata
 uv run python models.py [--update-wandb]                 # bleedthrough across model families (W&B group "models")
+uv run python think.py [--update-wandb]                  # OLMo 3.1 32B Think next to the Instruct
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -174,6 +175,72 @@ is the mean P(" heads") + P(" tails"). CIs are task bootstraps within origin.
 
 The three pods ran for about 17 H200-hours in total (~$78 at secure-cloud rates),
 including restarts.
+
+## OLMo 3.1 32B Think
+
+In `../coinflip`'s standard pairs the Think model shows no Assistant effect, while
+the 3.1 Instruct (whose SFT starts from the Think SFT) does. Run `z6ldqzq2`
+(`configs/olmo3-32b-think.yaml`, 1x H200, 24 min) scores `allenai/Olmo-3.1-32B-Think`
+on the same 300 tasks and 15k pairs as the model sweep; `think.py` sets it beside
+`d8ysbybo`'s base and Instruct refit on those pairs (`outputs/think/`,
+`figures/think_*.png`).
+
+The template opens every reply with `<think>` and has no non-thinking mode, so the
+Assistant choice is read two ways: after an empty block,
+`<think></think>\nI'll choose Task` (`close_think`; one newline, as in the chat and safety
+parts of Dolci-Think-SFT), and as the first words of the reasoning,
+`<think>I'll choose Task`. The two agree (r = 0.99), so the reading doesn't matter
+here. The coinflip is a Human turn and is unaffected. Both put >99% of the mass on " A" / " B".
+
+| Assistant vs. coinflip | r [95% CI] | r benign | r shift | slope | Asst. SD | coinflip SD | benign-harmful (coinflip) |
+|---|---|---|---|---|---|---|---|
+| base | 0.12 [-0.01, 0.25] | 0.05 | | 0.025 | 0.40 | 0.05 | 0.00 [-0.01, 0.02] |
+| Instruct | 0.63 [0.54, 0.71] | 0.40 | 0.64 | 0.057 | 5.83 | 0.38 | 0.38 [0.23, 0.54] |
+| Think (empty block) | -0.07 [-0.18, 0.05] | -0.27 | -0.08 | 0.008 | 3.02 | 0.17 | 0.02 [-0.03, 0.07] |
+| Think (in reasoning) | -0.05 [-0.17, 0.07] | -0.24 | -0.07 | 0.016 | 2.55 | 0.17 | |
+| Think coinflip vs. Instruct Assistant | 0.07 [-0.05, 0.19] | -0.11 | 0.06 | 0.009 | 5.83 | 0.17 | |
+
+Split-half reliabilities are 0.99-0.999 in every condition. Mean coinflip mass is 0.96.
+
+### Findings
+
+1. **The Think model shows no bleedthrough over the 300 tasks either.** Its coinflip
+   is uncorrelated with its own Assistant utilities (r = -0.07, within-origin slope
+   0.008), with the Instruct's (0.07), and in post-training shifts from base (-0.08).
+   Harmful tasks get no coinflip penalty (benign-harmful 0.02 nats vs. 0.38 for
+   Instruct). This is the `../coinflip` result, extended from benign-vs-harmful pairs
+   to the whole task range.
+2. **That is not for lack of Assistant preferences.** The Think Assistant's
+   preferences are strong (SD 3.0 nats) and close to the Instruct's (r = 0.94). Both
+   favor math and avoid BailBench (-6.2 vs. -12.6 nats by origin mean), the Think
+   model about half as strongly.
+3. **Its coinflip is not flat, and the Instruct shares it.** Think coinflip utilities
+   are reliable (0.99) and spread out (SD 0.17, 4x the base's). They correlate 0.41 with
+   the base coinflip and 0.58 with the Instruct coinflip (partial r given the base
+   coinflip 0.52). The Instruct coinflip is close to additive: Think coinflip plus an
+   Assistant part. Think coinflip alone explains R^2 = 0.34 of it, the Instruct
+   Assistant utilities 0.40, and both together 0.69; the two predictors are nearly
+   uncorrelated (r = 0.07). Along `d8ysbybo`'s Instruct ladder, the Think coinflip is
+   closest to the Instruct SFT's coinflip (r = 0.70; base 0.41, DPO 0.58, Instruct
+   0.59), and bleedthrough appears only at DPO (r = 0.25 at SFT, 0.65 at DPO). So the
+   non-Assistant coinflip structure looks inherited from the shared Think SFT lineage.
+   The Instruct DPO then adds an Assistant-aligned part, which the Think model's own
+   DPO and RL never added.
+4. **The negative benign r is mostly math.** The Think Assistant favors math most
+   (+3.2 nats), while its coinflip puts math lowest (-0.10). Within origin, r is -0.16
+   for math, 0.02-0.13 for WildChat and Alpaca, and 0.20 and 0.38 for STRESS-TEST and
+   BailBench (n = 45 and 30; the Instruct's are 0.75-0.76). Any trace of bleedthrough
+   is small and confined to the harm-related tasks.
+
+### Caveats
+
+- Neither Assistant reading is native to the Think model. Sampled without a prefill,
+  its reply after an empty block mostly reads like reasoning ("Okay, the user has given
+  me a choice between two tasks..."). After `<think>`, every sample is reasoning.
+  Its preferences may be best measured after full reasoning, which this design does
+  not do. The coinflip, the measure that matters here, is unaffected.
+- One Think checkpoint (3.1, after extended RL). The intermediate Think SFT / DPO
+  checkpoints were run only on `../coinflip`'s pairs.
 
 ## Tasks
 
