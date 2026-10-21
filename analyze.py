@@ -298,6 +298,18 @@ def log_to_wandb(run, result):
     run.log(log)
 
 
+def read_run_config(run_dir):
+    """The config a local run dir (outputs/<run_id>) was launched with. tournament.py writes it to
+    run_config.yaml. Earlier runs wrote config.yaml, which W&B overwrote with its own dump
+    ({key: {"value": ...}}) when the file was saved to the run, so that format is unwrapped."""
+    run_dir = Path(run_dir)
+    path = run_dir / "run_config.yaml"
+    cfg = yaml.safe_load(open(path if path.exists() else run_dir / "config.yaml"))
+    if "_wandb" in cfg:
+        cfg = {k: v["value"] for k, v in cfg.items() if k != "_wandb" and isinstance(v, dict) and "value" in v}
+    return cfg
+
+
 def read_jsonl(path):
     with open(path) as f:
         return [json.loads(line) for line in f]
@@ -346,7 +358,7 @@ def main():
     run = None
     if Path(args.source).is_dir():
         src = Path(args.source)
-        cfg = yaml.safe_load(open(src / "config.yaml"))
+        cfg = read_run_config(src)
         rows = load_results(src)
     else:
         import wandb

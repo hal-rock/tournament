@@ -167,12 +167,13 @@ def main():
                      group=cfg.get("group"), tags=cfg.get("tags"), config={**cfg, "n_tasks": len(tasks)})
     out_dir = Path("outputs") / run.id
     out_dir.mkdir(parents=True, exist_ok=True)
-    yaml.safe_dump({**cfg, "wandb_run": run.path}, open(out_dir / "config.yaml", "w"))
+    # Not "config.yaml": W&B keeps its own file of that name in the run and would overwrite this one.
+    yaml.safe_dump({**cfg, "wandb_run": run.path}, open(out_dir / "run_config.yaml", "w"))
     # Each finished condition is written to results/<stage>__<condition>.csv.gz and
     # uploaded to the W&B run's files right away, so a crash (or a failed batching
     # check) keeps it. (Too many rows for a W&B table at 300 tasks.) Recover with
     # analyze.py on the run dir or the W&B run path.
-    run.save(str(out_dir / "config.yaml"), base_path=str(out_dir), policy="now")
+    run.save(str(out_dir / "run_config.yaml"), base_path=str(out_dir), policy="now")
 
     # Unordered pairs of task indices (all, or a max_pairs subsample); each is scored in both orders.
     pairs = select_pairs(len(tasks), cfg.get("max_pairs"), cfg.get("seed", 0))

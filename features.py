@@ -29,10 +29,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import yaml
 from matplotlib.colors import LinearSegmentedColormap
 
-from analyze import N_BOOTSTRAP, pearson, read_jsonl
+from analyze import N_BOOTSTRAP, pearson, read_jsonl, read_run_config
 from report import DIVERGING, FOCUS_STAGE, INK, PRE_STAGE, fetch_wandb, group_mean_ci, nonassistant, task_arrays
 
 N_PERMUTATIONS = 5000
@@ -232,7 +231,7 @@ def main():
     run = None
     if Path(args.source).is_dir():
         run_dir = Path(args.source)
-        tasks_file = args.tasks or yaml.safe_load(open(run_dir / "config.yaml"))["tasks_file"]
+        tasks_file = args.tasks or read_run_config(run_dir)["tasks_file"]
     else:
         import wandb
         run = wandb.Api().run(args.source)

@@ -124,3 +124,16 @@ def test_partial_r_removes_shared_confound():
     x, y = z + 0.3 * rng.normal(size=500), z + 0.3 * rng.normal(size=500)
     assert pearson(x, y) > 0.8
     assert abs(partial_r(x, y, z)) < 0.15
+
+
+def test_read_run_config_both_formats(tmp_path):
+    """run_config.yaml as tournament.py writes it, and an older run's config.yaml that W&B
+    overwrote with its own {key: {"value": ...}} dump."""
+    from analyze import read_run_config
+    new, old = tmp_path / "new", tmp_path / "old"
+    new.mkdir(), old.mkdir()
+    (new / "run_config.yaml").write_text("tasks_file: data/t.jsonl\nmodels: [{name: m, stage: s}]\n")
+    (old / "config.yaml").write_text("_wandb:\n  value: {cli_version: 0.30.0}\ntasks_file:\n  value: data/t.jsonl\n"
+                                     "models:\n  value: [{name: m, stage: s}]\n")
+    for d in (new, old):
+        assert read_run_config(d) == {"tasks_file": "data/t.jsonl", "models": [{"name": "m", "stage": "s"}]}
