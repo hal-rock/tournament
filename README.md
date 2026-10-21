@@ -64,7 +64,8 @@ only the fitted utilities, so it runs in seconds on a laptop.
 
 Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
-base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think and OLMo 3 7B below.
+base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B and the
+`../coinflip` DPO retraining checkpoints (W&B group `retrain`) below.
 
 ## Model families
 
@@ -375,6 +376,110 @@ change in run 5 lies above or below 0.
   - agreement of the `close_think` and `strip_think` readings at each step;
   - a fixed-Assistant version that correlates every step's coinflip with step 600's A.
   Anything that doesn't fit A, B or C is reported as what it is.
+
+### Results (2026-10-21)
+
+14 runs, one per checkpoint, each on 1x H200 (19-28 min per pod, $30 in all). `retrain.py`
+computes everything below (`figures/retrain_*.png`). Split-half reliabilities are
+0.988-0.999 everywhere, and coinflip mass on " heads" / " tails" is 0.90-0.93. Run 1's step 0
+reproduces `d8ysbybo`'s Instruct SFT (r = 0.25 in both).
+
+Columns, all on non-harmful tasks except r (all tasks), the harm gap and the last column:
+- **r change** is r(A_t, C_t - C_0).
+- **b** is in nats of coinflip change per Assistant SD.
+- **../coinflip change** is that repo's Assistant-framing change from step 0, on its 25 pairs.
+
+| run | step | W&B | r | r benign [95% CI] | r change | b [95% CI] | harm gap | Asst. SD | ../coinflip change |
+|---|---|---|---|---|---|---|---|---|---|
+| 5 | 0 | `pkk3b2rl` | -0.01 | -0.21 [-0.35, -0.08] | | 0 | -0.00 | 1.58 | 0 |
+| 5 | 50 | `7tv5v3lk` | -0.02 | -0.21 [-0.35, -0.08] | +0.01 | 0.000 | -0.00 | 1.59 | -0.00 |
+| 5 | 100 | `o0crtxj9` | -0.00 | -0.20 [-0.33, -0.06] | +0.30 | 0.003 [0.002, 0.004] | +0.00 | 1.68 | +0.00 |
+| 5 | 160 | `581wwg3t` | +0.08 | -0.13 [-0.28, +0.01] | +0.53 | 0.012 [0.009, 0.015] | +0.02 | 2.08 | +0.06 |
+| 5 | 200 | `pzfeb3bw` | +0.16 | -0.05 [-0.20, +0.09] | +0.62 | 0.023 [0.019, 0.027] | +0.04 | 2.38 | +0.13 |
+| 5 | 300 | `2if7wwkz` | +0.31 | +0.11 [-0.05, +0.25] | +0.64 | 0.045 [0.036, 0.053] | +0.08 | 3.10 | +0.34 |
+| 5 | 400 | `l2fwmss8` | +0.35 | +0.17 [+0.02, +0.31] | +0.65 | 0.057 [0.046, 0.067] | +0.09 | 3.43 | +0.44 |
+| 5 | 500 | `trt0f1wh` | +0.35 | +0.19 [+0.03, +0.32] | +0.65 | 0.060 [0.049, 0.070] | +0.10 | 3.76 | +0.43 |
+| 5 | 600 | `l2syx47n` | +0.33 | +0.17 [+0.01, +0.30] | +0.61 | 0.056 [0.046, 0.066] | +0.09 | 3.94 | +0.38 |
+| 1 | 0 | `tgmnlv78` | +0.25 | +0.06 [-0.05, +0.16] | | 0 | +0.07 | 2.27 | 0 |
+| 1 | 200 | `rozy69sl` | +0.33 | +0.13 [+0.02, +0.23] | +0.24 | 0.009 [0.004, 0.015] | +0.10 | 3.22 | +0.18 |
+| 1 | 300 | `cp1pteww` | +0.40 | +0.19 [+0.07, +0.29] | +0.30 | 0.022 [0.011, 0.032] | +0.14 | 4.03 | +0.39 |
+| 1 | 400 | `k1wdb47q` | +0.48 | +0.25 [+0.13, +0.36] | +0.40 | 0.041 [0.024, 0.058] | +0.20 | 4.51 | +0.78 |
+| 1 | 600 | `e3zs6gox` | +0.54 | +0.30 [+0.17, +0.41] | +0.44 | 0.058 [0.035, 0.083] | +0.26 | 5.03 | +1.27 |
+
+Step 400 → 600, paired over tasks:
+
+| change from step 400 to 600 | run 5 | run 1 |
+|---|---|---|
+| r benign | -0.01 [-0.03, +0.02] | +0.05 [+0.02, +0.07] |
+| b | -0.001 [-0.004, +0.002] | +0.017 [+0.010, +0.025] |
+| r change, benign | -0.04 [-0.07, -0.02] | +0.05 [+0.02, +0.07] |
+| harm gap | -0.00 [-0.01, +0.00] | +0.06 [+0.04, +0.09] |
+| r, all tasks | -0.02 [-0.04, -0.01] | +0.06 [+0.05, +0.07] |
+
+![bleedthrough along runs 5 and 1](figures/retrain_trajectory.png)
+
+1. **Outcome B, as pre-registered: run 5's broad bleedthrough plateaus with its harm-driven
+   effect.**
+   - From step 400 to 600, neither r_benign nor b moves, and the harm gap is flat too, as the
+     `../coinflip` effect is.
+   - The sensitivity check passes: over the same steps both rise in run 1. So the design can
+     detect continued growth, and run 5 doesn't have it.
+   - It is not C: the change DPO adds to the Think SFT's coinflip is strongly Assistant-aligned
+     (r change 0.65 at step 400).
+2. **Up to step 400, the Think SFT's benign bleedthrough grows at least as fast as the
+   Instruct SFT's.**
+   - b is 0.045 vs 0.022 at step 300 and 0.057 vs 0.041 at step 400. Run 1 catches up only at
+     step 600 (0.058 vs 0.056).
+   - Run 5's r change is higher throughout (0.62-0.65 vs 0.24-0.44). Within origin the two runs
+     are similar (r 0.33-0.53 in run 5 vs 0.36-0.66 at step 400). Most of run 5's extra comes
+     from math tasks, whose coinflip rises as a group (+0.09 at step 400, against -0.04 for
+     Alpaca), and the Assistant likes math most.
+   - The harm gap grows equally in both runs to step 300 (+0.08 and +0.07 from step 0), and then
+     only run 1's keeps growing (+0.19 by step 600, run 5 +0.09).
+   - So the Think SFT doesn't lack broad bleedthrough. It stops gaining it at the same step as
+     the harm contrast.
+3. **The raw r understates run 5's bleedthrough, because of the Think SFT's own coinflip.** At
+   step 0, r_benign is -0.21 (the 3.1 Think final's: -0.27). Raw r_benign climbs to
+   +0.17-0.19 and plateaus there, while r change is ~0.6.
+
+   ![coinflip change vs Assistant utility](figures/retrain_scatter.png)
+4. **After step 400, run 5's coinflip still moves, but not toward the Assistant.**
+   - In run 5, the step 400 → 600 coinflip change (SD 0.025 nats; run 1 0.035) is unrelated to
+     the step-600 Assistant: r = -0.08 [-0.20, +0.04]. It is also unrelated to the earlier DPO
+     change (+0.06). It correlates +0.60 [+0.49, +0.70] with the Think SFT's starting coinflip:
+     late training amplifies the starting structure.
+   - In run 1 the late change continues the earlier one (r 0.74) and stays Assistant-aligned
+     (0.50).
+   - This is `../coinflip`'s linearization result (run 5's updates stop pointing along the
+     coinflip gradient after step 400), seen here across the whole task range.
+5. **The plateau shows up in every origin.** b within origin, step 400 → 600:
+
+   | origin | run 5 | run 1 |
+   |---|---|---|
+   | math | 0.039 → 0.039 | 0.031 → 0.044 |
+   | Alpaca | 0.012 → 0.015 | 0.023 → 0.030 |
+   | WildChat | 0.019 → 0.022 | 0.046 → 0.059 |
+   | non-harmful STRESS-TEST | 0.059 → 0.057 | 0.116 → 0.169 |
+
+6. **The Assistant side keeps changing; the coinflip doesn't follow.**
+   - Run 5's Assistant SD grows from 3.43 to 3.94 between steps 400 and 600, with its ordering
+     fixed (r with step 600 = 1.000), as in the 7B.
+   - The two Assistant readings agree at every step (r 0.986-0.992).
+   - The fixed-Assistant version tells the same story (r_benign 0.19 at step 400, 0.17 at 600).
+
+**For the safety-pair lead.** The non-harmful measure plateaus at the same step as the harm
+contrast, in every origin. So run 5's `../coinflip` plateau is not an artifact of that repo's
+pairs being mostly about safety. If the Think SFT fitting the safety pairs early matters, it
+would have to stop bleedthrough everywhere, not only for harm. That is possible, but it isn't
+the simple reading. The data look more like a general stop on the Think SFT around step 400,
+in line with the collapse of update alignment in `../coinflip`'s linearization.
+
+Findings 2-6 were not pre-registered. Caveats:
+- One seed per run.
+- Run 5 stops at step 600 (45% of run 1's dose), so a later restart of growth isn't ruled out.
+- The harm contrast rests on 43 tasks and is small here (0.1-0.26 nats).
+- Run 1 is measured here only to step 600. Its final released model has r = 0.65 (`d8ysbybo`),
+  which fits continued growth.
 
 ## Tasks
 
