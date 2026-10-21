@@ -12,6 +12,8 @@ from prompts import CONDITIONS, build_prompt, outcome_token_ids
 OLMO3 = "allenai/Olmo-3.1-32B-Instruct"
 OLMO3_BASE = "allenai/Olmo-3-1125-32B"
 OLMO3_THINK = "allenai/Olmo-3.1-32B-Think"
+OLMO3_THINK_SFT = "allenai/Olmo-3-32B-Think-SFT"  # step 0 of ../coinflip's DPO retraining run 5
+RUN5 = "hal-rock/olmo3-32b-run5-instruct-lr1e-6"  # its checkpoints, one branch per step
 OLMO2 = "allenai/OLMo-2-0425-1B-Instruct"
 QWEN_SMALL = "Qwen/Qwen3.5-0.8B"  # CPU smoke test (configs/local-qwen.yaml)
 QWEN_SMALL_BASE = "Qwen/Qwen3.5-0.8B-Base"
@@ -142,6 +144,25 @@ def test_olmo_think_reply():
     assert outcome_token_ids("assistant", tok) == outcome_token_ids("assistant", AutoTokenizer.from_pretrained(OLMO3))
     with pytest.raises(ValueError):
         render("assistant", AutoTokenizer.from_pretrained(OLMO3), close_think=True)
+
+
+def test_olmo_think_reply_without_think_block():
+    """strip_think drops the opening "<think>", so the prefilled prompt is a prefix of the
+    conversation in which the Assistant replied "I'll choose Task A." with no trace: how the
+    Think SFT's template rendered ../coinflip run 5's DPO pairs. Its checkpoints carry that
+    template."""
+    tok = AutoTokenizer.from_pretrained(OLMO3_THINK_SFT)
+    assert render("assistant", tok, strip_think=True).endswith(
+        "Task B: SECOND<|im_end|>\n<|im_start|>assistant\nI'll choose Task")
+    body = CONDITIONS["assistant"]["body"].format(first="FIRST", second="SECOND")
+    conv = tok.apply_chat_template([{"role": "user", "content": body},
+                                    {"role": "assistant", "content": "I'll choose Task A."}], tokenize=False)
+    assert prompts._strip_system(conv, body).startswith(render("assistant", tok, strip_think=True))
+    assert AutoTokenizer.from_pretrained(RUN5, revision="step00600").chat_template == tok.chat_template
+    with pytest.raises(ValueError):
+        render("assistant", tok, strip_think=True, close_think=True)
+    with pytest.raises(ValueError):
+        render("assistant", AutoTokenizer.from_pretrained(OLMO3), strip_think=True)
 
 
 def test_outcome_tokens_are_single_and_distinct(tok):

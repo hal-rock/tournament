@@ -1,0 +1,35 @@
+# ../coinflip DPO retraining run 5 (Think SFT on the Instruct DPO data, LR 1e-6), checkpoint step00200
+# (README "DPO retraining checkpoints"). One config per checkpoint, each on its own 1x H200;
+# all checkpoints of both runs run on H200 so the trajectory is on one GPU type. Same 300 tasks,
+# 15k pairs and no system prompt as the model sweep and the Think run.
+wandb_project: tournament
+group: retrain
+tags: [run5]
+run_name: run5-step00200
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 5000
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring (see
+# tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  # Primary Assistant reading: no think block, the format run 5's DPO trained on (its
+  # Instruct pairs carry no trace, so the Think template renders them right after the header).
+  - name: hal-rock/olmo3-32b-run5-instruct-lr1e-6
+    revision: step00200
+    stage: step00200
+    strip_think: true
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}
+  # Robustness: after an empty think block, as for OLMo 3.1 32B Think (z6ldqzq2).
+  - name: hal-rock/olmo3-32b-run5-instruct-lr1e-6
+    revision: step00200
+    stage: step00200-close
+    close_think: true
+    conditions: [assistant]

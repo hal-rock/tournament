@@ -47,6 +47,7 @@ uv run python features.py entity/tournament/<run_id> [--update-wandb] # utilitie
 uv run python models.py [--update-wandb]                 # bleedthrough across model families (W&B group "models")
 uv run python think.py [--update-wandb]                  # OLMo 3.1 32B Think next to the Instruct
 uv run python sizes.py                                   # OLMo 3 7B vs. 32B by post-training stage
+uv run python retrain.py                                 # ../coinflip DPO retraining checkpoints (runs 5 and 1)
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -303,6 +304,77 @@ every condition.
 - Only the Instruct ladder. `../coinflip` places the 7B's negative turn inside its
   Think SFT (steps 8-10k), which the Instruct SFT starts from; the 7B Think SFT
   checkpoints are not run here.
+
+## DPO retraining checkpoints (../coinflip runs 5 and 1)
+
+`../coinflip` retrains the 32B DPO with AI2's trainer and saves checkpoints along the way
+(its RESULTS.md, "DPO retraining"). Run 1 (Instruct SFT on the Instruct DPO data, LR 1e-6)
+replicates AI2's DPO: its Assistant coinflip change climbs steadily (+0.78 at step 400,
++1.27 at 600). Run 5 trains the Think SFT on the same data with the same schedule.
+Its loss matches run 1's, but its change rises with run 1's only to step 300 (+0.34)
+and then levels off (+0.44, +0.43, +0.38 at steps 400, 500, 600). The one pair type the
+Think SFT fits much faster is safety, and that gap opens over steps 200-300. Those 25 task
+pairs mostly contrast benign with harmful tasks. So the question here: across the 300 tasks,
+and among non-harmful tasks alone, does run 5's bleedthrough keep growing after its
+harm-driven effect has stopped? Or does it plateau with it, or never develop at all?
+
+### Design
+
+- **Checkpoints.** Run 5: step 0 (`allenai/Olmo-3-32B-Think-SFT`) and steps 50, 100, 160,
+  200, 300, 400, 500, 600 (branches of `hal-rock/olmo3-32b-run5-instruct-lr1e-6`). Run 1,
+  as the reference trajectory: step 0 (`allenai/Olmo-3.1-32B-Instruct-SFT`) and steps 200, 300,
+  400, 600 (`hal-rock/olmo3-32b-run1-instruct-lr1e-6`). The two runs share a schedule, so the
+  same step is the same dose.
+- **Same measurement as the model sweep:** the same 300 tasks, 15k pairs in both orders, and
+  no system prompt. One config per checkpoint (`configs/retrain/`, W&B group `retrain`), each
+  on its own 1x H200. Every checkpoint runs on that one GPU type, including both step 0
+  models, which are re-run rather than reused.
+- **Assistant reading.** Run 5's DPO pairs carry no thinking trace. Under the Think template a
+  reply with no trace starts right after the Assistant header, with no `<think>`.
+  `strip_think` reads the choice in that format (`assistant\nI'll choose Task`), and it is the
+  primary reading. The empty-block reading used for the 3.1 Think (`close_think`) is a
+  robustness check. Run 1 uses the Instruct template's ordinary reply, which is
+  token-identical to run 5's primary prompt.
+
+### Pre-registered analysis (written 2026-10-20, before any data)
+
+A_t and C_t are the Assistant and coinflip utilities at step t. "Non-harmful" means the 257
+tasks outside BailBench and the `harmful_request` topic (43 tasks). Measures per checkpoint:
+
+1. **r** = r(A_t, C_t), over all tasks and over non-harmful tasks (**r_benign**).
+2. **r_change**: r(A_t, C_t - C_0), over all and non-harmful tasks. It correlates the coinflip
+   change since the starting SFT with the Assistant utilities, which takes out the SFT's own
+   coinflip structure. The 3.1 Think's coinflip has plenty of that (reliable, SD 0.17,
+   unrelated to its Assistant).
+3. **b**: the slope of C_t - C_0 on standardized A_t over non-harmful tasks. It is in nats of
+   coinflip change per Assistant SD: the amount of Assistant-aligned change, which does not
+   shrink just because the Assistant scale grows during DPO.
+4. **Harm gap** H_t: coinflip mean utility, non-harmful minus harmful (nats). This is the
+   tournament's version of the `../coinflip` contrast (see "Model families").
+
+CIs come from a task bootstrap within origin (2,000 resamples), paired across steps for
+differences. Below, "rises" or "falls" means the paired 95% CI of the step-400 to step-600
+change in run 5 lies above or below 0.
+
+| outcome | criterion (run 5, step 400 → 600) | reading |
+|---|---|---|
+| A: broad keeps growing | r_benign or b rises, and neither falls | the plateau in `../coinflip` is specific to the harm contrast; broader bleedthrough continues |
+| B: plateaus together | neither r_benign nor b rises | the Think SFT's bleedthrough stops across the board, not just for harm |
+| C: never develops | non-harmful r_change is not above 0 (CI includes or is below 0) at steps 400, 500 and 600 | the DPO adds no Assistant-aligned coinflip change outside harm; takes precedence over B |
+
+- **Expected check:** run 5's harm gap H is flat from step 400 to 600 (CI includes 0, or it
+  falls), like the `../coinflip` effect. If it rises instead, the tournament's harm contrast
+  and the 25 coinflip pairs disagree for this run, and I'll report that.
+- **Sensitivity:** run 1's `../coinflip` effect climbs over the same steps. I predict that its
+  r_benign and b rise from step 400 to 600 too (paired CIs above 0). If run 1's don't
+  measurably rise, the design can't tell A from B, and run 5 will be called inconclusive, not B.
+- **Also reported,** without pre-set criteria:
+  - the Think SFT's own bleedthrough (step 0);
+  - the rise over steps 0-300;
+  - runs 5 and 1 side by side at matched steps;
+  - agreement of the `close_think` and `strip_think` readings at each step;
+  - a fixed-Assistant version that correlates every step's coinflip with step 600's A.
+  Anything that doesn't fit A, B or C is reported as what it is.
 
 ## Tasks
 

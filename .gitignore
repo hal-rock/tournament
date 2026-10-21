@@ -4,5 +4,6 @@ outputs/
 wandb/
 artifacts/
 .env
+.pods.tsv
 # upstream task source, only needed for `make_tasks.py extract`
 probing-persona-preferences/

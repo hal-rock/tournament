@@ -58,7 +58,8 @@ def _strip_system(rendered, content):
     return rendered
 
 
-def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format, close_think=False):
+def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format, close_think=False,
+            strip_think=False):
     """The conversation as text, user content still ending in SENTINEL, plus the
     Assistant header if has_reply."""
     if turn_format is not None:
@@ -88,11 +89,18 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
         if not rendered.endswith("<think>"):
             raise ValueError("close_think: the generation prompt does not end in <think>")
         rendered += "</think>\n"
+    if has_reply and strip_think:
+        # Or drop the opening "<think>", so the prefill follows the Assistant header directly. This
+        # is how the Think template renders a reply that carries no trace: the format ../coinflip's
+        # run 5 trained on (Instruct DPO pairs under the Think SFT's template).
+        if close_think or not rendered.endswith("<think>"):
+            raise ValueError("strip_think: the generation prompt does not end in <think> (or close_think is set)")
+        rendered = rendered.removesuffix("<think>")
     return rendered
 
 
 def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
-                 turn_format=None, close_think=False):
+                 turn_format=None, close_think=False, strip_think=False):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
@@ -102,12 +110,13 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     the chat template (see _render).
     close_think: close a Think-only template's opening "<think>" empty before the
     prefill; without it the prefill is the first words of the reasoning.
+    strip_think: drop that "<think>" instead, so the reply has no think block at all.
     """
     spec = CONDITIONS[condition]
     body = spec["body"].format(first=first.strip(), second=second.strip())
     has_reply = spec["prefill"] is not None
     rendered = _render([{"role": "user", "content": body + SENTINEL}], template_tokenizer, has_reply,
-                       system_prompt, turn_format, close_think)
+                       system_prompt, turn_format, close_think, strip_think)
 
     if not has_reply:
         # Cut inside the user turn, so the model continues the Human's message.

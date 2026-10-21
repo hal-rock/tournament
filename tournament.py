@@ -106,11 +106,12 @@ def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rn
 
 
 def phrasing_probe(model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, probe_cfg, rng,
-                   turn_format=None, close_think=False):
+                   turn_format=None, close_think=False, strip_think=False):
     """Sample the start of the Assistant's reply with no prefill, for a few random pairs."""
     chosen = rng.sample(pairs, min(probe_cfg["n_pairs"], len(pairs)))
     prompts = [build_prompt("assistant", tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer,
-                            system_prompt, prefill=False, turn_format=turn_format, close_think=close_think)
+                            system_prompt, prefill=False, turn_format=turn_format, close_think=close_think,
+                            strip_think=strip_think)
                for a, b in chosen]
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     enc = tokenizer(prompts, add_special_tokens=False, padding=True, padding_side="left",
@@ -138,12 +139,12 @@ def select_pairs(n_tasks, max_pairs=None, seed=0):
     return sorted(random.Random(f"pairs/{seed}").sample(pairs, max_pairs))
 
 
-def load_model(name, device, dtype):
+def load_model(name, device, dtype, revision=None):
     """On GPU, spread the model over all visible GPUs (one GPU if it fits there), and
     refuse to run with layers offloaded to CPU or disk: that is orders of magnitude slower."""
     if device != "cuda":
-        return AutoModelForCausalLM.from_pretrained(name, dtype=dtype, device_map=device).eval()
-    model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, device_map="auto").eval()
+        return AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map=device).eval()
+    model = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map="auto").eval()
     placement = {str(t.device) for t in itertools.chain(model.parameters(), model.buffers())}
     if placement & {"cpu", "meta"}:
         raise SystemExit(f"{name} does not fit on the visible GPUs (devices: {sorted(placement)})")
@@ -181,15 +182,19 @@ def main():
     rows, examples = [], {}
     for m in cfg["models"]:
         stage = m["stage"]
-        print(f"Loading {m['name']} on {device} ({dtype})", flush=True)
-        tokenizer = AutoTokenizer.from_pretrained(m["name"])
-        template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]))
-        model = load_model(m["name"], device, dtype)
+        # revision: an HF branch, e.g. an intermediate checkpoint of ../coinflip's DPO retraining.
+        revision = m.get("revision")
+        print(f"Loading {m['name']}{'@' + revision if revision else ''} on {device} ({dtype})", flush=True)
+        tokenizer = AutoTokenizer.from_pretrained(m["name"], revision=revision)
+        template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]),
+                                                           revision=None if "chat_template_from" in m else revision)
+        model = load_model(m["name"], device, dtype, revision)
 
         for condition in m["conditions"]:
             outcome_ids = tuple(outcome_token_ids(condition, tokenizer))
             items = [(build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
-                                   turn_format=m.get("turn_format"), close_think=m.get("close_think", False)),
+                                   turn_format=m.get("turn_format"), close_think=m.get("close_think", False),
+                                   strip_think=m.get("strip_think", False)),
                       outcome_ids) for a, b in ordered]
             examples[f"{stage}/{condition}"] = items[0][0]
             print(f"\n[{stage}/{condition}] example prompt:\n{items[0][0]}\n", flush=True)
@@ -211,7 +216,7 @@ def main():
             new_rows = []
             for (a, b), s in zip(ordered, scored):
                 new_rows.append(dict(
-                    model=m["name"], stage=stage, condition=condition,
+                    model=m["name"] + (f"@{revision}" if revision else ""), stage=stage, condition=condition,
                     first=tasks[a]["id"], second=tasks[b]["id"],
                     logp_first=s["logp_first"], logp_second=s["logp_second"],
                     log_odds=s["logp_first"] - s["logp_second"],
@@ -228,7 +233,7 @@ def main():
         if m.get("phrasing_probe"):
             probe_rows = [[stage] + r for r in phrasing_probe(
                 model, tokenizer, template_tokenizer, tasks, pairs, system_prompt, m["phrasing_probe"], rng,
-                m.get("turn_format"), m.get("close_think", False))]
+                m.get("turn_format"), m.get("close_think", False), m.get("strip_think", False))]
             run.log({f"phrasing_probe/{stage}": wandb.Table(
                 columns=["stage", "first", "second", "sample", "completion"], data=probe_rows)})
 
