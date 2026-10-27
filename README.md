@@ -11,6 +11,18 @@ them:
 Each gives pairwise comparisons, from which we fit per-task utilities
 (Bradley-Terry).
 
+This builds on Gilg, Beckmann, Paleka and Butlin, [Probing Persona-Dependent
+Preferences in Language Models](https://arxiv.org/abs/2605.13339) (2026;
+[code](https://github.com/oscar-gilg/probing-persona-preferences)). Its 6,000-task
+pool supplies every task here: the 300 tasks are drawn from it with its source
+quotas, and the origin and topic analyses use its Claude Sonnet 4.5 topic labels.
+The Assistant condition follows the paper's measurement, itself after Mazeika et
+al. (2025): the model picks which of two tasks, labelled Task A and Task B, to
+complete, and per-task utilities are fit from the pairwise choices. We read the
+choice from the log-probs of a prefilled answer rather than sampling it, and fit
+Bradley-Terry rather than Thurstonian utilities. The coinflip condition is our own
+addition.
+
 ## Design
 
 - Prompts (`prompts.py`) share the opening sentence and the "Task A / Task B"
@@ -484,9 +496,12 @@ Findings 2-6 were not pre-registered. Caveats:
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
-Preferences in Language Models](https://github.com/oscar-gilg/probing-persona-preferences)
-(upstream commit `11869a5`): Alpaca, competition MATH, WildChat, BailBench and
-STRESS-TEST, with topic labels by Claude Sonnet 4.5.
+Preferences in Language Models](https://arxiv.org/abs/2605.13339)
+([code](https://github.com/oscar-gilg/probing-persona-preferences), upstream commit
+`11869a5`): Alpaca, competition MATH, WildChat, BailBench and STRESS-TEST, with topic
+labels by Claude Sonnet 4.5. The task texts keep their source licenses (WildChat
+ODC-BY 1.0, Alpaca CC BY-NC 4.0, MATH MIT, BailBench MIT, STRESS-TEST Apache 2.0); the
+MIT license in `LICENSE` covers this repo's code.
 
 - `data/canonical_6000.jsonl`: all 6,000 tasks with origin, topic and source metadata.
 - `data/tasks_n100_max500_seed0.jsonl`: first working subsample. 100 tasks of
