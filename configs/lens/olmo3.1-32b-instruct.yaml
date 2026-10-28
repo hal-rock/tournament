@@ -1,0 +1,20 @@
+# Logit lens over the tournament (lens.py): OLMo 3.1 32B Instruct, both conditions, no system prompt.
+# The models-group pair set (15,000 of the 44,850 pairs, both orders): 30,000 prompts per condition,
+# the same prompts as run d8ysbybo's Instruct stage restricted to those pairs, whose output log-probs
+# depth L should reproduce. One 80GB GPU (A100, as d8ysbybo), ~150 GB disk.
+wandb_project: tournament
+group: lens
+run_name: lens-olmo3.1-32b-instruct
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+max_pairs: 15000
+batch_size: 32
+progress_every: 2000
+# As configs/olmo3-32b-stages-n300.yaml.
+batching_check: {n_prompts: 16, tolerance: 1.0}
+models:
+  - name: allenai/Olmo-3.1-32B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]

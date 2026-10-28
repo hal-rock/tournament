@@ -1,0 +1,14 @@
+# Local CPU smoke test of lens.py: OLMo 2 1B Instruct on 10 tasks. Plumbing only; don't read numbers.
+wandb_project: tournament
+run_name: lens-local-olmo2-1b-n10
+tasks_file: data/tasks_n10_max500_seed0.jsonl
+seed: 0
+system_prompt: none
+max_pairs: 10
+batch_size: 4
+progress_every: 8
+batching_check: {n_prompts: 6, tolerance: 0.01}
+models:
+  - name: allenai/OLMo-2-0425-1B-Instruct
+    stage: instruct
+    conditions: [assistant, coinflip]

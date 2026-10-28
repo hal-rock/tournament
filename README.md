@@ -493,6 +493,61 @@ Findings 2-6 were not pre-registered. Caveats:
 - Run 1 is measured here only to step 600. Its final released model has r = 0.65 (`d8ysbybo`),
   which fits continued growth.
 
+## Logit lens: OLMo 3.1 32B Instruct across depth
+
+How the coinflip's Assistant-like preferences build up over the network. Both
+conditions are read at every depth with the logit lens, as in `../coinflip`'s
+`logit_lens.py`: the residual stream at the last prompt position (after "I'll choose
+Task" or "it came up") goes through the final norm and the unembedding. Depth d is
+the stream after d decoder blocks: 0 is the embeddings and L = 64 is the model's
+output. `../coinflip` found OLMo's lens puts most of its mass on " heads"/" tails"
+from about depth 30-35.
+
+### Design
+
+- `lens.py`, config `configs/lens/olmo3.1-32b-instruct.yaml`: the final Instruct model
+  only, both conditions, no system prompt, the models-group pairs (15,000 of 44,850,
+  both orders): the same 60,000 prompts as `d8ysbybo`'s Instruct stage restricted to
+  those pairs. Per prompt and depth it saves log P of the two outcome tokens, the
+  lens's top token and the entropy.
+- `lens_analysis.py` fits utilities at each depth from the lens log-odds, exactly as
+  `analyze.py` does from the output's, and compares the coinflip utilities at depth d
+  with two Assistant scales:
+  - (a) the final Assistant utilities (the model's output), and
+  - (b) the Assistant utilities read by the lens at the same depth d.
+
+### Pre-registered before running (2026-10-28)
+
+- **Readability rule** (as `../coinflip`): a depth is readable for a condition if
+  the median P(first) + P(second) over its prompts is at least 0.10. Statistics at
+  unreadable depths are plotted faded and not interpreted. (a) needs the coinflip
+  readable at d; (b) needs both conditions readable at d.
+- **Validation gate.** At depth L the lens must match the model's output per prompt
+  (0.5 nats, checked by `lens.py`). The output log-odds must reproduce `d8ysbybo`'s
+  Instruct rows for the same prompts (median |difference| at most 0.05 nats; same
+  GPU type, A100), and the depth-L utilities must correlate at least 0.999 with
+  `d8ysbybo`'s on these pairs, in both conditions. If either fails, nothing is
+  interpreted until the cause is found.
+- **Measures per depth:** Pearson r between coinflip and Assistant utilities with a
+  95% task-bootstrap CI (both versions, all tasks and benign only), the slope of
+  coinflip on Assistant utilities, the coinflip utilities' SD and split-half
+  reliability, and the median outcome mass per condition.
+
+Questions, all descriptive, with no predicted direction:
+1. **Onset.** The shallowest readable depth from which r (a) has a CI above zero at
+   every deeper readable depth. If it is the first readable depth, the lens only
+   bounds when the correlation arises.
+2. **Peak vs output.** The largest r (a) at a readable depth against r at depth L,
+   paired over task bootstraps. r counts as falling off in the last blocks only if
+   the paired difference (depth minus L) has a CI above zero at 3 or more
+   consecutive depths. The same for the coinflip utilities' SD (`../coinflip`'s
+   effect peaked at depth 56 at twice its output size).
+3. **(a) vs (b).** Does the coinflip at depth d track the same-depth Assistant
+   utilities more or less than the final ones? Paired bootstrap difference
+   r (b) - r (a) per readable depth.
+4. **Assistant convergence.** r between the Assistant utilities at depth d and at L:
+   where does the Assistant's own ranking settle, relative to the coinflip's onset?
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
