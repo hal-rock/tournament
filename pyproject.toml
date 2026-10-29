@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.15.0",
     "matplotlib>=3.10",
+    "mats-kit",
     "numpy>=2.0",
     "pyyaml>=6.0.3",
     "torch>=2.14.0",
@@ -24,3 +25,6 @@ gpu = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+mats-kit = { path = "../mats-kit", editable = true }

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -1088,6 +1088,39 @@ wheels = [
 ]
 
 [[package]]
+name = "mats-kit"
+version = "0.1.0"
+source = { editable = "../mats-kit" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", marker = "extra == 'hf'", specifier = ">=1.15" },
+    { name = "anthropic", marker = "extra == 'claude'", specifier = ">=1.11" },
+    { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.10" },
+    { name = "numpy", specifier = ">=2" },
+    { name = "pydantic", marker = "extra == 'claude'", specifier = ">=2" },
+    { name = "safetensors", marker = "extra == 'hf'", specifier = ">=0.5" },
+    { name = "torch", marker = "extra == 'hf'", specifier = ">=2.4" },
+    { name = "transformers", marker = "extra == 'hf'", specifier = ">=5.17" },
+]
+provides-extras = ["hf", "claude", "plot"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "accelerate", specifier = ">=1.15" },
+    { name = "anthropic", specifier = ">=1.11" },
+    { name = "matplotlib", specifier = ">=3.10" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "safetensors", specifier = ">=0.5" },
+    { name = "torch", specifier = ">=2.14" },
+    { name = "transformers", specifier = ">=5.17" },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2156,6 +2189,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "matplotlib" },
+    { name = "mats-kit" },
     { name = "numpy" },
     { name = "pyyaml" },
     { name = "torch" },
@@ -2176,6 +2210,7 @@ gpu = [
 requires-dist = [
     { name = "accelerate", specifier = ">=1.15.0" },
     { name = "matplotlib", specifier = ">=3.10" },
+    { name = "mats-kit", editable = "../mats-kit" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "torch", specifier = ">=2.14.0" },
