@@ -60,6 +60,8 @@ uv run python models.py [--update-wandb]                 # bleedthrough across m
 uv run python think.py [--update-wandb]                  # OLMo 3.1 32B Think next to the Instruct
 uv run python sizes.py                                   # OLMo 3 7B vs. 32B by post-training stage
 uv run python retrain.py                                 # ../coinflip DPO retraining checkpoints (runs 5 and 1)
+uv run python lens.py configs/lens/olmo3.1-32b-instruct.yaml   # logit lens at every depth, 80GB GPU
+uv run python lens_analysis.py outputs/lens/<run_id>     # utilities by depth, figures/lens_*.{png,gif,mp4}
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -547,6 +549,105 @@ Questions, all descriptive, with no predicted direction:
    r (b) - r (a) per readable depth.
 4. **Assistant convergence.** r between the Assistant utilities at depth d and at L:
    where does the Assistant's own ranking settle, relative to the coinflip's onset?
+
+### Results (2026-10-28)
+
+Run `9kbknjwm` (1x A100 SXM, 38 min of scoring, $1.32). Per-depth table:
+`outputs/lens/9kbknjwm/analysis/per_depth.csv` (not in git; the raw `.npz` files are in
+the W&B run's files).
+
+![logit lens scatter](figures/lens_scatter.gif)
+
+`figures/lens_scatter.gif` (and `.mp4`) runs from depth 30, where the coinflip
+first becomes readable, to the output. Left (a): coinflip utilities at depth d against
+the final Assistant utilities. Right (b): against the Assistant utilities at the same
+depth (faded where the Assistant condition is unreadable). Axes are fixed across
+depths, so the spread shows how big the utilities are. Below the scatters, r by depth.
+Stills: `figures/lens_scatter_depth30.png`, `figures/lens_scatter_depth64.png`.
+Summary: `figures/lens_depth.png`.
+
+![lens by depth](figures/lens_depth.png)
+
+**Validation passes.** At depth 64 the lens equals the model's output exactly (0 nats
+for every prompt). The output log-odds reproduce `d8ysbybo` (median |difference|
+1e-7 nats; max 0.75 in the Assistant condition and 0.38 in the coinflip, bf16 rounding
+by batch composition in a few prompts). Depth-64 utilities correlate 1.0000
+(Assistant) and 0.9998 (coinflip) with `d8ysbybo`'s on these pairs.
+
+**Readability.** The coinflip is readable from depth 30 (median mass 0.16, 0.97 by
+depth 35), as in `../coinflip`. The Assistant's " A"/" B" become readable later, from
+depth 34 (0.86 by depth 40).
+
+| depth | r (a) [95% CI] | r (b) | r (a), benign | coinflip SD | slope (a) |
+|---|---|---|---|---|---|
+| 30 | 0.44 [0.30, 0.56] | (0.37) | 0.17 | 0.13 | 0.010 |
+| 36 | 0.55 [0.42, 0.65] | 0.44 | 0.32 | 0.25 | 0.023 |
+| 44 | 0.45 [0.31, 0.56] | 0.38 | 0.20 | 0.29 | 0.022 |
+| 52 | 0.59 [0.49, 0.67] | 0.55 | 0.39 | 0.48 | 0.049 |
+| 56 | 0.64 [0.56, 0.72] | 0.61 | 0.46 | **0.75** | 0.083 |
+| 60 | **0.65** [0.57, 0.72] | 0.63 | 0.47 | 0.53 | 0.059 |
+| 64 (output) | 0.63 [0.54, 0.71] | 0.63 | 0.40 | 0.38 | 0.041 |
+
+Answers to the pre-registered questions:
+
+1. **Onset: the correlation is there as soon as the coinflip is readable.** At depth
+   30, r (a) = 0.44 [0.30, 0.56], and its CI stays above zero at every deeper depth.
+   So the lens only bounds the onset. About two thirds of the output's correlation is
+   in place by the first readable depth, and r reaches 0.55 by depth 35.
+2. **Peak vs output: the size falls off at the end, the correlation doesn't.**
+   - r (a) peaks at depth 60 (0.65) against 0.63 at the output. No depth's paired
+     difference has a CI above zero, so r does not fall off in the last blocks.
+   - The coinflip utilities' SD does: it doubles from depth 48 to 56 (0.30 to 0.75),
+     then halves to 0.38 by the output. The paired CI is above the output's at
+     depths 52-63 (12 consecutive), the same late damping as `../coinflip`'s effect
+     (peak at depth 56, twice the output). The last 8 blocks shrink the coinflip's
+     preferences without making them less Assistant-like.
+3. **(a) vs (b): the coinflip tracks the final Assistant ranking slightly better than
+   the same-depth one,** at every depth where both are readable (34-63; the paired
+   CI of r (b) - r (a) is below zero at each). The gap is 0.01-0.10, largest at
+   depths 35-39, and gone at the output. The same-depth Assistant utilities
+   correlate 0.94-0.99 with the final ones over this range, so (b) is roughly
+   (a) with some lens noise added in x. Nothing here suggests the coinflip follows
+   an intermediate Assistant state that differs from the final one.
+4. **The Assistant's ranking settles early, before it is readable.** The Assistant
+   utilities at depth d correlate at least 0.9 with the final ones from depth 25
+   on, before the lens puts 10% mass on " A"/" B" (depth 34). The A-vs-B logit
+   difference already orders tasks like the output while the lens's top tokens are
+   still something else. That's under the readability threshold, so treat it as a
+   pointer, not a finding.
+
+Exploratory, not pre-registered:
+
+- **Harm first, then everything else.** Within origin, against the final Assistant
+  utilities:
+
+  | depth | MATH | Alpaca | WildChat | STRESS-TEST | BailBench |
+  |---|---|---|---|---|---|
+  | 32 | -0.06 | 0.10 | 0.10 | 0.51 | 0.70 |
+  | 36 | 0.26 | 0.36 | 0.21 | 0.69 | 0.69 |
+  | 52 | 0.45 | 0.49 | 0.41 | 0.75 | 0.71 |
+  | 56 | 0.58 | 0.56 | 0.50 | 0.75 | 0.75 |
+  | 64 | 0.39 | 0.47 | 0.48 | 0.75 | 0.76 |
+
+  Within the harm-related sources the coinflip tracks the Assistant from the first
+  readable depth. Within the benign sources it starts near zero and builds up over
+  depths 36-56. This is the benign-only r rising from 0.17 to 0.47. The last blocks
+  then take some of it back in MATH (0.58 to 0.39) but not in the harm sources.
+- **The late bulge is mostly harm.** BailBench's mean coinflip utility goes from
+  -0.25 (depth 44) to -1.02 (depth 56) and back to -0.53 at the output. STRESS-TEST
+  goes from +0.16 to +0.52 and back to +0.21; it sits above zero throughout,
+  despite middling Assistant utilities. In `../coinflip`'s terms this is the
+  harmful-vs-benign effect peaking at depth 56.
+- Below depth 30 the lens's r swings between -0.6 and +0.5 (`figures/lens_depth.png`,
+  faded). The outcome mass there is under 1%, so these are not interpreted, as
+  pre-registered.
+
+Caveats:
+- One model, one template, no system prompt; the logit lens assumes intermediate
+  residuals are already in the output basis, which is least true just above the
+  readability threshold.
+- Utilities are log-odds, and lens log-odds grow with depth as the lens sharpens. So
+  SDs and slopes compare across depths only roughly; r doesn't depend on scale.
 
 ## Tasks
 
