@@ -162,3 +162,116 @@ def test_design_file():
     assert len(d["partners"]) == 4 and len(d["standard"]["pref"]) == len(d["standard"]["dispref"]) == 5
     assert len({tuple(p) for p in d["benign_pairs"]}) == len(d["benign_pairs"])
     json.dumps(d)
+
+
+def test_ridge_weights_reproduce_predictions_and_recover_a_planted_signal():
+    from probe_fit import Gram, cv_predict, pearson
+    rng = np.random.default_rng(0)
+    n, d = 120, 400
+    # low-rank activations (10 latent factors) with uneven per-dimension scales and offsets; y reads factor 0
+    F = rng.normal(size=(n, 10))
+    X = (F @ rng.normal(size=(10, d)) + rng.normal(0, 1, (n, d))) * rng.uniform(0.1, 30, d) + rng.normal(0, 50, d)
+    y = F[:, 0] + rng.normal(0, 0.3, n)
+    gram = Gram(X)
+    m = gram.fit(np.arange(100), y[:100])
+    w, b = m.weights(1.0)
+    np.testing.assert_allclose(X[100:] @ w + b, m.predict(np.arange(100, n), [1.0])[:, 0], rtol=1e-8, atol=1e-8)
+    pred, _ = cv_predict(gram, y, np.arange(n))
+    assert pearson(pred, y) > 0.8
+    null, _ = cv_predict(gram, rng.permutation(y), np.arange(n))
+    assert abs(pearson(null, y)) < 0.4
+
+
+def test_fit_one_on_synthetic_acts(tmp_path):
+    """End to end on fake activations whose layer-1 slot readouts carry the DPO utility: the fit finds it there,
+    not at layer 0, and the benign probe separates harmful tasks (which have low utility)."""
+    import csv
+    from probe_acts import to_bits
+    from probe_fit import Data, fit_one
+    design = load_design()
+    task_ids = list(all_tasks(design))
+    rows = {r["id"]: r for r in csv.DictReader(open("outputs/d8ysbybo/analysis/utilities.csv"))} \
+        if Path("outputs/d8ysbybo/analysis/utilities.csv").exists() else None
+    if rows is None:
+        pytest.skip("needs outputs/d8ysbybo/analysis/utilities.csv")
+    rng = np.random.default_rng(1)
+    u = np.array([float(rows[t]["dpo/assistant"]) if t in rows else (5.0 if "pref_" in t[:9] else -15.0)
+                  for t in task_ids])
+    n, L, D = len(task_ids), 2, 32
+    direction = rng.normal(size=D)
+    base = rng.normal(size=(n, L, D))
+    base[:, 1] += 0.3 * u[:, None] * direction
+    slotted = np.stack([base, base + rng.normal(0, 0.3, size=base.shape)], 1)
+    acts = tmp_path / "acts"
+    acts.mkdir()
+    for name, arr in dict(single_eot=base, single_last=base, coinflip_label_b=base, assistant_task=slotted,
+                          coinflip_task=slotted).items():
+        np.save(acts / f"{name}.npy", to_bits(torch.tensor(arr, dtype=torch.float32)))
+    (acts / "tasks.json").write_text(json.dumps(task_ids))
+    data = Data(acts)
+    assert len(data.idx) == 300 and data.harm.sum() == 43
+    good, *_ = fit_one(data, "assistant_task", 1, "dpo", "benign", n_null=1)
+    bad, *_ = fit_one(data, "assistant_task", 0, "dpo", "all", n_null=1)
+    assert good["r_cv"] > 0.9 and abs(bad["r_cv"]) < 0.3
+    assert good["harm_auroc"] > 0.9 and good["std_acc"] == 1.0
+
+
+def test_swap_arms_set_the_other_orders_projections(tok, tiny, monkeypatch):
+    """After a single-block swap arm, each slot's mean projection at that block equals the other prompt's."""
+    from matskit import acts, models
+    import probe_tests as pt
+    model, _ = models.load(tiny, device_map="cpu", dtype="float32", check=False)
+    monkeypatch.setattr(pt, "SWAP_BLOCKS", [1, 2])
+    dirs = pt.load_directions("nonexistent.npz", models.n_layers(model), 64)
+    _, _, hp, tp = make_test_pairs(tok, "coinflip", which="standard")[0]
+    _, h_hp = pt.baseline(model, hp, [1, 2])
+    _, h_tp = pt.baseline(model, tp, [1, 2])
+    arms = pt.swap_arms(hp, tp, h_hp, h_tp, {"rand0": dirs["rand0"]}, [2])
+    (label, add, clamp), = arms
+    assert label == dict(arm="swap", direction="rand0", blocks="2") and clamp == {}
+    with acts.steer_tokens(model, add, at="post"):
+        after = acts.residuals(model, torch.tensor([hp.ids]), layers=[2], at="post")[2][0]
+    u = dirs["rand0"][2]
+    for s in ("task_a", "task_b"):
+        m_hp = (after @ u)[torch.tensor([x == s for x in hp.seg])].mean()
+        m_tp = (h_tp[2] @ u)[torch.tensor([x == s for x in tp.seg])].mean()
+        torch.testing.assert_close(m_hp, m_tp, rtol=1e-4, atol=1e-4)
+    # other directions' components at the task tokens, and every other token, are untouched
+    keep = torch.tensor([x not in ("task_a", "task_b") for x in hp.seg])
+    torch.testing.assert_close(after[keep], h_hp[2][keep], rtol=1e-5, atol=1e-5)
+    # "together": the slot means equal the other prompt's at every swap block (no stacking), via run_arms
+    (label, add, clamp), = pt.swap_arms(hp, tp, h_hp, h_tp, {"rand0": dirs["rand0"]}, ["together"])
+    assert add == {} and sorted(clamp) == [1, 2]
+    pos = pt.task_positions(hp)
+    from matskit import acts as A
+    with A.clamp(model, {b: clamp[b][0] for b in clamp}, {b: clamp[b][1] for b in clamp}, at="post", positions=pos):
+        both = A.residuals(model, torch.tensor([hp.ids]), layers=[1, 2], at="post")
+    for b in (1, 2):
+        u = dirs["rand0"][b]
+        for s in ("task_a", "task_b"):
+            m_hp = (both[b][0] @ u)[torch.tensor([x == s for x in hp.seg])].mean()
+            m_tp = (h_tp[b] @ u)[torch.tensor([x == s for x in tp.seg])].mean()
+            torch.testing.assert_close(m_hp, m_tp, rtol=1e-4, atol=1e-4)
+    out_ids = outcome_ids(tok, "coinflip")
+    mixed, _ = pt.run_arms(model, hp, arms + [(label, add, clamp)], out_ids, batch_size=4)
+    alone, _ = pt.run_arms(model, hp, [(label, add, clamp)], out_ids, batch_size=2)
+    np.testing.assert_allclose(mixed[-1], alone[0], rtol=1e-4, atol=1e-4)
+
+
+def test_run_arms_batches_match_single_rows(tok, tiny, monkeypatch):
+    """A steered row in a shared batch gives the same L as that arm alone, and the unsteered row the baseline."""
+    from matskit import models
+    import probe_tests as pt
+    model, _ = models.load(tiny, device_map="cpu", dtype="float32", check=False)
+    monkeypatch.setattr(pt, "STEER_BLOCKS", [1, 2, 3])
+    dirs = pt.load_directions("nonexistent.npz", models.n_layers(model), 64)
+    _, _, hp, _ = make_test_pairs(tok, "choice", which="standard")[0]
+    out_ids = outcome_ids(tok, "choice")
+    norms = {b: 10.0 for b in (1, 2, 3)}
+    arms = pt.steer_arms(hp, {"rand0": dirs["rand0"]}, norms, [0.5, 1.0], [1, "together"])
+    Ls, bases = pt.run_arms(model, hp, arms, out_ids, batch_size=3)
+    alone = [pt.run_arms(model, hp, [arm], out_ids, batch_size=2)[0][0] for arm in arms]
+    np.testing.assert_allclose(Ls, alone, rtol=1e-4, atol=1e-4)
+    logits, _ = pt.baseline(model, hp, [1])
+    np.testing.assert_allclose(bases, pt.logit_diff(logits, out_ids).item(), rtol=1e-4, atol=1e-4)
+    assert len(set(np.round(Ls, 5))) == len(Ls)  # every arm moved L differently

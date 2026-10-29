@@ -649,6 +649,205 @@ Caveats:
 - Utilities are log-odds, and lens log-odds grow with depth as the lens sharpens. So
   SDs and slopes compare across depths only roughly; r doesn't depend on scale.
 
+## Preference probe: OLMo 3.1 32B SFT and DPO
+
+Does the coinflip borrow the Assistant's preference mechanistically? `../coinflip`'s circuit work
+(its RESULTS.md, "Circuit, stage 1" onwards) found that DPO's weight change behind the coinflip effect
+sits in blocks 8-23, diffuse across thousands of neurons, upstream of "finder" heads (L20H39, L21H2,
+L22H3) that attend from the last token to the harmful task. Two readings of what that change does:
+
+- **(a)** the SFT already represents each task's value at the coinflip prompt's task tokens, and DPO
+  makes it readable to the finder heads;
+- **(b)** in a Human-turn prompt the SFT doesn't represent the task's value at all.
+
+A utility probe as in Gilg et al. separates them, and is also the cleanest test of preference vs harm:
+every dispreferred task in `../coinflip`'s 25 standard prompts is extremely harmful. Plan:
+`PLAN_preference_probe.md`. Exploratory (no pre-registration), with what each test would show written
+down below before the data.
+
+### Design
+
+- **Models:** `allenai/Olmo-3.1-32B-Instruct-SFT` and `-DPO`, the checkpoints of the circuit work, bf16
+  (their fp32 weights are bf16 values upcast), no system prompt, one 1x H200 pod each.
+- **Layers:** "block b" is block b's *output* (matskit `at="post"`, HF `hidden_states[b+1]`), b = 0..63,
+  as in `../coinflip/circuits`.
+- **Activations** (`probe_acts.py`): every prompt in one forward pass of its own (no padding), for the 300
+  tournament tasks plus `../coinflip`'s 10 standard tasks (`probe_prompts.py`):
+  - the task alone as the user message, read at `<|im_end|>` (the paper's selector) and at the last token;
+  - the tournament's Assistant and coinflip prompts, the task against 4 fixed partners
+    (`configs/probe/design.json`: one non-harmful task per source near the median DPO Assistant utility),
+    in both slots, read at the token closing the task's text (".\n\n", "?\n\n", a lone "\n\n", or in the
+    Assistant prompt's slot B the token before `<|im_end|>`); in the coinflip prompt also at " tails" when
+    the task is in slot A. Readouts are averaged over the partners.
+- **Fit** (`probe_fit.py`): ridge regression of the DPO model's Assistant utilities (`d8ysbybo`; the
+  SFT's as a check) on each site's residual at each block. Nested 5-fold CV (alpha by inner CV);
+  features standardized over the fit's rows, without labels, so the Gram matrix can be reused.
+  Controls: shuffled utilities (3 permutations), log length partialled out of both sides, leave one
+  source out, and a refit on the 257 non-harmful tasks only.
+- **Readout** (`probe_readout.py`): probes applied to the other site's and the other model's
+  activations.
+- **Interventions** (`probe_tests.py`), on `../coinflip`'s 25 standard pairs (token-identical to
+  `circuits/pairs.py`, checked in `tests/test_probe.py`) and 300 non-harmful pairs whose DPO Assistant
+  utilities differ by at least 2, each in HP and TP order, in the coinflip prompt and `../coinflip`'s
+  direct-choice prompt ("I choose Task"):
+  - *steering:* +c·s·u on every token of task A and -c·s·u on task B's at block b (u the probe's unit
+    direction at b, s the mean residual norm there), b = 15..23 singly and all together;
+  - *swap:* shift each task's tokens along u so their mean projection becomes what the other order's
+    prompt has in that slot. If the prompt depended on the tasks only through u, HP would become TP:
+    share = ((L_TP' - L_TP) - (L_HP' - L_HP)) / 4 / effect.
+  - Controls: 3 random directions. Each prompt's arms share a batch of identical rows with one
+    unsteered row, so dL is within-batch.
+
+### What each result would mean (written 2026-10-29, before the data)
+
+1. **Probe quality.** The paper got held-out r ≈ 0.83-0.87 with 4,000 tasks. With 300, cross-validated
+   r well above the shuffled null and above ~0.7 at some block means the probe is usable; well under
+   0.7 means more utilities (ask Hal first).
+2. **Harm vs preference.** If the non-harmful-only probe ranks the 43 harmful tasks low (AUROC well
+   above 0.5) and ranks the 25 standard pairs right, the direction is a preference that also covers
+   harm. If harm is separated only when harmful tasks are in training, the probe is mostly a harm
+   detector.
+3. **(a) vs (b).** If the SFT's coinflip task tokens carry the utility (a probe fit there, or the
+   Assistant-prompt probe applied there) about as well as DPO's, that's (a); much less is (b). Each
+   model's probe is applied to the other's activations before reading a difference as a change in
+   what's represented.
+4. **Causality.** If the coinflip borrows the Assistant's preference through this direction, steering
+   moves the choice in both models and the coinflip mostly in DPO, well beyond random directions, and
+   the swap carries a sizable share of DPO's coinflip effect. Steering that moves the choice but not
+   the coinflip, or a swap share near the random directions', means the coinflip reads the tasks
+   some other way.
+
+### Results (2026-10-29)
+
+Two 1x H200 pods (SFT and DPO), $10.19 in all. Extraction took 5-10 min per model, and the
+interventions 25-28 min. Checks:
+- **Prompts:** the extraction prompts' own log-odds reproduce the tournament's utilities (task
+  mean over partners vs `d8ysbybo`: r 0.994/0.996 for the Assistant prompt, 0.935/0.956 for the
+  coinflip, SFT/DPO).
+- **Batch drift:** under the interventions' batching, the unsteered row is a median of 0-0.06 nats
+  (max 0.25) from the unbatched forward. Every dL is taken within its batch.
+
+Numbers are in `outputs/probe/` (not in git): `{sft,dpo}/fit_summary.json`, `readout.json`,
+`effects.json`.
+
+**1. The probes fit well, in both models.**
+
+![probe r by layer](figures/probe_r_by_layer.png)
+
+- **Fit:** the DPO Assistant utilities are read at cross-validated r = 0.93-0.96 from block ~18 on,
+  at every site, with the same curves in SFT and DPO. The best blocks:
+  - task alone, `<|im_end|>`: 0.93/0.94 (block 19);
+  - pairwise Assistant prompt: 0.93/0.94;
+  - coinflip task tokens: 0.94/0.95;
+  - coinflip " tails": 0.95/0.96.
+- **Controls:** the shuffled-utility null peaks at 0.13. Partialling out log length changes r by
+  under 0.005. Refit on the SFT's own utilities, r is 0.93-0.96.
+- **Between vs within sources:** most of the utility variance (67%) lies between the five task
+  sources. Random-fold predictions still rank tasks within each source (r 0.67 Alpaca, 0.76 MATH,
+  0.73-0.83 STRESS-TEST, 0.45-0.58 WildChat, 0.9 BailBench). But a probe that never saw a source
+  misplaces that source's level: leave-one-source-out pooled r is only 0.20-0.34. With 300 tasks
+  this is much weaker than the paper's held-out-topic r ≈ 0.85 with 4,000.
+- **Two probe positions:** the single-task (`<|im_end|>`) probe and the pairwise probe are different
+  vectors (cosine 0.5 at block 19, falling to 0.1 by block 63), but they predict each other's
+  sites (cross-fitted r 0.91 and 0.93 at block 19).
+
+**2. Preference, not just harm.**
+
+![harm vs benign](figures/probe_harm_vs_benign.png)
+
+The probe fit on the 257 non-harmful tasks only:
+- predicts held-out non-harmful tasks at r 0.79-0.88;
+- ranks the 43 harmful tasks below them (AUROC 0.86-0.91 at blocks 15-40, about 2 SD lower on
+  average);
+- ranks all 25 standard pairs correctly from block 11 on.
+
+So this is a preference direction that also covers harm. It's not a harm detector: harm separates
+without harmful tasks in training. Its direction is at cosine ~0.65-0.70 to the all-task probe's.
+
+**3. Reading (a): the SFT already represents the tasks' values at the coinflip's task tokens.**
+
+![coinflip readout](figures/probe_coinflip_readout.png)
+
+The pairwise Assistant-prompt probe, cross-fitted so no task is scored by a probe that saw its
+utility, read at the coinflip prompt's task tokens gives r = 0.94 at block 20 in *both* models
+(0.86 within non-harmful tasks).
+- The DPO model's probe reads the SFT's activations as well as the SFT's own probe does (0.941 vs
+  0.942).
+- The two models' probes are nearly the same vector (cosine 0.96-0.99 at blocks 15-23).
+- So the value representation at the task tokens is shared and unchanged by DPO.
+- At " tails" a probe fit there reaches 0.95 in both models. The task-token probe doesn't read it
+  before block ~25 (r ≈ 0 at blocks 13-21): the label token carries the value in a different
+  direction.
+
+(A first version of this figure applied the full-data probes to the same tasks' activations at
+other sites, which inflated those curves to r ≈ 1.)
+
+**4. The direction is causal for both decisions; DPO amplifies the coinflip's read of it.**
+
+![steering, standard pairs](figures/probe_steering_standard.png)
+
+![dose response](figures/probe_steering_dose_standard.png)
+
+Steering with c = 0.2 × the residual norm (about 2 SD of the probe projection's spread across tasks,
+applied with opposite signs to the two tasks), at block 19, standard pairs, change in log-odds toward
+task A:
+
+| | coinflip | direct choice |
+|---|---|---|
+| SFT, probe | +0.60 | +0.42 |
+| DPO, probe | **+1.91** | +0.90 |
+| random directions (3, both models) | -0.30 to +0.16 | -0.08 to 0.00 |
+
+- At c = 0.4: DPO coinflip +3.7 [3.3, 4.0] and choice +2.1; SFT coinflip +1.4 and choice +0.9.
+- Effects are largest at blocks 15-19 and drop sharply after block 19, where `../coinflip`'s finder
+  heads (blocks 20-22) read the tasks.
+- The DPO probe, the SFT probe and the non-harmful-only probe all work. The last is somewhat
+  weaker (DPO coinflip +1.56 at block 19).
+- The non-harmful pairs agree: DPO choice +1.30 and coinflip +0.13 at c = 0.1 (block 17), against
+  baseline effects of 3.28 and 0.16 nats.
+
+Against the prediction: the SFT's coinflip *does* respond to the direction, with a third of DPO's
+gain, although its coinflip effect is only 0.11 nats. Per unit of steering the coinflip responds
+more than the Assistant's own direct choice, in both models, and DPO raises both gains about
+2-3×.
+
+![swap](figures/probe_swap.png)
+
+**Swap.** Moving only the tasks' projections on the probe direction into the other order's values,
+at blocks 15-23 together (the change in nats is plotted; shares below):
+
+| | coinflip, standard | coinflip, non-harmful | choice, standard | choice, non-harmful |
+|---|---|---|---|---|
+| DPO, DPO probe | **19% [16, 24]** (0.44 of 2.27 nats) | 23% [17, 34] | 2% (0.30 of 16.95) | 11% |
+| DPO, non-harmful probe | 11% | 32% | 1% | 16% |
+| SFT, DPO probe | ~100% (0.105 of 0.10 nats; CI wide) | 0.015 of 0.04 nats | 3% | 12% |
+| random | ≤ 1% | ≤ 1% | 0% | 0% |
+
+- Single blocks carry 10-14% of the DPO coinflip effect at blocks 15-19, and 2-4% from block 20 on.
+
+**Reading.**
+- The task-value direction is the same in SFT and DPO, and present at the coinflip's task tokens in
+  both: reading (a).
+- It is causal for the coinflip in both models, and DPO makes the coinflip about 3× more sensitive
+  to it.
+- Under natural task differences, though, it carries only about a fifth of DPO's coinflip effect
+  (0.44 of 2.27 nats; the SFT's whole effect is about 0.1). So most of what DPO added to the
+  coinflip's dependence on the tasks runs through other features at blocks 15-23, or outside
+  the task tokens.
+- The direct choice depends on this direction even less under natural differences (2% of its
+  17-nat effect).
+
+Caveats:
+- **Probe vs read direction:** a ridge probe is fit to predict, not to match the direction the
+  model reads. A 1-D swap underestimates mediation when the model reads a nearby direction, while
+  steering doesn't need an exact match.
+- **Scope of the swap:** it moves only the task tokens' mean projection at blocks 15-23. Label and
+  ending tokens are untouched; " tails" carries the value in its own direction (point 3).
+- **Sample:** 300 tasks, one prompt template per condition, 4 fixed partners, bf16 on H200.
+- **Format:** steering and swap use `../coinflip`'s direct-choice wording ("I choose Task"), not
+  the tournament's ("I'll choose Task"), to match the circuit work. The probes were fit in the
+  tournament's format.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

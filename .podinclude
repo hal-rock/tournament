@@ -1,0 +1,2 @@
+# steering directions for probe_tests.py (outputs/ is gitignored)
+outputs/probe/directions.npz
