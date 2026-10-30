@@ -837,6 +837,78 @@ at blocks 15-23 together (the change in nats is plotted; shares below):
 - The direct choice depends on this direction even less under natural differences (2% of its
   17-nat effect).
 
+**5. The label B token (follow-up with the `../coinflip` circuit agent, same day).** The circuit
+work finds that " tails" carries about a quarter of DPO's coinflip effect at blocks 18-24 (residual
+patching), and point 3 shows it holds the value in a direction of its own. So the label B outcome
+word was tested causally: " tails" in the coinflip prompt and " B" ("Task B:") in the direct-choice
+prompt. Two more 1x H200 pods, $7.86.
+
+- **Setup:**
+  - *What it can encode:* the label B token comes after task A's text and before task B's, so with
+    causal attention its residual depends on task A alone. Any task-B term is exactly zero, so the
+    probes regress on u_A, task A's utility.
+  - *Extraction:* " B" was extracted from `../coinflip`'s choice prompt, one prompt per task with the
+    task in slot A (`probe_acts.py --kinds choice`).
+  - *Probes:* label probes were fit as before (`probe_fit.py --tag _label`), with directions
+    `label_<prompt>_probe_*` in `directions.npz`.
+  - *Arms* (`probe_tests.py --label`):
+    - steering the label token alone along its probe, on the same dose scale;
+    - swapping its projection to the other order's value;
+    - that swap combined with the task-token swap (along the task probe), at blocks 15-23 together
+      and singly.
+- **Which scale the label token reads:** the Assistant utilities fit best, DPO's and SFT's equally
+  (cross-validated r 0.95-0.97 at both labels, both models). Next come the DPO coinflip utilities
+  (0.82-0.84) and the SFT coinflip utilities (0.68-0.73).
+- **Its own direction:** the label probes are nearly orthogonal to the task-token probe (cosine
+  0.00-0.11 at blocks 15-23). " tails" and " B" have different directions (0.19-0.29), and each is
+  the same in SFT and DPO (0.91-0.99). The cross-fitted task-token probe partly reads " B" (r
+  0.55-0.67) but not " tails" before block 25 (r ≈ 0).
+
+![label swap summary](figures/probe_label_summary.png)
+
+Share of the effect swapped at blocks 15-23 together, along the DPO model's probes. Brackets are 95%
+pair-bootstrap CIs. Where the effect is under 0.15 nats (SFT coinflip) the change is given in nats.
+The random directions are the range over 3.
+
+| model | prompt | pairs | effect (nats) | task tokens | label B | both | random (task / label / both) |
+|---|---|---|---|---|---|---|---|
+| SFT | coinflip | standard | +0.11 | +0.105 nats | +0.058 nats | +0.156 nats | ±0.01 nats |
+| SFT | coinflip | non-harmful | +0.04 | +0.015 nats | +0.009 nats | +0.028 nats | ±0.01 nats |
+| SFT | choice | standard | +5.74 | 3% [2, 3] | 0% [0, 1] | 3% [3, 4] | 0% |
+| SFT | choice | non-harmful | +1.14 | 12% [11, 13] | 1% [1, 1] | 13% [12, 15] | 0% |
+| DPO | coinflip | standard | +2.26 | 19% [16, 24] | 13% [12, 16] | **29% [25, 35]** | 0-1% |
+| DPO | coinflip | non-harmful | +0.16 | 23% [17, 34] | 16% [12, 23] | **38% [29, 56]** | -4 to -1% |
+| DPO | choice | standard | +16.94 | 2% [1, 2] | 0% [0, 1] | 2% [2, 3] | 0% |
+| DPO | choice | non-harmful | +3.29 | 11% [10, 12] | 1% [1, 1] | 12% [11, 13] | 0% |
+
+- **The label token matters for the coinflip, not the choice.** In DPO the label swap alone carries
+  13-16% of the coinflip effect, and with the task tokens 29-38%, close to the sum of the two
+  parts. In both models it carries at most 1% of the direct choice.
+- **Where along the depth:** swapped one block at a time, the label's share of DPO's coinflip peaks
+  at blocks 20-21 (0.24 and 0.20 nats, about 10%), against 0.09-0.16 at blocks 15-19. That's
+  where the circuit work puts the readers' keys at " tails". The task tokens peak earlier (blocks
+  15-19).
+- **The SFT** (coinflip effect ~0.1 nats) shows the same pattern in nats: the label swap moves it
+  0.058, and both together 0.156, more than its whole effect.
+
+![label steering](figures/probe_label_steering_standard.png)
+
+**Steering the label token** along its own probe (one token, against the task tokens' 20-40):
+- DPO coinflip: +0.26 to +0.47 nats at c = 0.2, peaking at block 20; +0.75 [0.61, 0.89] at c = 0.4
+  over blocks 15-23.
+- DPO direct choice: +0.01 to +0.12.
+- SFT: 0.00 to +0.13 (coinflip +0.03 to +0.13, choice 0.00 to +0.09).
+- Random directions at a single token are noisy: -0.26 to +0.28 nats in DPO's coinflip at single
+  blocks, and ±0.06 over 15-23. So only DPO's coinflip clearly beats them at single blocks.
+
+**Reading.**
+- DPO's coinflip reads the task values from two places: the task tokens (the Assistant's value
+  direction) and the " tails" label word, which carries task A's value in a separate direction.
+  The latter is read around blocks 20-21.
+- Along these two 1-D directions the swaps account for about 30% (standard pairs) to 40%
+  (non-harmful) of the effect. The rest goes through other directions or other tokens.
+- The Assistant's direct choice barely uses the label token (≤ 1%).
+
 Caveats:
 - **Probe vs read direction:** a ridge probe is fit to predict, not to match the direction the
   model reads. A 1-D swap underestimates mediation when the model reads a nearby direction, while

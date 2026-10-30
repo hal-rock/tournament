@@ -9,6 +9,9 @@ Per pair (HP and TP prompts of the same two tasks), with L the outcome log-odds 
              the effect that the swap along the direction removes and reverses (1 = HP fully becomes TP)
 CIs: 95% bootstrap over pairs.
 
+Label-token arms (probe_tests.py --label): steer_label as steer, swap_label / swap_both as swap; table() prints the
+task / label / both summary, figures/probe_label_*.png.
+
 Writes outputs/probe/effects.json and figures/probe_steering*.png, figures/probe_swap.png.
 Usage (local): uv run python probe_effects.py
 """
@@ -41,9 +44,9 @@ def load_rows(stage):
     the first run's version stacked its shifts across blocks) and dropped if there is no rerun."""
     rows = [json.loads(line) for line in open(ROOT / stage / "tests/rows.jsonl")]
     rows = [r for r in rows if not (r["arm"] == "swap" and r["blocks"] == "together")]
-    rerun = ROOT / stage / "tests/rows_swap_together.jsonl"
-    if rerun.exists():
-        rows += [json.loads(line) for line in open(rerun)]
+    for extra in ("rows_swap_together.jsonl", "rows_label.jsonl"):  # the label-token arms (probe_tests.py --label)
+        if (ROOT / stage / "tests" / extra).exists():
+            rows += [json.loads(line) for line in open(ROOT / stage / "tests" / extra)]
     return rows
 
 
@@ -60,7 +63,7 @@ def by_pair(rows):
 def summarize(stage):
     rows = load_rows(stage)
     base, arms = by_pair(rows)
-    out = {"effect": {}, "steer": {}, "swap": {}, "batch_drift": {}}
+    out = {"effect": {}, "batch_drift": {}, **{a: {} for a in ("steer", "swap", "steer_label", "swap_label", "swap_both")}}
     for (s, f) in {(k[0], k[1]) for k in base}:
         eff = np.array([(v["HP"] - v["TP"]) / 2 for (s2, f2, _), v in sorted(base.items()) if (s2, f2) == (s, f)])
         out["effect"][f"{s}/{f}"] = dict(mean=float(eff.mean()), ci=bootstrap_ci(eff), n=len(eff))
@@ -71,14 +74,14 @@ def summarize(stage):
     for key, per_pair in arms.items():
         s, f, arm, d, c, blocks = key
         pairs = sorted(per_pair)
-        if arm == "steer":
+        if arm.startswith("steer"):
             dl = np.array([np.mean([per_pair[p][o][0] - per_pair[p][o][1] for o in ("HP", "TP")]) for p in pairs])
-            out["steer"][f"{s}/{f}/{d}/{c}/{blocks}"] = dict(mean=float(dl.mean()), ci=bootstrap_ci(dl), n=len(dl))
+            out[arm][f"{s}/{f}/{d}/{c}/{blocks}"] = dict(mean=float(dl.mean()), ci=bootstrap_ci(dl), n=len(dl))
         else:
             num = np.array([((per_pair[p]["TP"][0] - per_pair[p]["TP"][1])
                              - (per_pair[p]["HP"][0] - per_pair[p]["HP"][1])) / 4 for p in pairs])
             eff = np.array([(per_pair[p]["HP"][1] - per_pair[p]["TP"][1]) / 2 for p in pairs])
-            out["swap"][f"{s}/{f}/{d}/{blocks}"] = dict(share=float(num.sum() / eff.sum()), ci=ratio_ci(num, eff),
+            out[arm][f"{s}/{f}/{d}/{blocks}"] = dict(share=float(num.sum() / eff.sum()), ci=ratio_ci(num, eff),
                                                         moved=float(num.mean()), effect=float(eff.mean()))
     return out
 
@@ -88,12 +91,12 @@ def block_axis(keys):
     return sorted(order, key=int) + (["together"] if "together" in keys else [])
 
 
-def fig_steer(res, which="standard", c=0.2):
+def fig_steer(res, which="standard", c=0.2, arm="steer"):
     fig, axes = plt.subplots(2, 2, figsize=(10, 6.4), sharex=True)
     for j, st in enumerate(STAGES):
         for i, fmt in enumerate(["choice", "coinflip"]):
             ax = axes[i, j]
-            steer = res[st]["steer"]
+            steer = res[st][arm]
             keys = [k.split("/") for k in steer if k.startswith(f"{which}/{fmt}/") and float(k.split("/")[3]) == c]
             blocks = block_axis({k[4] for k in keys})
             x = np.arange(len(blocks))
@@ -116,9 +119,11 @@ def fig_steer(res, which="standard", c=0.2):
                 ax.set_xlabel("steered block (output)")
     axes[0, 0].legend(fontsize=7.5, frameon=False)
     name = "standard pairs (benign vs extremely harmful)" if which == "standard" else "non-harmful pairs (gap >= 2)"
-    fig.suptitle(f"Steering +c on task A's tokens, -c on task B's, c = {c} x residual norm; {name}", fontsize=10.5)
+    what = ("+c on task A's tokens, -c on task B's" if arm == "steer"
+            else "+c at the label B token along its own probe")
+    fig.suptitle(f"Steering {what}, c = {c} x residual norm; {name}", fontsize=10.5)
     fig.tight_layout()
-    return ps.save(fig, f"probe_steering_{which}")
+    return ps.save(fig, f"probe_{'steering' if arm == 'steer' else 'label_steering'}_{which}")
 
 
 def fig_dose(res, which="standard", blocks="together"):
@@ -184,6 +189,69 @@ def fig_swap(res):
     return ps.save(fig, "probe_swap")
 
 
+SWAPS = {"swap": "task tokens", "swap_label": "label B token", "swap_both": "both"}
+SETS = {"standard": "standard", "benign": "non-harmful"}
+
+
+def table(res, direction="probe_dpo", blocks="together"):
+    """Markdown: share of the effect for task-token / label / both swaps, per model x prompt x pair set, with the
+    effect and the 3 random directions' range."""
+    lines = ["| model | prompt | pairs | effect (nats) | task tokens | label B | both | random (task / label / both) |",
+             "|---|---|---|---|---|---|---|---|"]
+    for st in STAGES:
+        for fmt in ("coinflip", "choice"):
+            for w in SETS:
+                eff = res[st]["effect"][f"{w}/{fmt}"]["mean"]
+                cells = []
+                for arm in SWAPS:
+                    v = res[st][arm].get(f"{w}/{fmt}/{direction}/{blocks}")
+                    cells.append("–" if v is None else f"{v['share']:.0%} [{v['ci'][0]:.0%}, {v['ci'][1]:.0%}]"
+                                 if abs(eff) > 0.15 else f"{v['moved']:+.3f} nats")
+                rand = []
+                for arm in SWAPS:
+                    vals = [res[st][arm][k]["share" if abs(eff) > 0.15 else "moved"] for k in res[st][arm]
+                            if k.startswith(f"{w}/{fmt}/rand") and k.endswith(f"/{blocks}")]
+                    rand.append(f"{min(vals):+.2f}..{max(vals):+.2f}" if vals else "–")
+                lines.append(f"| {LABEL[st]} | {fmt} | {SETS[w]} | {eff:+.2f} | " + " | ".join(cells) + " | "
+                             + " / ".join(rand) + " |")
+    return "\n".join(lines)
+
+
+def fig_label_summary(res, direction="probe_dpo", blocks="together"):
+    """Share of the effect swapped: task tokens, label B token, both, at blocks 15-23, per model x prompt x pair set.
+    SFT coinflip effects are ~0.1 nats or less, so its shares are left out (the table gives nats)."""
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), sharey=True)
+    colors = {"swap": ps.SERIES[0], "swap_label": ps.SERIES[1], "swap_both": ps.SERIES[2]}
+    for ax, fmt in zip(axes, ("coinflip", "choice")):
+        groups = [(st, w) for st in STAGES for w in SETS]
+        for g, (st, w) in enumerate(groups):
+            eff = res[st]["effect"][f"{w}/{fmt}"]["mean"]
+            for j, arm in enumerate(SWAPS):
+                v = res[st][arm].get(f"{w}/{fmt}/{direction}/{blocks}")
+                if v is None or abs(eff) <= 0.15:
+                    continue
+                x = g + (j - 1) * 0.25
+                ax.bar(x, v["share"], width=0.24, color=colors[arm], label=SWAPS[arm] if g == 0 or (
+                    fmt == "coinflip" and g == 2) else None)
+                ax.errorbar(x, v["share"], yerr=[[v["share"] - v["ci"][0]], [v["ci"][1] - v["share"]]],
+                            color=ps.INK, lw=0.8, capsize=2)
+            if abs(eff) <= 0.15:
+                ax.text(g, 0.02, f"effect\n{eff:+.2f}\n(too small)", ha="center", fontsize=7, color=ps.INK2)
+        ax.set_xticks(range(len(groups)), [f"{LABEL[st]}\n{SETS[w]}" for st, w in groups], fontsize=8.5)
+        ax.axhline(0, color=ps.BASELINE, lw=0.8)
+        ax.set_title(LABEL[fmt], fontsize=10)
+    axes[0].set_ylabel("share of the effect swapped")
+    handles, labels = [], []
+    for ax in axes:
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            if l not in labels:
+                handles.append(h), labels.append(l)
+    axes[1].legend(handles, labels, fontsize=8, frameon=False, loc="upper right")
+    fig.suptitle("Swap along the DPO model's probes at blocks 15-23: task tokens, label B token, both", fontsize=10.5)
+    fig.tight_layout()
+    return ps.save(fig, "probe_label_summary")
+
+
 def main():
     ps.setup()
     res = {st: summarize(st) for st in STAGES if (ROOT / st / "tests/rows.jsonl").exists()}
@@ -196,6 +264,11 @@ def main():
         for f in (fig_steer(res, "standard"), fig_steer(res, "benign", 0.1), fig_dose(res, "standard"),
                   fig_dose(res, "benign", "together"), fig_swap(res)):
             print(f"wrote {f}")
+        if all(res[st]["swap_label"] for st in STAGES):
+            for f in (fig_steer(res, "standard", 0.2, "steer_label"), fig_steer(res, "benign", 0.1, "steer_label"),
+                      fig_label_summary(res)):
+                print(f"wrote {f}")
+            print(table(res))
 
 
 if __name__ == "__main__":
