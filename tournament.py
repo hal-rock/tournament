@@ -139,12 +139,14 @@ def select_pairs(n_tasks, max_pairs=None, seed=0):
     return sorted(random.Random(f"pairs/{seed}").sample(pairs, max_pairs))
 
 
-def load_model(name, device, dtype, revision=None):
+def load_model(name, device, dtype, revision=None, max_memory=None):
     """On GPU, spread the model over all visible GPUs (one GPU if it fits there), and
-    refuse to run with layers offloaded to CPU or disk: that is orders of magnitude slower."""
+    refuse to run with layers offloaded to CPU or disk: that is orders of magnitude slower.
+    max_memory: {gpu: limit}, for a model that only just fits."""
     if device != "cuda":
         return AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map=device).eval()
-    model = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map="auto").eval()
+    model = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map="auto",
+                                                 max_memory=max_memory).eval()
     placement = {str(t.device) for t in itertools.chain(model.parameters(), model.buffers())}
     if placement & {"cpu", "meta"}:
         raise SystemExit(f"{name} does not fit on the visible GPUs (devices: {sorted(placement)})")
@@ -189,7 +191,9 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(m["name"], revision=revision)
         template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]),
                                                            revision=None if "chat_template_from" in m else revision)
-        model = load_model(m["name"], device, dtype, revision)
+        model = load_model(m["name"], device, dtype, revision, m.get("max_memory"))
+        if "use_cache" in m:  # no KV cache: scoring doesn't need one, and it costs memory on a tight fit
+            model.config.use_cache = m["use_cache"]
 
         for condition in m["conditions"]:
             outcome_ids = tuple(outcome_token_ids(condition, tokenizer))
