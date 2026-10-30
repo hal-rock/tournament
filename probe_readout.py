@@ -123,10 +123,16 @@ def probe_agreement(loaded):
     return out
 
 
-def write_directions(probes):
-    """probes: {stage: probe.npz contents}."""
+def write_directions(probes, label_probes=None):
+    """probes: {stage: probe.npz contents}; label_probes: {stage: probe_label.npz contents} (the label-token follow-up),
+    adding label_<format>_<name> for the label B token of each prompt."""
     dirs = {"probe_dpo": probes["dpo"][f"{PROBE_KEY}/w"], "probe_sft": probes["sft"][f"{PROBE_KEY}/w"],
             "probe_dpo_benign": probes["dpo"]["dpo/benign/assistant_task/w"]}
+    for fmt in ("coinflip", "choice") if label_probes else ():
+        key = f"{fmt}_label_b"
+        dirs |= {f"label_{fmt}_probe_dpo": label_probes["dpo"][f"dpo/all/{key}/w"],
+                 f"label_{fmt}_probe_sft": label_probes["sft"][f"dpo/all/{key}/w"],
+                 f"label_{fmt}_probe_dpo_benign": label_probes["dpo"][f"dpo/benign/{key}/w"]}
     for k, v in dirs.items():
         assert np.isfinite(v[15:24]).all(), f"{k}: steering blocks 15-23 weren't fit"
     np.savez(ROOT / "directions.npz", **{k: np.nan_to_num(v).astype(np.float32) for k, v in dirs.items()})
@@ -205,14 +211,18 @@ def fig_readout(loaded, tr):
 def main():
     import sys
     if sys.argv[1:2] == ["--directions-only"]:  # from the quick blocks 15-23 fits (probe_fit.py --tag _steer)
-        write_directions({st: dict(np.load(ROOT / st / "probe_steer.npz")) for st in STAGES})
+        write_directions({st: dict(np.load(ROOT / st / "probe_steer.npz")) for st in STAGES},
+                         {st: dict(np.load(ROOT / st / "probe_label.npz")) for st in STAGES}
+                         if all((ROOT / st / "probe_label.npz").exists() for st in STAGES) else None)
         print(f"wrote {ROOT / 'directions.npz'}")
         return
     ps.setup()
     loaded = {st: load(st) for st in STAGES}
     tr = transfer(loaded)
     agree = probe_agreement(loaded)
-    write_directions({st: loaded[st][1] for st in STAGES})
+    labels = {st: dict(np.load(ROOT / st / "probe_label.npz")) for st in STAGES
+              if (ROOT / st / "probe_label.npz").exists()}
+    write_directions({st: loaded[st][1] for st in STAGES}, labels if len(labels) == len(STAGES) else None)
     out = dict(transfer={f"{a}->{b}/{s}": dict(layers=v[0].tolist(), r_all=v[1].tolist(), r_benign=v[2].tolist())
                          for (a, b, s), v in tr.items()},
                agreement=agree)

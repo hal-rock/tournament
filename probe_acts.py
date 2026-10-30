@@ -10,12 +10,14 @@ Saved per read site, averaged over the fixed partners (4, or 3 for a partner tas
     assistant_task.npy                [tasks, 2, L, D]   the task's last token, slot A / slot B, Assistant prompt
     coinflip_task.npy                 [tasks, 2, L, D]   the same in the coinflip prompt
     coinflip_label_b.npy              [tasks, L, D]      " tails" with the task in slot A
+    choice_task.npy, choice_label_b.npy [tasks, L, D]    --kinds choice: ../coinflip's direct-choice prompt, task
+                                                         in slot A, its closing token and " B" (one partner)
 
 Stored as bf16 bit patterns (int16; read with load_acts), so values are exactly the model's, with no
 fp16 overflow from massive activations. tasks.json lists the task order. items.jsonl has one row per
 prompt: kind, task, partner, slot, and L = log P(first outcome) - log P(second outcome) at the last
 token (assistant: " A" vs " B"; coinflip: " heads" vs " tails"), for a check against the tournament's
-utilities. summary.json has provenance, timings, and the max |activation|.
+utilities (choice: " A" vs " B"). summary.json has provenance, timings, and the max |activation|.
 
 Usage (GPU pod): uv run python probe_acts.py <model> <stage> [--limit N] [--out outputs/probe]
 """
@@ -31,7 +33,7 @@ import numpy as np
 import torch
 
 from matskit import acts, io, models
-from probe_prompts import all_tasks, extraction_items, load_design, outcome_ids
+from probe_prompts import DEFAULT_KINDS, all_tasks, extraction_items, load_design, outcome_ids
 
 SITES = {  # name -> (kind, read, has slot axis)
     "single_eot": ("single", "eot", False),
@@ -39,6 +41,9 @@ SITES = {  # name -> (kind, read, has slot axis)
     "assistant_task": ("assistant", "task", True),
     "coinflip_task": ("coinflip", "task", True),
     "coinflip_label_b": ("coinflip", "label_b", False),
+    # --kinds choice (label-token follow-up): ../coinflip's direct-choice prompt, task in slot A, one partner
+    "choice_task": ("choice", "task", False),
+    "choice_label_b": ("choice", "label_b", False),
 }
 
 
@@ -61,12 +66,14 @@ def extract(model, tok, items, task_ids, progress_every=200):
     n_layers = models.n_layers(model)
     D = models.text_config(model).hidden_size
     row = {t: i for i, t in enumerate(task_ids)}
+    kinds = {it.kind for it in items}
+    sites = {k: v for k, v in SITES.items() if v[0] in kinds}
     sums, counts = {}, {}
-    for name, (_, _, slotted) in SITES.items():
+    for name, (_, _, slotted) in sites.items():
         shape = (len(task_ids), 2) if slotted else (len(task_ids),)
         sums[name] = torch.zeros(*shape, n_layers, D)
         counts[name] = torch.zeros(*shape)
-    first_second = {k: outcome_ids(tok, k) for k in ("assistant", "coinflip")}
+    first_second = {k: outcome_ids(tok, k) for k in ("assistant", "coinflip", "choice")}
     records, max_abs, t0 = [], 0.0, time.time()
     layers = list(range(n_layers))
     for k, item in enumerate(items):
@@ -88,7 +95,7 @@ def extract(model, tok, items, task_ids, progress_every=200):
         r = row[item.meta["task"]]
         for j, (read, _) in enumerate(reads):
             name = f"{item.kind}_{read}"
-            if name not in SITES:
+            if name not in sites:
                 continue
             idx = (r, "ab".index(item.meta["slot"])) if SITES[name][2] else (r,)
             sums[name][idx] += h[j]
@@ -98,7 +105,7 @@ def extract(model, tok, items, task_ids, progress_every=200):
             print(f"item {k + 1}/{len(items)}  {el / 60:.1f} min elapsed, ~{el / (k + 1) * (len(items) - k - 1) / 60:.1f} "
                   "min left", flush=True)
     means = {}
-    for name in SITES:
+    for name in sites:
         c = counts[name]
         assert (c > 0).all(), f"{name}: some tasks have no reads"
         means[name] = sums[name] / c.reshape(*c.shape, 1, 1)
@@ -112,7 +119,11 @@ def main():
     ap.add_argument("--limit", type=int, help="first N tasks only (smoke tests)")
     ap.add_argument("--out", default="outputs/probe")
     ap.add_argument("--cpu", action="store_true", help="tiny local models: fp32 on CPU, no sanity check")
+    ap.add_argument("--kinds", nargs="+", default=list(DEFAULT_KINDS),
+                    help="prompt kinds (single assistant coinflip choice); a non-default set writes items_<kinds>.jsonl "
+                         "and summary_<kinds>.json beside the default run's files")
     a = ap.parse_args()
+    suffix = "" if tuple(a.kinds) == DEFAULT_KINDS else "_" + "_".join(a.kinds)
 
     out = Path(a.out) / a.stage / "acts"
     out.mkdir(parents=True, exist_ok=True)
@@ -120,20 +131,20 @@ def main():
     model, tok = models.load(a.model, **kw)
     design = load_design()
     task_ids = list(all_tasks(design))[:a.limit] if a.limit else list(all_tasks(design))
-    items = extraction_items(tok, design, limit=a.limit)
+    items = extraction_items(tok, design, limit=a.limit, kinds=tuple(a.kinds))
     print(f"{a.model}: {len(items)} prompts over {len(task_ids)} tasks, {models.n_layers(model)} blocks", flush=True)
     means, records, info = extract(model, tok, items, task_ids)
     for name, m in means.items():
         np.save(out / f"{name}.npy", to_bits(m))
     (out / "tasks.json").write_text(json.dumps(task_ids))
-    with open(out / "items.jsonl", "w") as f:
+    with open(out / f"items{suffix}.jsonl", "w") as f:
         for r in records:
             f.write(json.dumps(r) + "\n")
     summary = dict(model=a.model, stage=a.stage, layers="block outputs (at='post'), 0..L-1",
                    n_layers=models.n_layers(model), d_model=models.text_config(model).hidden_size,
                    design=load_design() | {"benign_pairs": len(design["benign_pairs"])},
                    provenance=io.provenance(), **info)
-    (out / "summary.json").write_text(json.dumps(summary, indent=1))
+    (out / f"summary{suffix}.json").write_text(json.dumps(summary, indent=1))
     print(f"done: {info['n_items']} prompts in {info['seconds'] / 60:.1f} min; max |h| {info['max_abs']:.0f}; "
           f"wrote {out}", flush=True)
 

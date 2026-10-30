@@ -165,16 +165,26 @@ def single_item(tok, task, meta=None):
     return Item("single", enc.ids, {"eot": eot, "last": len(enc.ids) - 1}, dict(meta or {}))
 
 
-def extraction_items(tok, design=None, limit=None):
+DEFAULT_KINDS = ("single", "assistant", "coinflip")
+
+
+def extraction_items(tok, design=None, limit=None, kinds=DEFAULT_KINDS):
     """Prompts for probe_acts.py: every task alone, and every task against each fixed partner in both slots,
-    in the Assistant and coinflip formats. A partner isn't paired with itself."""
+    in the Assistant and coinflip formats. A partner isn't paired with itself.
+
+    kind "choice" (../coinflip's direct-choice prompt, added 2026-10-29 for the label-token follow-up): the task
+    in slot A only, against one partner, read at its closing token ("task") and at " B" of "Task B:" ("label_b").
+    Both precede task B's text, so with causal attention they don't depend on the partner at all."""
     design = design or load_design()
     texts = all_tasks(design)
     ids = list(texts)[:limit] if limit else list(texts)
     items = []
     for t in ids:
-        items.append(single_item(tok, texts[t], dict(task=t)))
+        if "single" in kinds:
+            items.append(single_item(tok, texts[t], dict(task=t)))
         for kind in ("assistant", "coinflip"):
+            if kind not in kinds:
+                continue
             for p in design["partners"]:
                 if p == t:
                     continue
@@ -183,6 +193,11 @@ def extraction_items(tok, design=None, limit=None):
                 a.read = {"task": a.read["task_a"], "label_b": a.read["label_b"]}
                 b.read = {"task": b.read["task_b"]}
                 items += [a, b]
+        if "choice" in kinds:
+            p = next(p for p in design["partners"] if p != t)
+            a = pair_item(tok, "choice", texts[t], texts[p], dict(task=t, partner=p, slot="a"))
+            a.read = {"task": a.read["task_a"], "label_b": a.read["label_b"]}
+            items.append(a)
     return items
 
 

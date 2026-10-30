@@ -46,7 +46,8 @@ from probe_prompts import load_tasks
 
 ALPHAS = np.logspace(-1, 6, 15)  # in units of the mean kernel diagonal (= d for standardized features)
 UTILITIES = "outputs/d8ysbybo/analysis/utilities.csv"
-TARGETS = {"dpo": "dpo/assistant", "sft": "sft/assistant"}
+# dpo is the primary target; the coinflip utilities are for the label-token sites' "which scale fits best" check
+TARGETS = {"dpo": "dpo/assistant", "sft": "sft/assistant", "dpo_coinflip": "dpo/coinflip", "sft_coinflip": "sft/coinflip"}
 
 
 def pearson(a, b):

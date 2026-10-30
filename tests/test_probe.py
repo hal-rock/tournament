@@ -1,6 +1,7 @@
 """Preference probe: prompt bookkeeping (real OLMo 3.1 tokenizer), activation capture and interventions on a
 tiny random OLMo 3 (pipeline only; don't read numbers into it)."""
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -241,10 +242,11 @@ def test_swap_arms_set_the_other_orders_projections(tok, tiny, monkeypatch):
     torch.testing.assert_close(after[keep], h_hp[2][keep], rtol=1e-5, atol=1e-5)
     # "together": the slot means equal the other prompt's at every swap block (no stacking), via run_arms
     (label, add, clamp), = pt.swap_arms(hp, tp, h_hp, h_tp, {"rand0": dirs["rand0"]}, ["together"])
-    assert add == {} and sorted(clamp) == [1, 2]
+    assert add == {} and sorted(clamp) == [(1, "task"), (2, "task")]
     pos = pt.task_positions(hp)
     from matskit import acts as A
-    with A.clamp(model, {b: clamp[b][0] for b in clamp}, {b: clamp[b][1] for b in clamp}, at="post", positions=pos):
+    with A.clamp(model, {b: clamp[b, w][0] for b, w in clamp}, {b: clamp[b, w][1] for b, w in clamp}, at="post",
+                 positions=pos):
         both = A.residuals(model, torch.tensor([hp.ids]), layers=[1, 2], at="post")
     for b in (1, 2):
         u = dirs["rand0"][b]
@@ -275,3 +277,51 @@ def test_run_arms_batches_match_single_rows(tok, tiny, monkeypatch):
     logits, _ = pt.baseline(model, hp, [1])
     np.testing.assert_allclose(bases, pt.logit_diff(logits, out_ids).item(), rtol=1e-4, atol=1e-4)
     assert len(set(np.round(Ls, 5))) == len(Ls)  # every arm moved L differently
+
+
+def test_label_arms(tok, tiny, monkeypatch):
+    """swap_label sets the label B token's projection to the other order's at every swap block, swap_both also
+    swaps the task tokens, and steer_label adds only at the label token."""
+    from matskit import acts as A, models
+    import probe_tests as pt
+    model, _ = models.load(tiny, device_map="cpu", dtype="float32", check=False)
+    monkeypatch.setattr(pt, "SWAP_BLOCKS", [1, 2])
+    monkeypatch.setattr(pt, "STEER_BLOCKS", [1, 2])
+    tdirs = pt.load_directions("nonexistent.npz", models.n_layers(model), 64)
+    ldirs = pt.load_directions("nonexistent.npz", models.n_layers(model), 64, seed=1, prefix="label_choice_")
+    assert not torch.allclose(tdirs["rand0"], ldirs["rand0"])
+    _, _, hp, tp = make_test_pairs(tok, "choice", which="standard")[0]
+    _, h_hp = pt.baseline(model, hp, [1, 2])
+    _, h_tp = pt.baseline(model, tp, [1, 2])
+    arms = pt.label_swap_arms(hp, tp, h_hp, h_tp, {"rand0": ldirs["rand0"]}, {"rand0": tdirs["rand0"]}, [2, "together"])
+    assert [a[0]["arm"] for a in arms] == ["swap_label", "swap_both", "swap_label", "swap_both"]
+    (_, _, only), (_, _, both) = arms[2], arms[3]
+    assert sorted(only) == [(1, "label"), (2, "label")] and sorted(both) == [(1, "label"), (1, "task"), (2, "label"),
+                                                                            (2, "task")]
+    lab = hp.read["label_b"]
+    with contextlib.ExitStack() as st:
+        for (b, w), (u, v) in both.items():
+            st.enter_context(A.clamp(model, {b: u}, {b: v}, at="post", positions=pt.clamp_positions(hp, w)))
+        after = A.residuals(model, torch.tensor([hp.ids]), layers=[1, 2], at="post")
+    for b in (1, 2):
+        u = ldirs["rand0"][b]
+        torch.testing.assert_close(after[b][0, lab] @ u, h_tp[b][tp.read["label_b"]] @ u, rtol=1e-4, atol=1e-4)
+    out_ids = outcome_ids(tok, "choice")
+    mixed, _ = pt.run_arms(model, hp, arms, out_ids, batch_size=3)
+    alone = [pt.run_arms(model, hp, [arm], out_ids, batch_size=2)[0][0] for arm in arms]
+    np.testing.assert_allclose(mixed, alone, rtol=1e-4, atol=1e-4)
+    # steer_label: only the label token moves at the steered block, by c * norm * u
+    (_, add, _), = pt.label_steer_arms(hp, {"rand0": ldirs["rand0"]}, {1: 10.0, 2: 10.0}, [0.5], [1])
+    with A.steer_tokens(model, add, at="post"):
+        moved = A.residuals(model, torch.tensor([hp.ids]), layers=[1], at="post")[1][0]
+    torch.testing.assert_close(moved[lab], h_hp[1][lab] + 5.0 * ldirs["rand0"][1], rtol=1e-4, atol=1e-4)
+    keep = torch.arange(len(hp.ids)) != lab
+    torch.testing.assert_close(moved[keep], h_hp[1][keep], rtol=1e-5, atol=1e-5)
+
+
+def test_choice_extraction_reads(tok):
+    items = extraction_items(tok, limit=3, kinds=("choice",))
+    assert len(items) == 3 and all(i.kind == "choice" and i.meta["slot"] == "a" for i in items)
+    for it in items:
+        assert tok.decode([it.ids[it.read["label_b"]]]) == " B"
+        assert it.read["task"] < it.read["label_b"]
