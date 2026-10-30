@@ -20,11 +20,13 @@ CIs are 95% task bootstraps within origin, with the same resamples for every ope
 so changes and retention (value / value at "Okay, ") are paired. Each non-"Okay" cell gets the
 pre-registered call from `classify`, and the 12 cells are correlated with their retention in
 ../coinflip (x fixed, y bootstrapped). Not pre-registered, printed last: L by which side the
-benign task is on (`orientation`), and how OLMo's coinflips relate to its SFT stage (`sft_stage`).
+benign task is on (`orientation`), r and mean C within each origin (`by_origin`), and how OLMo's
+coinflips relate to its SFT stage (`sft_stage`).
 
   outputs/openers/openers.csv      one row per model and opener
   outputs/openers/across_cells.csv the across-cell correlations
   outputs/openers/orientation.csv  mean L by side of the benign task
+  outputs/openers/by_origin.csv    r(A, C) and mean C within each origin
   figures/openers_*.png
 
 Usage: uv run python openers.py [--group openers]
@@ -162,6 +164,16 @@ def orientation(rows, benign_ids):
     return {k: float(np.mean(v)) for k, v in out.items()}
 
 
+def by_origin(a, C, origins):
+    """Exploratory: r(A, C) and mean C within each origin, per opener."""
+    rows = []
+    for g in ORIGIN_STYLE:
+        k = origins == g
+        rows += [dict(origin=g, opener=o, n=int(k.sum()), r=pearson(a[k], C[o][k]), mean_c=float(C[o][k].mean()),
+                      sd_c=float(C[o][k].std())) for o in OPENERS]
+    return rows
+
+
 def plot_summary(all_cells, models, path):
     fig, axes = plt.subplots(2, len(models), figsize=(4.2 * len(models), 7.4), sharey="row", squeeze=False)
     x = np.arange(len(OPENERS))
@@ -213,8 +225,10 @@ def plot_vs_coinflip(all_cells, models, path):
             ax.errorbar(xs, est, yerr=[est - lo, hi - est], fmt=MODEL_MARKER[m], color=plotstyle.SERIES[j], ms=7,
                         mec="white", mew=0.8, elinewidth=1.5, label=MODEL_INFO[m][0], zorder=3)
             for xi, yi, o in zip(xs, est, os_):
-                ax.annotate(LABELS[o].strip('"').rstrip(","), (xi, yi), xytext=(5, 4), textcoords="offset points",
-                            fontsize=8, color=INK_2)
+                if m != LLAMA or o == "so":  # Llama's other cells overlap near (1, 1), so they go unlabelled
+                    below = o == "no_okay"  # none and OK sit close together in OLMo and GLM
+                    ax.annotate(LABELS[o].strip('"').rstrip(","), (xi, yi), textcoords="offset points", fontsize=8,
+                                xytext=(-5, -11) if below else (6, 4), ha="right" if below else "left", color=INK_2)
         ax.set_xlabel('Share of the "Okay," effect kept in ../coinflip')
         ax.set_title(title, color=INK, fontsize=11, loc="left")
         style(ax)
@@ -255,7 +269,7 @@ def sft_stage(a, C, ids):
 def write_csv(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w = csv.DictWriter(fh, fieldnames=list(dict.fromkeys(k for r in rows for k in r)))
         w.writeheader()
         w.writerows(rows)
 
@@ -270,7 +284,7 @@ def main():
     models = [m for m in (OLMO, LLAMA, GLM) if m in runs]
     out = Path("outputs/openers")
     out.mkdir(parents=True, exist_ok=True)
-    all_cells, data, table, gates, orient, all_ok = {}, {}, [], [], [], True
+    all_cells, data, table, gates, orient, origin_rows, all_ok = {}, {}, [], [], [], [], True
     for m in models:
         run = runs[m]
         analysis = Path("outputs") / run.id / "analysis"
@@ -292,6 +306,7 @@ def main():
         a = B["instruct/assistant"]
         C = {o: U[f"instruct/coinflip_{o}"] for o in OPENERS}
         data[m] = (a, C, origins)
+        origin_rows += [dict(model=MODEL_INFO[m][0], **r) for r in by_origin(a, C, origins)]
         # Validation gate: "Okay," reproduces the sweep's coinflip.
         gate_r, gate_sd = pearson(C["okay"], B["instruct/coinflip"]), C["okay"].std() / B["instruct/coinflip"].std() - 1
         passed = gate_r >= GATE_R and abs(gate_sd) <= GATE_SD
@@ -358,6 +373,12 @@ def main():
     for r in orient:
         print(f"{r['model']:16} {r['opener']:8} heads benign {r['L_heads_benign']:+.2f} (P(benign) {r['p_benign_heads']:.2f})  "
               f"tails benign {r['L_tails_benign']:+.2f} ({r['p_benign_tails']:.2f})")
+    print("\nExploratory, within each origin, r(A, C) | mean C, by opener (" + ", ".join(OPENERS) + "):")
+    for m in models:
+        for g in ORIGIN_STYLE:
+            cells = [r for r in origin_rows if r["model"] == MODEL_INFO[m][0] and r["origin"] == g]
+            print(f"{MODEL_INFO[m][0]:16} {g:12} n={cells[0]['n']:2d}  " + " ".join(f"{r['r']:+.2f}" for r in cells)
+                  + "  |  " + " ".join(f"{r['mean_c']:+.2f}" for r in cells))
     if OLMO in data:
         a, C, _ = data[OLMO]
         ids = [r["id"] for r in rows]
@@ -369,6 +390,7 @@ def main():
     write_csv(out / "openers.csv", table)
     write_csv(out / "across_cells.csv", across)
     write_csv(out / "orientation.csv", orient)
+    write_csv(out / "by_origin.csv", origin_rows)
     plotstyle.setup()
     plot_summary(all_cells, models, "figures/openers_summary.png")
     plot_vs_coinflip(all_cells, models, "figures/openers_vs_coinflip.png")
