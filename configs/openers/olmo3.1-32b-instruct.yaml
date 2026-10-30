@@ -1,0 +1,20 @@
+# Last-line openers (README, "Last-line openers"): the coinflip condition with ../coinflip's five
+# openers, on the models-group pair set. The Assistant prompt has no such line, so the Assistant
+# utilities come from the sweep. One 80GB GPU (A100, as d8ysbybo and the lens run), ~120 GB of disk.
+wandb_project: tournament
+group: openers
+run_name: openers-olmo3.1-32b-instruct
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+models:
+  - name: allenai/Olmo-3.1-32B-Instruct
+    stage: instruct
+    conditions: [coinflip_okay, coinflip_no_okay, coinflip_alright, coinflip_ok, coinflip_so]

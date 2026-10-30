@@ -62,6 +62,8 @@ uv run python sizes.py                                   # OLMo 3 7B vs. 32B by 
 uv run python retrain.py                                 # ../coinflip DPO retraining checkpoints (runs 5 and 1)
 uv run python lens.py configs/lens/olmo3.1-32b-instruct.yaml   # logit lens at every depth, 80GB GPU
 uv run python lens_analysis.py outputs/lens/<run_id>     # utilities by depth, figures/lens_*.{png,gif,mp4}
+uv run python tournament.py configs/openers/<model>.yaml # coinflip with each last-line opener
+uv run python openers.py                                 # openers vs bleedthrough (W&B group "openers")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -919,6 +921,93 @@ Caveats:
 - **Format:** steering and swap use `../coinflip`'s direct-choice wording ("I choose Task"), not
   the tournament's ("I'll choose Task"), to match the circuit work. The probes were fit in the
   tournament's format.
+
+## Last-line openers: is the prefix effect limited to the extreme prompts?
+
+`../coinflip` found that the coinflip effect depends on the opener of the prompt's last line
+(`RESULTS.md`, "Without 'Okay, '" and "Follow-up: other openers"). OLMo 3.1 32B Instruct keeps
+14-42% of its effect with any opener but "Okay, ", GLM-4.5-Air keeps it with "Alright, " but not
+"OK, ", and Llama 3.3 barely reacts. "Okay, " is assistant-speak, so this may be about who the
+model takes to be speaking on that line. Those effects are measured only on benign vs extremely
+harmful pairs. Does the same happen across the tournament's 300 tasks?
+
+### Design
+
+- **Conditions:** the coinflip prompt with `../coinflip`'s five openers: "Okay, " (as in every
+  run here), none, "Alright, ", "OK, ", "So, ". Only the opener's tokens change (`Okay` `,` ` I`;
+  `test_openers_change_only_the_last_lines_opener`). Conditions `coinflip_<opener>` in `prompts.py`.
+- **Models:** the post-trained models of that run: OLMo 3.1 32B Instruct, Llama 3.3 70B Instruct,
+  GLM-4.5-Air. The bases didn't react in `../coinflip`.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders, 30,000 prompts per opener.
+- **Assistant utilities:** reused from the sweep (`d8ysbybo` refit on these pairs, `tvlqj8a0`,
+  `i5vejs3b`), since the Assistant prompt has no such line.
+- **GPUs:** as in those runs, per the gotcha on comparing across GPU types: A100 for OLMo, 2x H200 for Llama
+  and GLM. Configs `configs/openers/`, analysis `openers.py`.
+
+### Pre-registered before running (2026-10-30)
+
+A is the Assistant utilities, C the coinflip utilities at one opener. CIs are 95% task bootstraps
+within origin; every comparison with "Okay, " uses the same resamples for both openers.
+"Non-harmful" is the usual 257 tasks.
+
+**Measures per model and opener:**
+- **Primary: r** = r(A, C), and its paired change from "Okay, ".
+- **Scale:** b, the slope of C on A in nats per Assistant SD, with retention (b / b at "Okay, ").
+  The benign-harmful gap in C, the contrast `../coinflip`'s pairs measure, also with retention.
+  Coinflip SD, and the SD of C around its line on A.
+- **Within-type vs cross-type:** r and b over non-harmful tasks, r over harmful tasks (n = 43),
+  r within origin (each origin's mean removed from A and C), and r over the five origin means
+  (no CI worth reading at n = 5; descriptive).
+- **Same coinflip turned down?** r(C_okay, C) and the slope of C on C_okay.
+- Split-half reliability and r disattenuated by it, since a smaller effect could lower r through
+  noise alone. Slot (heads) bias and coin mass.
+
+**Call for each non-"Okay" cell:**
+- **r falls:** the change in r has a CI below 0 and is at most -0.05.
+- **r rises:** the mirror image.
+- **Scale only:** r doesn't fall or rise, and the CI of b's retention lies wholly below 0.9.
+- **Unchanged:** neither.
+
+**Across cells:** Spearman (and Pearson) over the 12 non-"Okay" cells of `../coinflip` retention
+with the change in r (primary), with b's retention and with the gap's retention. Task bootstrap on
+the tournament side, `../coinflip`'s numbers held fixed. Also without GLM (8 cells), since its coin
+mass is low.
+
+**Validation gate:** at "Okay, " the utilities must reproduce the sweep's coinflip at r >= 0.999
+and SD within 2%.
+
+**Predictions:**
+1. **OLMo:** r falls with all four other openers (call "r falls"), with "Alright, " highest and
+   "So, " lowest, and stays at or above about 0.25, the Instruct SFT's r.
+2. **Llama:** |change in r| <= 0.02 and b's retention within 0.9-1.1 for none, "Alright, " and
+   "OK, ". "So, " dips at most 0.05 in r, with retention no lower than 0.8.
+3. **GLM:** "Alright, " stays with "Okay, " (|change in r| <= 0.02, b's retention >= 0.9); none
+   and "OK, " lose r or b (call "r falls" or "scale only"). GLM's r is high at 0.92, and I expect
+   this to show more in b than in r.
+4. **Across cells:** the Spearman of `../coinflip` retention with the change in r is positive with
+   a CI above 0, and likewise for b's and the gap's retention.
+5. **OLMo's heads bias** rises with the other openers, as in `../coinflip` (2.2 to 3.9-4.6 there;
+   3.43 here at "Okay, ").
+
+**What each outcome would mean:**
+- **r falls and scale falls:** the prefix controls how much of the coinflip is Assistant-aligned
+  across the task range, not just on extreme tasks.
+- **Scale only** (Hal's and my runner-up): r(C_okay, C) near 1 with b and the coinflip SD down. The
+  opener turns the same coinflip up or down, rather than changing what it tracks. With an
+  unrelated coinflip part still in place, this would need that part to scale too; the SD of C
+  around its line separates the two.
+- **Only the gap falls:** r and b hold within type (non-harmful, within origin) while the
+  benign-harmful gap falls. The prefix effect is about harm, or cross-type contrasts, so it is
+  largely limited to the extreme prompts.
+- **Nothing moves in OLMo:** the prefix effect is specific to `../coinflip`'s pairs.
+
+**Caveats, known in advance:**
+- GLM puts only ~45% of its coin mass on " heads" / " tails" (often " **" first, for "**heads**").
+  Its utilities are log-odds within those two tokens. Not dealt with here; conclusions shouldn't
+  rest on GLM.
+- Only weakening is really testable: no opener beat "Okay, " in `../coinflip`, and Llama and GLM
+  start at r = 0.92.
+- One phrasing of the rest of the line, one Assistant measurement, no system prompt.
 
 ## Tasks
 

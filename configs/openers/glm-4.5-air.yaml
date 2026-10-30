@@ -1,0 +1,20 @@
+# Last-line openers (README, "Last-line openers"): the coinflip condition with ../coinflip's five
+# openers, on the models-group pair set. The Assistant prompt has no such line, so the Assistant
+# utilities come from the sweep. 2x H200, as i5vejs3b (~220 GB in bf16), ~350 GB of disk.
+wandb_project: tournament
+group: openers
+run_name: openers-glm-4.5-air
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: zai-org/GLM-4.5-Air
+    stage: instruct
+    conditions: [coinflip_okay, coinflip_no_okay, coinflip_alright, coinflip_ok, coinflip_so]

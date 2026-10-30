@@ -36,6 +36,12 @@ CONDITIONS = {
         outcomes=(" heads", " tails"),
     ),
 }
+# The opener of the coinflip's last line, as in ../coinflip's ENDINGS. Each gets its own condition,
+# coinflip_<name>; coinflip_okay is the same prompt as coinflip. "no_okay" also loses the " I" token.
+OPENERS = {"okay": "Okay, ", "no_okay": "", "alright": "Alright, ", "ok": "OK, ", "so": "So, "}
+for _name, _opener in OPENERS.items():
+    CONDITIONS[f"coinflip_{_name}"] = {**CONDITIONS["coinflip"],
+                                       "body": CONDITIONS["coinflip"]["body"].replace("Okay, I'm", _opener + "I'm")}
 SENTINEL = "<<<CUT_HERE>>>"
 
 

@@ -7,7 +7,7 @@ from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
 
 import prompts
-from prompts import CONDITIONS, build_prompt, outcome_token_ids
+from prompts import CONDITIONS, OPENERS, build_prompt, outcome_token_ids
 
 OLMO3 = "allenai/Olmo-3.1-32B-Instruct"
 OLMO3_BASE = "allenai/Olmo-3-1125-32B"
@@ -169,3 +169,19 @@ def test_outcome_tokens_are_single_and_distinct(tok):
     for condition in CONDITIONS:
         a, b = outcome_token_ids(condition, tok)
         assert a != b
+
+
+@pytest.mark.parametrize("name", [OLMO3, LLAMA, GLM])
+def test_openers_change_only_the_last_lines_opener(name):
+    tok = AutoTokenizer.from_pretrained(name)
+    assert render("coinflip_okay", tok) == render("coinflip", tok)
+    base = tok(render("coinflip", tok), add_special_tokens=False).input_ids
+    for opener in OPENERS:
+        p = render(f"coinflip_{opener}", tok)
+        assert p.endswith(f"{OPENERS[opener]}I'm flipping the coin now ... it came up")
+        assert p == render("coinflip", tok).replace("Okay, I'm", OPENERS[opener] + "I'm")
+        ids = tok(p, add_special_tokens=False).input_ids
+        # Only the opener's tokens differ ("Okay", ",", " I"): the same prefix and suffix around them.
+        pre = next((k for k, (x, y) in enumerate(zip(ids, base)) if x != y), len(base))
+        suf = next((k for k, (x, y) in enumerate(zip(ids[::-1], base[::-1])) if x != y), len(base))
+        assert len(base) - pre - suf <= 3 and len(ids) - pre - suf <= 3
