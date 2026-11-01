@@ -1175,6 +1175,45 @@ Caveats: one Assistant prompt and prefill, no system prompt, and the Think readi
 that model (see its section). Spearman is lower than Pearson in some groups (between families, 0.73 vs. 0.81 on
 BailBench and 0.63 vs. 0.69 within origin), so extreme tasks may contribute to those r values.
 
+### With task length removed
+
+The same correlations with log task length regressed out of both models' utilities, fit on each
+group's own tasks (`<group>_length` in `outputs/cross_model/`). "Change" is from the unadjusted mean,
+with a paired bootstrap CI. "Cubic" replaces the straight line with a cubic in log length, as a check
+(`<group>_length3`; one cubic per origin in the within-origin row).
+
+![Mean r with and without length](figures/cross_model_assistant_length.png)
+
+![Model x model partial r](figures/cross_model_assistant_matrices_length.png)
+
+| tasks | n | different families, mean r [95% CI] | change [95% CI] | cubic | same family, mean r | different families, mean Spearman | lowest reliability | range of r |
+|---|---|---|---|---|---|---|---|---|
+| all | 300 | 0.90 [0.89, 0.91] | +0.01 [+0.01, +0.01] | 0.90 | 0.93 | 0.88 | 1.00 | 0.77-0.96 |
+| non-harmful | 257 | 0.84 [0.81, 0.87] | +0.02 [+0.01, +0.03] | 0.83 | 0.88 | 0.83 | 1.00 | 0.71-0.93 |
+| within origin | 300 | 0.70 [0.63, 0.75] | 0.00 [-0.01, +0.01] | 0.69 | 0.81 | 0.62 | 0.99 | 0.43-0.87 |
+| MATH | 75 | 0.55 [0.43, 0.64] | -0.01 [-0.10, +0.04] | 0.51 | 0.71 | 0.52 | 0.97 | 0.19-0.91 |
+| Alpaca | 75 | 0.56 [0.46, 0.66] | -0.04 [-0.11, +0.01] | 0.57 | 0.67 | 0.54 | 0.97 | 0.17-0.90 |
+| WildChat | 75 | 0.65 [0.52, 0.74] | +0.02 [-0.03, +0.05] | 0.65 | 0.74 | 0.59 | 0.99 | 0.40-0.86 |
+| STRESS-TEST | 45 | 0.74 [0.64, 0.81] | 0.00 [-0.03, +0.02] | 0.73 | 0.86 | 0.75 | 0.99 | 0.50-0.91 |
+| BailBench | 30 | 0.81 [0.64, 0.89] | 0.00 [-0.10, +0.03] | 0.81 | 0.89 | 0.73 | 0.99 | 0.49-0.96 |
+
+1. **Length explains almost none of the agreement.** No between-family mean moves by more than 0.04,
+   and the task types keep their order: MATH, Alpaca, WildChat, STRESS-TEST, BailBench.
+2. **That isn't because length doesn't matter within a task type.** Most models favor longer tasks on
+   MATH and Alpaca (r with log length up to 0.61) and shorter ones on BailBench (-0.10 to -0.36). Over
+   all 300 tasks it's small (-0.12 to 0.22). Correlations of this size can't move much: if both
+   models correlate 0.3 with length, partialling it out takes an r of 0.60 only to 0.56.
+3. **Length accounts for part of OLMo 7B's disagreement on MATH and WildChat.** Its preference for
+   length on MATH runs the other way (-0.20, vs. +0.60 for 32B Instruct). Removing length raises its r with 32B Instruct
+   from 0.27 to 0.50 on MATH and from 0.38 to 0.62 on WildChat. Its mean with other families rises
+   from 0.38 to 0.47 and from 0.46 to 0.54. On Alpaca it stays the outlier and falls, from 0.34 to 0.27.
+4. **The one topic-level drop to note:** on `harmful_request` (n = 37), mean r falls from 0.77 to 0.70
+   [change -0.17, -0.01]. It's the only origin or topic whose change CI excludes zero, with no
+   correction for the number of groups, so read it loosely.
+
+Caveat: length is measured in characters and is tied up with content (longer MATH problems may also
+be harder ones), so this removes whatever tracks length, not length alone.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

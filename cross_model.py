@@ -15,15 +15,21 @@ pairs) and d8ysbybo (all pairs) match the rest. Groups:
 - non-harmful: without BailBench and harmful_request (report.py's benign mask).
 - within origin: all tasks with each origin's mean removed from both models, so only agreement
   on tasks of the same type counts.
-- within origin + length: the same, with log task length also regressed out.
 - origin:<X>, topic:<X>: tasks of one origin, or one topic with at least MIN_TOPIC tasks.
+- <group>_length: the same tasks with log task length regressed out of both models, fit on that
+  group's tasks (a partial correlation). within_origin_length uses origin intercepts and one slope.
+- <group>_length3: a check on the straight line, with a cubic in log length instead;
+  within_origin_length3 fits a separate cubic per origin.
+
+Each *_length row also gets its change from the unadjusted group, with a paired bootstrap CI
+(both use the same resampled tasks). models.csv gives each model's r_loglen in every group.
 
 reliability is split-half (Spearman-Brown, as in analyze.split_half) computed on the same subset:
 a group with little spread can have a low ceiling even though the 300-task reliability is ~0.99.
 r_disattenuated = r / sqrt(reliability_a * reliability_b).
 
 Writes outputs/cross_model/{pairs,models,summary}.csv, matrix_<group>.csv, and
-figures/cross_model_assistant_{matrices,by_group}.png.
+figures/cross_model_assistant_{matrices,by_group,matrices_length,length}.png.
 
 Usage: uv run python cross_model.py
 """
@@ -119,18 +125,28 @@ def make_groups(origins, topics, benign, loglen):
     dummies = (origins[:, None] == np.array(list(ORIGIN_STYLE))[None, :]).astype(float)
     groups = {"all": ("All 300 tasks", np.ones(n, bool), None),
               "non_harmful": ("Non-harmful", benign, None),
-              "within_origin": ("Within origin", np.ones(n, bool), dummies),
-              "within_origin_length": ("Within origin + length", np.ones(n, bool), np.column_stack([dummies, loglen]))}
+              "within_origin": ("Within origin", np.ones(n, bool), dummies)}
     for o in ORIGIN_STYLE:
         groups[f"origin:{o}"] = (ORIGIN_LABEL[o], origins == o, None)
     for t, c in zip(*np.unique(topics, return_counts=True)):
         if c >= MIN_TOPIC:
             groups[f"topic:{t}"] = (f"topic: {t}", topics == t, None)
+    for key, (label, mask, cov) in list(groups.items()):
+        z = (loglen - loglen[mask].mean()) / loglen[mask].std()
+        cubic = np.column_stack([np.ones(n), z, z ** 2, z ** 3])
+        if cov is None:
+            line, curve = cubic[:, :2], cubic
+        else:  # within origin: one slope, or one cubic per origin
+            line = np.column_stack([cov, loglen])
+            curve = np.column_stack([cov * cubic[:, [j]] for j in range(4)])
+        groups[f"{key}_length"] = (f"{label} + length", mask, line)
+        groups[f"{key}_length3"] = (f"{label} + cubic length", mask, curve)
     return groups
 
 
-def group_stats(U, halves, origins, group, resamples):
-    """The stats for one group: r, its bootstrap replicates, Spearman, reliabilities, SDs."""
+def group_stats(U, halves, origins, loglen, group, resamples):
+    """The stats for one group: r, its bootstrap replicates, Spearman, reliabilities, SDs, r with
+    log length. Groups over the same tasks get the same bootstrap draws, so they can be paired."""
     _, mask, cov = group
     sub = np.flatnonzero(mask)
     def resid(i, V):
@@ -139,7 +155,7 @@ def group_stats(U, halves, origins, group, resamples):
     reps = []
     rng = np.random.default_rng(0)
     for draw in resamples:
-        if cov is None and not mask.all():
+        if not mask.all():
             # Same origin-stratified scheme, restricted to the group's tasks.
             members = [sub[origins[sub] == o] for o in np.unique(origins[sub])]
             draw = np.concatenate([rng.choice(m, len(m)) for m in members])
@@ -149,12 +165,14 @@ def group_stats(U, halves, origins, group, resamples):
         h0, h1 = resid(sub, halves[s, :, :, 0].T), resid(sub, halves[s, :, :, 1].T)
         half_r[s] = [pearson(h0[:, m], h1[:, m]) for m in range(U.shape[1])]
     mean_half = half_r.mean(0)
+    L = resid(sub, loglen[:, None])[:, 0]
     return dict(n=len(sub), r=np.corrcoef(A.T), reps=np.array(reps), sd=A.std(0),
+                r_loglen=np.array([pearson(A[:, m], L) if L.std() > 1e-9 else float("nan") for m in range(A.shape[1])]),
                 reliability=2 * mean_half / (1 + mean_half),
                 spearman=np.array([[spearman(A[:, a], A[:, b]) for b in range(A.shape[1])] for a in range(A.shape[1])]))
 
 
-def plot_matrices(stats, groups, labels, families, keys, path):
+def plot_matrices(stats, groups, labels, families, keys, path, title="Post-trained Assistant utilities: Pearson r between models"):
     """Heatmaps of model x model r, one per group, on one colour scale."""
     assert min(stats[k]["r"].min() for k in keys) >= 0, "negative r: use plotstyle.DIVERGING centred on 0"
     ncols = 3
@@ -182,7 +200,7 @@ def plot_matrices(stats, groups, labels, families, keys, path):
             side.set_visible(False)
     for ax in axes.flat[len(keys):]:
         ax.set_visible(False)
-    fig.suptitle("Post-trained Assistant utilities: Pearson r between models", x=0.01, ha="left", fontsize=13,
+    fig.suptitle(title, x=0.01, ha="left", fontsize=13,
                  fontweight="bold")
     fig.tight_layout(rect=(0, 0, 0.93, 0.98))
     cax = fig.add_axes([0.945, 0.3, 0.012, 0.4])
@@ -212,6 +230,27 @@ def plot_by_group(stats, groups, families, keys, path):
     ax.set_ylabel("Pearson r between two models")
     ax.set_title("Models agree less within a task type than across all tasks, least on MATH, Alpaca and WildChat", loc="left")
     ax.legend(loc="lower left", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def plot_length_effect(summary, groups, keys, path):
+    """Mean between-family r with and without log length removed, per group."""
+    rows = {r["group"]: r for r in summary}
+    fig, ax = plt.subplots(figsize=(10.5, 4.4))
+    for suffix, color, marker, dx, label in (("", plotstyle.SERIES[0], "o", -0.1, "Unadjusted"),
+                                             ("_length", plotstyle.SERIES[1], "s", 0.1, "Log length removed")):
+        pts = [rows[k + suffix] for k in keys]
+        est = np.array([r["mean_r_across_families"] for r in pts])
+        ax.errorbar(np.arange(len(keys)) + dx, est, yerr=[est - [r["ci_low"] for r in pts], [r["ci_high"] for r in pts] - est],
+                    fmt=marker, color=color, ms=8, mec="white", mew=0.8, elinewidth=1.5, label=label, zorder=3)
+    ax.set_ylim(0, 1)
+    ax.grid(axis="x", visible=False)
+    ax.set_xticks(range(len(keys)), [f"{groups[k][0]}\nn = {rows[k]['n_tasks']}" for k in keys], fontsize=8.5)
+    ax.set_ylabel("Mean r between families (39 pairs)")
+    ax.set_title("Removing task length barely changes agreement between models (95% CI over tasks)", loc="left")
+    ax.legend(loc="lower right", fontsize=9)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
@@ -250,12 +289,12 @@ def main():
     groups = make_groups(origins, topics, benign, loglen)
     halves = split_half_fits(ids, effects, np.random.default_rng(0))
     resamples = stratified_resamples(origins, np.random.default_rng(0), N_BOOTSTRAP)
-    stats = {k: group_stats(U, halves, origins, g, resamples) for k, g in groups.items()}
+    stats = {k: group_stats(U, halves, origins, loglen, g, resamples) for k, g in groups.items()}
 
     tri = list(itertools.combinations(range(len(MODELS)), 2))
     across = [(a, b) for a, b in tri if families[a] != families[b]]
     same = [(a, b) for a, b in tri if families[a] == families[b]]
-    pair_rows, model_rows, summary_rows = [], [], []
+    pair_rows, model_rows, summary_rows, across_reps = [], [], [], {}
     for key, s in stats.items():
         lo, hi = np.percentile(s["reps"], [2.5, 97.5], axis=0)
         rel = s["reliability"]
@@ -266,16 +305,23 @@ def main():
                                   reliability_b=rel[b], r_disattenuated=s["r"][a, b] / np.sqrt(rel[a] * rel[b])))
         for m, label in enumerate(labels):
             others = [n for n in range(len(labels)) if n != m and families[n] != families[m]]
-            model_rows.append(dict(group=key, n_tasks=s["n"], model=label, utility_sd=s["sd"][m], reliability=rel[m],
+            model_rows.append(dict(group=key, n_tasks=s["n"], model=label, utility_sd=s["sd"][m],
+                                   r_loglen=s["r_loglen"][m], reliability=rel[m],
                                    mean_r_other_families=s["r"][m, others].mean(), outcome_mass_all_tasks=masses[m]))
         pair_mean = lambda M, ps: np.mean([M[a, b] for a, b in ps], axis=0)
         rep_across = np.array([pair_mean(R, across) for R in s["reps"]])
         lo_a, hi_a = np.percentile(rep_across, [2.5, 97.5])
+        across_reps[key] = rep_across
+        base = key.removesuffix("_length3").removesuffix("_length")
+        # Change from the unadjusted group; a paired CI, since both saw the same bootstrap draws.
+        delta = pair_mean(s["r"], across) - pair_mean(stats[base]["r"], across)
+        delta_lo, delta_hi = np.percentile(rep_across - across_reps[base], [2.5, 97.5])
         disatt = s["r"] / np.sqrt(np.outer(rel, rel))
         low = min(tri, key=lambda p: s["r"][p])
         high = max(tri, key=lambda p: s["r"][p])
         summary_rows.append(dict(group=key, n_tasks=s["n"], mean_r_across_families=pair_mean(s["r"], across),
-                                 ci_low=lo_a, ci_high=hi_a, mean_r_same_family=pair_mean(s["r"], same),
+                                 ci_low=lo_a, ci_high=hi_a, change_from_unadjusted=delta, change_ci_low=delta_lo,
+                                 change_ci_high=delta_hi, mean_r_same_family=pair_mean(s["r"], same),
                                  mean_spearman_across=pair_mean(s["spearman"], across),
                                  mean_disattenuated_across=pair_mean(disatt, across),
                                  min_reliability=rel.min(), median_reliability=np.median(rel),
@@ -305,11 +351,16 @@ def main():
     main_keys = ["all", "non_harmful", "within_origin", *[f"origin:{o}" for o in ORIGIN_STYLE]]
     plot_matrices(stats, groups, labels, families, main_keys, "figures/cross_model_assistant_matrices.png")
     plot_by_group(stats, groups, families, main_keys, "figures/cross_model_assistant_by_group.png")
+    plot_matrices(stats, groups, labels, families, [f"{k}_length" for k in main_keys],
+                  "figures/cross_model_assistant_matrices_length.png",
+                  "Post-trained Assistant utilities with log task length removed: partial r between models")
+    plot_length_effect(summary_rows, groups, main_keys, "figures/cross_model_assistant_length.png")
 
-    print(f"\n{'group':26} {'n':>4} {'across r [95% CI]':>22} {'same':>6} {'rho':>6} {'disatt':>7} {'rel min/med':>12}  "
+    print(f"\n{'group':32} {'n':>4} {'across r [95% CI]':>22} {'change [95% CI]':>23} {'same':>6} {'rho':>6} {'disatt':>7} {'rel min/med':>12}  "
           "lowest / highest pair")
     for r in summary_rows:
-        print(f"{r['group']:26} {r['n_tasks']:4d} {r['mean_r_across_families']:8.2f} [{r['ci_low']:5.2f},{r['ci_high']:5.2f}] "
+        print(f"{r['group']:32} {r['n_tasks']:4d} {r['mean_r_across_families']:8.2f} [{r['ci_low']:5.2f},{r['ci_high']:5.2f}] "
+              f"{r['change_from_unadjusted']:7.3f} [{r['change_ci_low']:6.3f},{r['change_ci_high']:6.3f}] "
               f"{r['mean_r_same_family']:6.2f} {r['mean_spearman_across']:6.2f} {r['mean_disattenuated_across']:7.2f} "
               f"{r['min_reliability']:5.2f}/{r['median_reliability']:4.2f}  {r['min_r']:.2f} {r['min_pair']}; "
               f"{r['max_r']:.2f} {r['max_pair']}")
