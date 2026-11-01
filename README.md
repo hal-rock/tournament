@@ -64,6 +64,7 @@ uv run python lens.py configs/lens/olmo3.1-32b-instruct.yaml   # logit lens at e
 uv run python lens_analysis.py outputs/lens/<run_id>     # utilities by depth, figures/lens_*.{png,gif,mp4}
 uv run python tournament.py configs/openers/<model>.yaml # coinflip with each last-line opener
 uv run python openers.py                                 # openers vs bleedthrough (W&B group "openers")
+uv run python cross_model.py                             # Assistant utilities: model x model r, by task type
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -1129,6 +1130,50 @@ perception under each opener, and whether that read predicts these per-opener r 
 - **One phrasing** of the rest of the line, one Assistant measurement, no system prompt, bf16.
 - Every earlier OLMo coinflip number in this repo (stages, retraining, lens, probes) was measured at "Okay,",
   where its bleedthrough is largest, so those numbers overstate how much it shows at other wordings.
+
+## Do models agree on what they prefer as the Assistant?
+
+`cross_model.py` correlates Assistant utilities between the ten final-stage models scored on the
+300 tasks: the eight of the model sweep, plus OLMo 3.1 32B Think (`z6ldqzq2`, read after an empty
+think block) and OLMo 3 7B Instruct (`st9cz0uw`). All are fit on the same 15,000 pairs, and the
+eight sweep models reproduce the `models.py` matrix to within 0.00005. "Within origin" removes each origin's mean
+from both models. CIs are task bootstraps within origin. They cover the choice of tasks, not of
+models, and the pairs share models, so they aren't independent. Reliability is split-half within each
+group. Tables are in `outputs/cross_model/` (`pairs.csv` has every pair in every group, with CIs).
+
+![Model x model r](figures/cross_model_assistant_matrices.png)
+
+![Pairwise r by group](figures/cross_model_assistant_by_group.png)
+
+| tasks | n | different families, mean r [95% CI] | same family, mean r | different families, mean Spearman | lowest reliability | range of r |
+|---|---|---|---|---|---|---|
+| all | 300 | 0.89 [0.88, 0.90] | 0.92 | 0.87 | 1.00 | 0.77-0.96 |
+| non-harmful | 257 | 0.82 [0.79, 0.85] | 0.85 | 0.82 | 1.00 | 0.62-0.93 |
+| within origin | 300 | 0.69 [0.63, 0.75] | 0.80 | 0.63 | 0.99 | 0.41-0.88 |
+| within origin + length | 300 | 0.70 [0.63, 0.75] | 0.81 | 0.62 | 0.99 | 0.43-0.87 |
+| MATH | 75 | 0.56 [0.45, 0.64] | 0.65 | 0.53 | 0.97 | 0.22-0.95 |
+| Alpaca | 75 | 0.61 [0.52, 0.68] | 0.71 | 0.59 | 0.98 | 0.19-0.91 |
+| WildChat | 75 | 0.62 [0.51, 0.71] | 0.67 | 0.60 | 0.99 | 0.33-0.86 |
+| STRESS-TEST | 45 | 0.74 [0.65, 0.81] | 0.86 | 0.74 | 0.99 | 0.51-0.91 |
+| BailBench | 30 | 0.81 [0.66, 0.88] | 0.89 | 0.73 | 0.99 | 0.50-0.96 |
+
+1. **Agreement is high overall, and part of it is agreement about task types.** Between families,
+   mean r falls from 0.89 over all tasks to 0.69 within origin. Regressing out log length as well
+   changes nothing (0.70).
+2. **Models agree most on harm-related tasks and least on ordinary ones.** BailBench and STRESS-TEST
+   give 0.81 and 0.74, against 0.56-0.62 for MATH, Alpaca and WildChat. These gaps aren't
+   noise: reliability is at least 0.97 in every group in this table, so disattenuating moves no mean by more than 0.01.
+3. **OLMo 3 7B Instruct is the main outlier on ordinary tasks,** including within its own family.
+   On MATH it correlates 0.27 with OLMo 3.1 32B Instruct, while 32B Instruct and Think
+   correlate 0.95. Its mean r with other families is 0.38 on MATH and 0.34 on Alpaca, against
+   0.66 on BailBench. Without it, the between-family means rise by 0.02-0.05. Llama is also low on MATH
+   (0.38).
+4. **A family doesn't guarantee agreement.** Same-family pairs average only 0.03-0.12 higher than
+   different-family pairs, and the OLMo 7B pairs are the reason their range is so wide on ordinary tasks.
+
+Caveats: one Assistant prompt and prefill, no system prompt, and the Think reading isn't native to
+that model (see its section). Spearman is lower than Pearson in some groups (between families, 0.73 vs. 0.81 on
+BailBench and 0.63 vs. 0.69 within origin), so extreme tasks may contribute to those r values.
 
 ## Tasks
 
