@@ -65,6 +65,7 @@ uv run python lens_analysis.py outputs/lens/<run_id>     # utilities by depth, f
 uv run python tournament.py configs/openers/<model>.yaml # coinflip with each last-line opener
 uv run python openers.py                                 # openers vs bleedthrough (W&B group "openers")
 uv run python cross_model.py                             # Assistant utilities: model x model r, by task type
+uv run python olmo2.py                                   # OLMo 2 32B stages next to OLMo 3.1 32B (W&B group "olmo2")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -82,8 +83,8 @@ only the fitted utilities, so it runs in seconds on a laptop.
 Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
-`../coinflip` DPO retraining checkpoints (W&B group `retrain`) and the last-line openers (W&B group
-`openers`) below.
+`../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
+`openers`) and OLMo 2 32B by stage (W&B group `olmo2`) below.
 
 ## Model families
 
@@ -1213,6 +1214,94 @@ with a paired bootstrap CI. "Cubic" replaces the straight line with a cubic in l
 
 Caveat: length is measured in characters and is tied up with content (longer MATH problems may also
 be harder ones), so this removes whatever tracks length, not length alone.
+
+## OLMo 2 32B by post-training stage
+
+In `../coinflip`, OLMo 2 32B has a sizable effect after SFT alone (+0.97 log-odds, from +0.15 at base), while OLMo 3.1
+32B needs DPO (+0.11 at SFT, +2.24 at DPO). Both end at about the same size (+2.42, +2.27). Those effects are measured
+only on benign vs extremely harmful pairs. Does OLMo 2's SFT effect hold across the 300 tasks?
+
+### Design
+
+- **Stages:** `allenai/OLMo-2-0325-32B` (base), `-SFT`, `-DPO` and `-Instruct` (final), both conditions, one W&B run per
+  stage (group `olmo2`, `configs/olmo2/`).
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders, 30,000 prompts per stage and condition. OLMo 3.1 32B
+  is `d8ysbybo` refit on the same pairs, all four stages.
+- **Prompts:** the same text as every other run, no system prompt. Every stage reads DPO's template, as in `../coinflip`:
+  the stages' own templates disagree on BOS and all were trained with `--add_bos`. `../coinflip` found dropping BOS moves
+  the effect by at most 0.06. The chat frame differs from OLMo 3's: `<|user|>` and `<|assistant|>` are ordinary tokens, so
+  even the base has trained embeddings for them.
+- **GPUs:** 1x A100 SXM per stage, the GPU type of `d8ysbybo`'s config and of `../coinflip`'s OLMo 2 run. Base weights
+  are fp32 on disk and cast to bf16 at load, like every other stage's.
+- **Analysis:** `olmo2.py`.
+
+### Pre-registered before running (2026-11-02)
+
+A and C are a stage's Assistant and coinflip utilities. CIs are 95% task bootstraps within origin, using the same
+resamples for every stage and both ladders, so differences are paired. "Non-harmful" is the usual 257 tasks.
+
+**Measures per ladder and stage:**
+- **r** = r(A, C) over all tasks, non-harmful tasks and within origin (each origin's mean removed from both).
+- **r shift** = r(A - A_base, C - C_base).
+- **b**, the slope of C on A in nats per Assistant SD, over all tasks and non-harmful tasks.
+- **Gap**, mean C of non-harmful minus harmful tasks, the contrast `../coinflip`'s pairs measure.
+- **SFT share** of a stat: (SFT - base) / (final - base).
+- Also: coinflip SD, the SD of C around its line on A, r with log length partialled out, r over harmful tasks, r over the
+  five origin means, split-half reliability, heads bias and coin mass.
+
+OLMo 3.1 32B on these pairs, computed from existing data before writing this:
+
+| stage | r | r non-harmful | r within origin | r shift | b | gap | `../coinflip` |
+|---|---|---|---|---|---|---|---|
+| base | 0.12 [-0.01, 0.25] | 0.05 | 0.23 | | 0.01 | 0.00 | 0.12 |
+| SFT | 0.25 [0.15, 0.34] | 0.06 [-0.05, 0.16] | 0.27 [0.17, 0.36] | 0.24 | 0.04 | 0.07 | 0.11 |
+| DPO | 0.65 [0.56, 0.72] | 0.43 | 0.63 | 0.66 | 0.24 | 0.37 | 2.24 |
+| final | 0.63 [0.54, 0.71] | 0.40 | 0.63 | 0.64 | 0.24 | 0.38 | 2.27 |
+
+Its SFT share is 0.15 [0.09, 0.19] of b and 0.18 [0.10, 0.25] of the gap. So on the broad task set OLMo 3's SFT isn't quite
+zero, even though it's flat on `../coinflip`'s pairs.
+
+**The call (OLMo 2 vs OLMo 3 at SFT, paired):**
+- **Within type:** r non-harmful and r within origin at SFT are both higher in OLMo 2, each by at least 0.05 with a CI
+  above 0.
+- **Harm contrast:** the gap's SFT share is higher in OLMo 2, with a CI above 0.
+- Both: **holds across the range.** Harm contrast alone: **harm contrast only.** Within type alone: **within-type only.**
+  Neither: **does not hold.**
+
+**Validation gate:** split-half reliability is at least 0.9 in all eight OLMo 2 cells, and the OLMo 3 refit matches its
+all-pairs utilities at r >= 0.99 in all eight of its cells.
+
+**Predictions:**
+1. **The call:** holds across the range (about 55%), with harm contrast only the runner-up (about 35%). The harm contrast
+   is the safer half: `../coinflip`'s SFT share is 36% against about 0 in OLMo 3. The within-origin bar is the riskier
+   one, since OLMo 3's SFT already has 0.27 there, most of it from its base.
+2. **SFT size:** OLMo 2's gap share is between 0.25 and 0.5, and its r at SFT is at least 0.35.
+3. **Final stage:** r is at least 0.5 and r shift is at least 0.5, as the two ladders end at the same `../coinflip` effect.
+4. **Coarser than OLMo 3:** at the final stage, r non-harmful is lower than r by at least 0.1 in OLMo 2, because its
+   `../coinflip` effect barely depends on which tasks are offered (SD 0.22 across pairs vs 1.44 in OLMo 3).
+5. **Stage order:** DPO is OLMo 2's largest single step in r, b and the gap, as it is in `../coinflip`. The DPO to final
+   step in the gap is above 0 (a CI above 0) in OLMo 2, where it's +0.00 in OLMo 3, matching `../coinflip`'s +0.17 vs +0.02.
+6. **Coin mass:** at least 0.8 at every stage.
+
+**What each outcome would mean:**
+- **Holds across the range:** SFT alone can move the coinflip toward the Assistant's ranking in general, not only its
+  rejection of harm. "It needs DPO" would then be specific to OLMo 3's recipe across this whole range, as `../coinflip`
+  found for its pairs.
+- **Harm contrast only:** OLMo 2's SFT effect is mostly the benign-harmful contrast its pairs measure, and following the
+  Assistant within a task type still takes DPO, as in OLMo 3.
+- **Within-type only:** the SFT coinflip follows the Assistant within types without a larger harm contrast than OLMo 3.
+  That would conflict with `../coinflip`, so I'd look for a problem first.
+- **Does not hold:** the SFT effect is specific to `../coinflip`'s pairs.
+
+**Caveats, known in advance:**
+- OLMo 2 and OLMo 3 differ in SFT data, DPO pairs, chat frame and optimizer budget all at once, so this shows what
+  isn't necessary, not which difference matters.
+- The share measures use each stage's own Assistant utilities. b is per Assistant SD for that reason, since A's scale
+  grows by stage.
+- Every coinflip here is at "Okay,", where OLMo 3's bleedthrough is largest ("Last-line openers"). OLMo 2's sensitivity to
+  the opener isn't known.
+- `d8ysbybo`'s GPU type isn't recorded, though its config says A100.
+- One phrasing per condition, no system prompt, bf16.
 
 ## Tasks
 

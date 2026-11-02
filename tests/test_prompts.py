@@ -3,6 +3,7 @@
 import importlib.util
 
 import pytest
+import yaml
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
 
@@ -15,6 +16,10 @@ OLMO3_THINK = "allenai/Olmo-3.1-32B-Think"
 OLMO3_THINK_SFT = "allenai/Olmo-3-32B-Think-SFT"  # step 0 of ../coinflip's DPO retraining run 5
 RUN5 = "hal-rock/olmo3-32b-run5-instruct-lr1e-6"  # its checkpoints, one branch per step
 OLMO2 = "allenai/OLMo-2-0425-1B-Instruct"
+# OLMo 2 32B: every stage reads DPO's template (configs/olmo2/); SFT has no tokenizer.json of its own.
+OLMO2_BASE_32B = "allenai/OLMo-2-0325-32B"
+OLMO2_DPO_32B = "allenai/OLMo-2-0325-32B-DPO"
+OLMO2_FINAL_32B = "allenai/OLMo-2-0325-32B-Instruct"
 QWEN_SMALL = "Qwen/Qwen3.5-0.8B"  # CPU smoke test (configs/local-qwen.yaml)
 QWEN_SMALL_BASE = "Qwen/Qwen3.5-0.8B-Base"
 QWEN_DENSE = "Qwen/Qwen3.5-27B"
@@ -36,7 +41,7 @@ QWEN_REPLY = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 # Where the Assistant's reply starts. Hybrid-thinking templates get their non-thinking
 # reply: an empty think block (Qwen 3.5, GLM-4.5) or thought channel (Gemma 4).
 REPLY_HEADER = {
-    OLMO3: "<|im_end|>\n<|im_start|>assistant\n", OLMO2: "\n<|assistant|>\n",
+    OLMO3: "<|im_end|>\n<|im_start|>assistant\n", OLMO2: "\n<|assistant|>\n", OLMO2_DPO_32B: "\n<|assistant|>\n",
     QWEN_SMALL: QWEN_REPLY, QWEN_DENSE: QWEN_REPLY, QWEN_MOE: QWEN_REPLY, QWEN_LARGE: QWEN_REPLY,
     GEMMA: "<turn|>\n<|turn>model\n<|channel>thought\n<channel|>",
     LLAMA: "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
@@ -88,7 +93,7 @@ def test_task_text_mentioning_system_is_kept(tok):
     assert "operating system" in render("assistant", tok, first="Explain what an operating system does.")
 
 
-@pytest.mark.parametrize("name", [OLMO3, LLAMA, GLM])
+@pytest.mark.parametrize("name", [OLMO3, LLAMA, GLM, OLMO2_DPO_32B])
 def test_prefill_continues_like_a_rendered_reply(name):
     """Where the template renders past Assistant turns with the same header as the
     generation prompt, the prefilled prompt is a prefix of the conversation in which
@@ -100,6 +105,33 @@ def test_prefill_continues_like_a_rendered_reply(name):
                                    tokenize=False, enable_thinking=False)
     conv = prompts._strip_system(conv, body)
     assert conv.startswith(render("assistant", tok))
+
+
+def test_olmo2_32b_stages_read_identical_tokens():
+    """Base and final tokenize DPO's rendering to the same ids (SFT takes DPO's tokenizer), BOS opens
+    the prompt, and the outcome tokens are the ones OLMo 3 reads."""
+    dpo = AutoTokenizer.from_pretrained(OLMO2_DPO_32B)
+    olmo3 = AutoTokenizer.from_pretrained(OLMO3)
+    for condition in ("assistant", "coinflip"):
+        p = render(condition, dpo, first="Explain gravity.", second="Solve $x^2=4$.")
+        assert p.startswith("<|endoftext|><|user|>\n") and "system" not in p
+        ids = dpo(p, add_special_tokens=False).input_ids
+        assert ids[0] == dpo.eos_token_id and dpo.decode(ids[1:6]) == "<|user|>\n"
+        for name in (OLMO2_BASE_32B, OLMO2_FINAL_32B):
+            assert AutoTokenizer.from_pretrained(name)(p, add_special_tokens=False).input_ids == ids
+        assert [dpo.decode([i]) for i in outcome_token_ids(condition, dpo)] == list(CONDITIONS[condition]["outcomes"])
+        # The body is the same text OLMo 3 reads, so the ladders differ only in the frame around it.
+        assert p.split("<|user|>\n")[1].split("\n<|assistant|>")[0] in render(condition, olmo3, first="Explain gravity.",
+                                                                              second="Solve $x^2=4$.")
+
+
+def test_olmo2_configs_share_one_template_and_the_sweep_pairs():
+    configs = [yaml.safe_load(open(f"configs/olmo2/{s}.yaml")) for s in ("base", "sft", "dpo", "instruct")]
+    for cfg in configs:
+        (m,) = cfg["models"]
+        assert m["chat_template_from"] == OLMO2_DPO_32B and m["conditions"] == ["assistant", "coinflip"]
+        assert cfg["max_pairs"] == 15000 and cfg["seed"] == 0 and cfg["group"] == "olmo2"
+    assert configs[1]["models"][0]["tokenizer_from"] == OLMO2_DPO_32B
 
 
 def test_deepseek_matches_reference_encoding():

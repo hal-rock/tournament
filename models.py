@@ -252,21 +252,21 @@ def collect_runs(group, project=PROJECT):
     return latest
 
 
-def olmo_on_shared_pairs(config):
-    """Refit the OLMo stages run's base and instruct stages on the pairs the per-model runs
-    scored (select_pairs with their max_pairs and seed). Cached in
-    outputs/<run>/analysis-<n>pairs; returns (utilities.csv rows, summary)."""
+def olmo_on_shared_pairs(config, stages=STAGES, cache_suffix=""):
+    """Refit the OLMo stages run's stages (by default base and instruct) on the pairs the
+    per-model runs scored (select_pairs with their max_pairs and seed). Cached in
+    outputs/<run>/analysis-<n>pairs<cache_suffix>; returns (utilities.csv rows, summary)."""
     import wandb
     from tournament import select_pairs
     run = wandb.Api().run(OLMO_RUN)
-    out = Path("outputs") / run.id / f"analysis-{config['max_pairs']}pairs"
+    out = Path("outputs") / run.id / f"analysis-{config['max_pairs']}pairs{cache_suffix}"
     if not (out / "utilities.csv").exists():
         tasks = read_jsonl(config["tasks_file"])
         index = {t["id"]: i for i, t in enumerate(tasks)}
         keep = set(select_pairs(len(tasks), config["max_pairs"], config.get("seed", 0)))
-        rows = [r for r in fetch_results(run, Path("outputs") / run.id) if r["stage"] in STAGES
+        rows = [r for r in fetch_results(run, Path("outputs") / run.id) if r["stage"] in stages
                 and tuple(sorted((index[r["first"]], index[r["second"]]))) in keep]
-        analyze(rows, tasks, out, seed=config.get("seed", 0), stage_order=list(STAGES))
+        analyze(rows, tasks, out, seed=config.get("seed", 0), stage_order=list(stages))
     with open(out / "utilities.csv", newline="") as fh:
         return list(csv.DictReader(fh)), json.loads((out / "summary.json").read_text())
 

@@ -1,0 +1,31 @@
+# OLMo 2 32B by post-training stage (README, "OLMo 2 32B by post-training stage"). One config per
+# stage, each on its own 1x A100 SXM, the GPU type of OLMo 3 32B's stages run and ../coinflip's OLMo 2 run.
+# Every stage reads DPO's template: the stages' own disagree (32B SFT and Instruct omit BOS, DPO has it, the
+# base has none), and all were trained with --add_bos, so BOS is the frame they know.
+wandb_project: tournament
+group: olmo2
+tags: [olmo2-32b]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+# OLMo 2 has no default system prompt, so "none" changes nothing here; it only matches the other runs.
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep; OLMo 3 32B (d8ysbybo) is refit on the same ones.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring, as for OLMo 3 32B
+# on an A100 (see tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+run_name: olmo2-32b-sft
+
+models:
+  - name: allenai/OLMo-2-0325-32B-SFT
+    stage: sft
+    # This repo has no tokenizer.json. Same vocab as DPO's.
+    tokenizer_from: allenai/OLMo-2-0325-32B-DPO
+    chat_template_from: allenai/OLMo-2-0325-32B-DPO
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}

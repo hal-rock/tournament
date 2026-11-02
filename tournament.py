@@ -188,7 +188,9 @@ def main():
         # revision: an HF branch, e.g. an intermediate checkpoint of ../coinflip's DPO retraining.
         revision = m.get("revision")
         print(f"Loading {m['name']}{'@' + revision if revision else ''} on {device} ({dtype})", flush=True)
-        tokenizer = AutoTokenizer.from_pretrained(m["name"], revision=revision)
+        # tokenizer_from: for a repo without usable tokenizer files (OLMo 2 32B SFT has no tokenizer.json).
+        tokenizer = AutoTokenizer.from_pretrained(m.get("tokenizer_from", m["name"]),
+                                                  revision=None if "tokenizer_from" in m else revision)
         template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]),
                                                            revision=None if "chat_template_from" in m else revision)
         model = load_model(m["name"], device, dtype, revision, m.get("max_memory"))
