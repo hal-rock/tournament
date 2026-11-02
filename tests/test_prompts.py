@@ -75,6 +75,34 @@ def test_assistant_prefill_follows_closed_user_turn(tok):
     assert render("assistant", tok, prefill=False).endswith(header)
 
 
+def test_user_choice_continues_human_turn(tok):
+    p = render("user_choice", tok)
+    assert p.endswith("whichever I choose.\n\nTask A: FIRST\n\nTask B: SECOND\n\nOkay, I think I'll choose Task")
+    assert "assistant" not in p.lower() and "system" not in p and "nothink" not in p
+    # Same answer tokens as the Assistant's choice, read right after the same word.
+    assert outcome_token_ids("user_choice", tok) == outcome_token_ids("assistant", tok)
+    assert tok.decode(tok(p, add_special_tokens=False).input_ids[-1]) == " Task"
+
+
+def test_user_choice_differs_from_the_assistant_prompt_only_where_it_must():
+    a, u = CONDITIONS["assistant"]["body"], CONDITIONS["user_choice"]["body"]
+    assert u.replace("whichever I choose", "whichever you choose") == a + "\n\nOkay, I think I'll choose Task"
+    assert CONDITIONS["assistant"]["prefill"] == "I'll choose Task" and u.endswith("I'll choose Task")
+
+
+def test_user_choice_configs_pair_base_and_final():
+    finals = {"olmo3.1-32b": OLMO3, "gemma4-31b": GEMMA, "llama-70b": LLAMA}
+    for family, final in finals.items():
+        base = yaml.safe_load(open(f"configs/user_choice/{family}-base.yaml"))
+        last = yaml.safe_load(open(f"configs/user_choice/{family}-final.yaml"))
+        (b,), (f,) = base["models"], last["models"]
+        assert b["stage"] == "base" and b["conditions"] == ["user_choice"] and b["chat_template_from"] == final
+        assert f["stage"] == "instruct" and f["name"] == final and f["conditions"] == ["user_choice", "assistant"]
+        for cfg in (base, last):
+            assert cfg["max_pairs"] == 15000 and cfg["seed"] == 0 and cfg["system_prompt"] == "none"
+            assert cfg["group"] == "user_choice" and cfg["tags"] == [family]
+
+
 def test_conditions_share_opening_and_layout(tok):
     a = render("assistant", tok)
     c = render("coinflip", tok)

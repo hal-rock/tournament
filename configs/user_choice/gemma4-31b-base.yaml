@@ -1,0 +1,22 @@
+# User choice (README, "Does post-training make the user's choice more like the Assistant's?"): the user
+# picks which task the Assistant does. One config per stage, each on its own pod. 1x H200, as the sweep. ~120 GB of disk.
+wandb_project: tournament
+group: user_choice
+tags: [gemma4-31b]
+run_name: user-choice-gemma4-31b-base
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep, so the Assistant and coinflip utilities can come from it.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: google/gemma-4-31B
+    stage: base
+    chat_template_from: google/gemma-4-31B-it
+    conditions: [user_choice]

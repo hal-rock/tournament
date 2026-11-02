@@ -1,0 +1,24 @@
+# User choice (README, "Does post-training make the user's choice more like the Assistant's?"): the user
+# picks which task the Assistant does. One config per stage, each on its own pod. 1x H200 without a KV cache, as in configs/openers/llama-70b.yaml (the sweep used 2x H200 and the openers run reproduced it at r = 1.0000). ~250 GB of disk.
+wandb_project: tournament
+group: user_choice
+tags: [llama-70b]
+run_name: user-choice-llama-70b-base
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep, so the Assistant and coinflip utilities can come from it.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.1-70B
+    stage: base
+    chat_template_from: unsloth/Llama-3.3-70B-Instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [user_choice]

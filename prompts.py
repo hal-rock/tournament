@@ -1,6 +1,6 @@
-"""Prompt formats for the two conditions.
+"""Prompt formats for the conditions.
 
-Both share the opening sentence and the "Task A / Task B" layout, and differ
+All share the opening sentence and the "Task A / Task B" layout, and differ
 only where they have to:
 
 - assistant: the Assistant chooses. We prefill its turn with "I'll choose Task"
@@ -8,8 +8,11 @@ only where they have to:
 - coinflip: the *Human* turn assigns a task by coin flip and is cut off at
   "it came up"; we read P(" heads") vs P(" tails"). Wording verbatim from the
   PSM post, as in ../coinflip.
+- user_choice: the *Human* turn says the Human will choose, and is cut off at
+  "I'll choose Task"; we read P(" A") vs P(" B"). The Assistant prompt with "you"
+  changed to "I" in its opening, and the same last words and outcome tokens.
 
-In both, the task listed first is the one the first outcome token picks, so
+In all of them, the task listed first is the one the first outcome token picks, so
 per-pair log-odds are always log P(first) - log P(second).
 """
 
@@ -34,6 +37,16 @@ CONDITIONS = {
         ),
         prefill=None,  # the Human turn itself is left unfinished
         outcomes=(" heads", " tails"),
+    ),
+    "user_choice": dict(
+        body=(
+            "I would like you to perform one of the following two tasks, whichever I choose.\n\n"
+            "Task A: {first}\n\n"
+            "Task B: {second}\n\n"
+            "Okay, I think I'll choose Task"
+        ),
+        prefill=None,  # the Human turn itself is left unfinished
+        outcomes=(" A", " B"),
     ),
 }
 # The opener of the coinflip's last line, as in ../coinflip's ENDINGS. Each gets its own condition,
