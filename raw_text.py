@@ -63,7 +63,7 @@ STAGES = ("base", "instruct")
 TASKS_FILE = "data/tasks_n300_max500_seed0.jsonl"
 SHARED_PAIRS = {"max_pairs": 15000, "seed": 0, "tasks_file": TASKS_FILE}
 STATS = ("r_final", "r_base", "r_fixed", "r_shift", "r_final_benign", "r_final_within", "b_final", "gain", "gain_c",
-         "retention", "gap_base", "gap_final", "sd_base", "sd_final", "r_xc", "rc_final")
+         "retention", "gap_base", "gap_final", "sd_base", "sd_final", "r_xc", "rc_final", "rc_fixed")
 K = {name: j for j, name in enumerate(STATS)}
 R_SHIFT = 0.2  # "tracks" needs r_shift at least this, with a CI above 0
 RETAIN = 0.25  # retention of the chat coinflip's gain that counts as tracking (or reversing)
@@ -78,7 +78,7 @@ def cell_stats(ab, af, xb, xf, cb, cf, benign, origins):
     return np.array([
         pearson(af, xf), pearson(ab, xb), pearson(af, xb), pearson(af - ab, xf - xb),
         pearson(af[benign], xf[benign]), pearson(w(af), w(xf)), slope_per_sd(af, xf), gain, gain_c, gain / gain_c,
-        gap(xb), gap(xf), xb.std(), xf.std(), pearson(xf, cf), pearson(af, cf),
+        gap(xb), gap(xf), xb.std(), xf.std(), pearson(xf, cf), pearson(af, cf), pearson(af, cb),
     ])
 
 
@@ -198,8 +198,10 @@ def plot_r(cells, labels, path):
                 est = np.array([cells[f, c]["est"][K[stat]] for f in families])
                 lo, hi = (np.array(v) for v in zip(*(ci(cells[f, c]["boot"][:, K[stat]]) for f in families)))
             errorbar(ax, off, est, np.minimum(lo, est), np.maximum(hi, est), col, "o", LABEL[c], ls="none")
-            if stat == "r_final" and c != "coinflip":
-                ax.plot(off, [cells[f, c]["est"][K["r_fixed"]] for f in families], ls="none", marker="o", ms=6,
+            if stat == "r_final":
+                fixed = "rc_fixed" if c == "coinflip" else "r_fixed"
+                cc = RAW[0] if c == "coinflip" else c
+                ax.plot(off, [cells[f, cc]["est"][K[fixed]] for f in families], ls="none", marker="o", ms=6,
                         mfc="white", mec=col, mew=1.2, zorder=3)
             ax.set_ylabel(ylab, color=INK_2)
     for ax in axes:
@@ -208,8 +210,9 @@ def plot_r(cells, labels, path):
         style(ax)
     axes[0].set_title("Filled: final model's utilities. Open: base model's, against the same final Assistant",
                       loc="left", fontsize=9, color=INK_2)
-    axes[0].legend(frameon=False, fontsize=8, loc="lower left")
-    fig.tight_layout()
+    handles, names = axes[0].get_legend_handles_labels()
+    fig.legend(handles, names, frameon=False, fontsize=9, ncol=len(conds), loc="lower center")
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
