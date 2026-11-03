@@ -92,7 +92,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) and the user's choice (W&B group `user_choice`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) and the user doing the task (W&B group `user_does`) below.
 
 ## Model families
 
@@ -1710,7 +1710,9 @@ coinflip effect on its 25 benign vs extremely harmful pairs: 4.13 to 2.11 in Lla
 Instruct. In Gemma 4 31B-it it reversed, from 7.81 to -5.34 (0 of 25 pairs favoring the benign task). Here the doer becomes a
 second factor next to who chooses. That gives a 2 x 2: the coin or the user chooses, and the Assistant or the user does the task.
 Over the 300 tasks, how much of the coin's and the user's alignment with the Assistant survives when the Assistant isn't the one
-doing the task?
+doing the task? **Most of the user's: it keeps the Assistant's ranking at half to all of the scale, and OLMo's user gets closer to
+the Assistant. Less of the coin's, in OLMo and especially Gemma, though Llama's coin keeps about as much as its user. Nothing reverses
+across the 300 tasks, though Gemma's coin ranks harmful tasks above Alpaca-style instructions. See Results.**
 
 ### Design
 
@@ -1813,6 +1815,98 @@ The Assistant-does-it cells, already measured:
   from these pods.
 - Llama's base and final are different releases (3.1, 3.3). One phrasing per condition, no system prompt, bf16. CIs cover task
   sampling only.
+
+### Results (2026-11-03)
+
+Runs (base, final), group `user_does`: OLMo `3kszzuwn`, `wn79sbte` (one A100, the stages in turn, $2.86); Gemma `5iqycnn2`, `zg2c48pe`
+(two H200s, $4.68); Llama `1y45sbcs`, `hhxktb2u` (one H200, the stages in turn, $6.71). $14.25 in all. The only change from the plan:
+A100 and H200 stock was short, so OLMo and Llama ran both stages on one pod each. GPU types match the plan.
+
+**The gate passes:** split-half reliability is 0.993-0.999 in every final cell and 0.994-0.998 in every user-choice cell. The base coin
+cells, reported only, are 0.975-0.990.
+
+**Bottom line: taking the Assistant out as the doer shrinks the coin and the user's choice, but they remain far from absent, and nothing
+reverses over the 300 tasks.** In Gemma and Llama the user, choosing for themselves, keeps the Assistant's ranking almost exactly (r with
+the final Assistant 0.90, 0.91) at 52-65% of the post-training gain. OLMo's user is unaffected in scale and *more* Assistant-like by r,
+because its preference for long tasks shrinks once the user has to do the work. The coin depends more on the doer: Gemma's coin keeps
+18% of its gain and loses most of its alignment with the Assistant (r 0.91 to 0.36). OLMo's keeps only its harm avoidance. Llama's
+keeps 69%, about what its user keeps.
+
+![Summary](figures/user_does_summary.png)
+
+![Final-stage utilities against the final Assistant](figures/user_does_scatter.png)
+
+| model | chooser | call | retention | retention, non-harmful | r(A_f, X_f) → r(A_f, X'_f) | non-harmful | gap X_f → X'_f | r(X'_f, X_f) | d for X' |
+|---|---|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | coin | reduced | **0.67** [0.60, 0.74] | 0.10 [-0.21, 0.28] | 0.63 → 0.50 | 0.40 → 0.04 | 0.38 → 0.35 | 0.84 | +0.50 |
+| | user | doer-independent | **0.99** [0.91, 1.08] | 0.70 [0.63, 0.79] | 0.72 → 0.89 | 0.81 → 0.89 | 1.06 → 1.39 | 0.88 | +0.08 |
+| Gemma 4 31B | coin | absent | **0.18** [0.13, 0.22] | 0.27 [0.21, 0.34] | 0.91 → 0.36 | 0.87 → 0.42 | 5.74 → 0.37 | 0.56 | +0.05 |
+| | user | reduced | **0.52** [0.50, 0.54] | 0.50 [0.47, 0.53] | 0.90 → 0.90 | 0.91 → 0.90 | 4.07 → 2.43 | 0.95 | +0.17 |
+| Llama 70B | coin | reduced | **0.69** [0.66, 0.72] | 0.77 [0.71, 0.82] | 0.92 → 0.89 | 0.88 → 0.85 | 2.13 → 1.37 | 0.94 | +0.85 |
+| | user | reduced | **0.65** [0.62, 0.68] | 0.63 [0.58, 0.67] | 0.95 → 0.91 | 0.94 → 0.84 | 3.20 → 2.24 | 0.92 | +0.19 |
+
+X is the Assistant-does-it cell (C or U), X' the user-does-it one. d = r(A_f, X'_f) - r(A_f, X'_b), the user-choice section's primary
+measure, for the new condition. The paired differences in r(A_f, ·), user does minus Assistant does, are -0.14 [-0.18, -0.09], -0.55
+[-0.62, -0.48] and -0.03 [-0.04, -0.01] for the coin and +0.17 [+0.14, +0.20], +0.00 [-0.01, +0.01] and -0.05 [-0.07, -0.03] for the
+user (OLMo, Gemma, Llama). Base stage, for comparison: r(A_b, X'_b) - r(A_b, X_b) is -0.12, -0.07, +0.02 (coin) and -0.01, +0.04, -0.04
+(user).
+
+**Interaction, coin minus user, on retention:** OLMo -0.32 [-0.43, -0.21], Gemma -0.34 [-0.40, -0.29], Llama +0.04 [+0.00, +0.07].
+
+**Predictions, scored:**
+1. **Coin: right for OLMo and Llama, wrong for Gemma.** OLMo and Llama are reduced. Gemma is absent (0.18), not reversed: over these
+   tasks its coin still leans toward the Assistant's choice, just weakly.
+2. **Gemma's reversal is about harm: wrong.** The gap stays positive (0.37 [0.02, 0.74]), though r over non-harmful tasks is above 0.3
+   (0.42). See finding 4 for where a reversal does show.
+3. **User's choice: confirmed.** Reduced or doer-independent in all three, never reversed, and the user still avoids harmful tasks
+   (gap 1.39, 2.43, 2.24, all CIs above 0).
+4. **Interaction: right in two of three.** The coin loses more than the user's choice in OLMo and Gemma. In Llama they are level.
+5. **Base as control: wrong.** At base, the user-does-it wording reorders the tasks more than expected: r(X'_b, X_b) is 0.67, 0.54,
+   0.70 for the coin and 0.94, 0.88, 0.69 for the user, so only two of six reach 0.8. The base models' link to the Assistant hardly
+   moves, though (the base differences above, all within 0.12).
+6. **OLMo's length preference falls: confirmed.** r(U'_f, log length) is 0.40 against U_f's 0.67, -0.27 [-0.32, -0.22].
+7. **Mass: confirmed.** User-choice cells 0.92-1.00. Coin cells are within 0.05 of the sweep's coin mass at both stages (base 0.80,
+   0.81, 0.85 vs 0.85, 0.78, 0.81; final 0.91, 1.00, 0.85 vs 0.94, 0.99, 0.81).
+
+### Findings
+
+1. **The written user prefers what the Assistant prefers, even when the user will do the task.** In Gemma and Llama the user's ranking
+   barely changes with the doer (r(U'_f, U_f) 0.95, 0.92) and still tracks the final Assistant at r 0.90 and 0.91. That holds on
+   non-harmful tasks too (0.90, 0.84; retention 0.50, 0.63). What drops is the scale: about half to two-thirds of the gain survives.
+   By the pre-registered reading, this is the Assistant's taste in tasks carrying over to what the written user likes doing, beyond
+   harm avoidance. It can't separate that from the model speaking as the Assistant inside the user's turn.
+2. **OLMo's user-choice reversal was about the Assistant doing the work.** With the user doing it, OLMo's user is as strongly tilted as
+   before (retention 0.99) but much closer to the Assistant (r 0.72 to 0.89), and the pre-registered d turns from -0.07 to +0.08 [+0.05,
+   +0.12]. Its pull toward long tasks falls (r 0.67 to 0.40). In the user-choice runs it looked like a user getting the most out of the
+   Assistant's work; here, as someone doing the task themselves, it no longer favors long tasks as much. Alpaca's deficit shrinks (-1.03
+   to -0.41) and STRESS-TEST's lead disappears (+0.60 to -0.07; `figures/user_does_by_origin.png`).
+3. **When the user does the task, OLMo's coin keeps only its harm avoidance.** The gap is unchanged (0.38 to 0.35) and r within harmful
+   tasks stays at 0.79, but over non-harmful tasks r falls from 0.40 to 0.04 (retention 0.10 [-0.21, 0.28]). OLMo's coin favors the
+   tasks its Assistant likes only when the Assistant does them, while it still steers away from harmful tasks for the user.
+4. **Gemma's coin goes V-shaped (exploratory).** Its alignment collapses (r 0.91 to 0.36), and harmful tasks no longer sit at the bottom:
+   their mean is 0.96 nats *above* Alpaca's (-4.17 when the Assistant does it). Math still ranks highest, and within harmful tasks the coin
+   barely tracks the Assistant (r 0.14). `../coinflip`'s -5.34 came from pairing extremely harmful tasks with short benign
+   instructions, much like Alpaca's. Against those, harmful tasks do win here, so the two results agree. The reversal shows up when
+   harmful tasks are compared with ordinary instructions, not across the board. What's left of the coin tracks task length (r 0.55, vs
+   0.12 with the Assistant doing it).
+5. **Llama's coin hardly cares who does the task.** It keeps 69% of its gain, r 0.89 with the Assistant, and the same ranking (r(C'_f,
+   C_f) 0.94), about what Llama's user keeps. This fits `../coinflip`, where Llama's user-does-it effect was half its Assistant-does-it
+   effect and the largest among the three. Llama's coin with the user doing it looks like its user's choice at a smaller scale, as it did
+   with the Assistant doing it ("The coin and the user converge" above).
+
+![Mean final utility by origin](figures/user_does_by_origin.png)
+
+### Caveats
+
+- **The doer and the "I don't need your help with it" clause change together,** as in `../coinflip`, and the base models already react
+  to the new wording (prediction 5). Retention is a base-to-final comparison, so it allows for that, but only to first order.
+- **Gemma's final coin is heavily slot-biased when the user does it:** P(" tails") averages 0.93 (slot bias -5.43, against -1.20 in the sweep's
+  coin), and its user's choice favors " B" (-2.77). Scoring both orders cancels this to first order, reliability is 0.995-0.998, and the
+  additive fit's R² is 0.80 and 0.90. Still, log-odds this far from 0 may compress the coin's spread.
+- **Finding 4 was looked for after seeing the scatter,** so it is exploratory. The comparison with `../coinflip`'s pairs rests on its
+  benign tasks resembling Alpaca's (as they look), not on the same tasks.
+- One token is read, so none of this says who the model takes to be speaking. C and U come from earlier runs on the same GPU types,
+  not these pods.
 
 ## Personas in the system prompt
 
