@@ -361,6 +361,7 @@ PERSONA_SYSTEM = {
     OLMO3: ("", "<|im_start|>system\n{}<|im_end|>\n"),
     LLAMA: ("<|begin_of_text|>", "<|start_header_id|>system<|end_header_id|>\n\n"
             "Cutting Knowledge Date: December 2023\nToday Date: 26 Jul 2024\n\n{}<|eot_id|>"),
+    GEMMA: ("<bos>", "<|turn>system\n{}<turn|>\n"),
 }
 
 
@@ -406,7 +407,7 @@ def test_persona_configs_cover_every_condition_once_per_model():
         assert m["stage"] == "instruct"
         by_model.setdefault(m["name"], []).extend(m["conditions"])
     want = sorted([f"{c}@{p}" for c in ("assistant", "coinflip") for p in prompts.PERSONAS] + ["coinflip"])
-    assert set(by_model) == {OLMO3, LLAMA}
+    assert set(by_model) == {OLMO3, LLAMA, GEMMA}
     for name, conditions in by_model.items():
         # OLMo also re-scores the plain assistant, as it runs on a different GPU type than the sweep.
         assert sorted(conditions) == sorted(want + (["assistant"] if name == OLMO3 else []))

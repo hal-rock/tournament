@@ -1,9 +1,9 @@
 """Personas in the system prompt: does the coinflip follow the default Assistant, the persona, or a mix?
 
 The measures and calls were pre-registered in the README ("Personas in the system prompt") before any data. Per model
-(OLMo 3.1 32B Instruct, Llama 3.3 70B Instruct):
+(OLMo 3.1 32B Instruct, Llama 3.3 70B Instruct, Gemma 4 31B-it):
 - A_0, C_0: the no-system-prompt Assistant and coinflip utilities, from the sweep (`d8ysbybo` refit on its pairs,
-  `tvlqj8a0`), unless the gate fails (OLMo then uses the ones re-scored on the persona pods);
+  `tvlqj8a0`, `jrl62npf`), unless the gate fails (OLMo then uses the ones re-scored on the persona pods);
 - A_p, C_p for p in helpful (the control), evil and slacker: from the W&B runs of group "personas" (configs/personas/).
 
 Primary, per model and persona (evil, slacker): least squares C_p = c + b_def z(A_0) + b_per z(A_p) over the 300 tasks, z()
@@ -39,7 +39,7 @@ from openers import slope_per_sd, write_csv
 from report import INK, INK_2, RULE, errorbar, origin_scatter, stratified_resamples, style, task_arrays
 from user_choice import FAMILIES, TASKS_FILE, ci, load_sweep, top_token_shares
 
-MODELS = ("olmo3.1-32b", "llama-70b")
+MODELS = ("olmo3.1-32b", "llama-70b", "gemma4-31b")
 PERSONAS = ("evil", "slacker")
 CONDITIONS = ("none", "helpful", "slacker", "evil")  # figure order
 COND_LABEL = {"none": "No system prompt", "helpful": "\"You are a helpful assistant.\"", "slacker": "Slacker",
@@ -199,7 +199,12 @@ def plot_pulls(cells, labels, path):
                     lw=0, elinewidth=1.5, mec="white", mew=0.8, zorder=3)
         ax.annotate("no system prompt (b_0)", (0, est[b0]), xytext=(8, -12), textcoords="offset points",
                     color=INK_2, fontsize=9)
-        top = max(top, hi[b0]) * 1.15
+        bh = K["b_h"]
+        ax.errorbar(0, est[bh], yerr=[[est[bh] - lo[bh]], [hi[bh] - est[bh]]], color=INK_2, marker="s", ms=7,
+                    lw=0, elinewidth=1.5, mec="white", mew=0.8, zorder=3, mfc="white")
+        ax.annotate("helpful control (b_h)", (0, est[bh]), xytext=(8, 4), textcoords="offset points",
+                    color=INK_2, fontsize=9)
+        top = max(top, hi[b0], hi[bh]) * 1.15
         bottom = min(0.0, *(lo[K[f"{p}:{s}"]] for p in PERSONAS for s in ("b_per", "b_def"))) * 1.15
         ax.plot([0, top], [0, top], color=RULE, ls="--", lw=1, zorder=1)
         ax.text(top * 0.98, top * 0.9, "equal pulls (w = 0.5)", color=INK_2, fontsize=8, ha="right", rotation=0)
@@ -259,6 +264,7 @@ def plot_by_origin(rows, labels, path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--group", default="personas")
+    p.add_argument("--models", nargs="+", default=list(MODELS), help="a subset, e.g. while a model is still running")
     args = p.parse_args()
     plotstyle.setup()
     out = Path("outputs/personas")
@@ -267,7 +273,7 @@ def main():
     data, cells, labels, gates, tops, masses = {}, {}, {}, [], {}, {}
     ids0 = resamples = None
     passed = {}
-    for family in MODELS:
+    for family in args.models:
         final = FAMILIES[family][0]
         labels[family] = label = MODEL_INFO[final][0]
         print(f"{label}:")

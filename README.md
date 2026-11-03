@@ -2026,9 +2026,13 @@ post-training put in the weights), the **persona's** (the character the context 
     Date: 26 Jul 2024\n\n{persona}<|eot_id|>`, after `<|begin_of_text|>`. The template always writes the date lines with a
     system message (fixed at 26 Jul 2024 in this template, no clock); the helpful control has them too.
 
+  - Gemma 4 31B-it (added later, see below): `<|turn>system\n{persona}<turn|>\n` after `<bos>`. Its template injects no
+    default system turn.
+
   `test_persona_adds_only_its_system_block` checks that each persona prompt is the plain prompt plus that block, in text and
   tokens.
-- **Models:** final stages only, OLMo 3.1 32B Instruct and Llama 3.3 70B Instruct. No base models: a base has no trained
+- **Models:** final stages only, OLMo 3.1 32B Instruct and Llama 3.3 70B Instruct, and Gemma 4 31B-it (added after OLMo's
+  results; see the addendum below). No base models: a base has no trained
   system role, and the question is about a persona layered on a post-trained Assistant.
 - **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders. Per model: `assistant@{helpful,evil,slacker}`,
   `coinflip@{helpful,evil,slacker}`, and the plain `coinflip` re-scored as a check against the sweep. The no-system-prompt
@@ -2108,6 +2112,23 @@ the model is reported without calls until the plain assistant is re-scored on it
 - Llama's system block carries the template's date lines with every persona, the control included.
 - The persona prompts are long (~150 tokens), roughly doubling prompt length.
 - One phrasing per condition, bf16, two models. CIs cover task sampling only.
+
+#### Added: Gemma 4 31B-it (written 2026-11-03, after OLMo's results, before any Llama or Gemma data)
+
+Hal asked to add Gemma 4 31B-it, the third model of the recent experiments. Same conditions, measures, calls and gate as
+above (`configs/personas/gemma4-31b-{a,b}.yaml`, two 1x H200 pods, the sweep's GPU for Gemma; A_0 and C_0 from `jrl62npf`;
+the plain coinflip re-scored as the check). These predictions were written after seeing OLMo's results (evil: persona,
+w = 0.89; slacker: against the persona, weakly, with slacker barely moving OLMo's Assistant), so they are informed by them.
+
+The sweep's numbers for Gemma: r(A_0, C_0) 0.91, b_0 3.07, gap C_0 5.74, C_0 SD 3.38, A_0 SD 9.80, r(A_0, log length) -0.05.
+
+**Predictions for Gemma:**
+1. **The personas work on the Assistant:** both move it more than in OLMo. r(A_evil, A_0) < 0.3 and A_evil's gap below A_0's
+   by at least half; r(A_slacker, A_0) < 0.88 (OLMo's).
+2. **Evil:** persona or mix with w >= 0.5, as in OLMo. The evil coin's gap falls below half of C_0's (5.74).
+3. **Slacker:** a mix with w between 0 and 1, not against the persona: with the persona moving Gemma's Assistant more, its coin
+   has more to follow.
+4. **The control:** r(C_helpful, C_0) >= 0.9.
 
 ## Tasks
 
