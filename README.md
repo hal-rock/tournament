@@ -69,6 +69,7 @@ uv run python tournament.py configs/openers/<model>.yaml # coinflip with each la
 uv run python openers.py                                 # openers vs bleedthrough (W&B group "openers")
 uv run python cross_model.py                             # Assistant utilities: model x model r, by task type
 uv run python olmo2.py                                   # OLMo 2 32B stages next to OLMo 3.1 32B (W&B group "olmo2")
+uv run python figures_stages.py                          # both ladders' coinflip by stage vs the final Assistant, slide style
 uv run python user_choice.py                             # the user's choice vs the Assistant's, base vs final (W&B group "user_choice")
 ```
 
@@ -1322,6 +1323,13 @@ non-harmful tasks and within origin. DPO then mostly turns that same coinflip up
 ![OLMo 2 and OLMo 3 by stage](figures/olmo2_by_stage.png)
 
 ![Assistant vs coinflip utilities by stage](figures/olmo2_scatter.png)
+
+In the style of `figures/scatter_vs_instruct.png` (`figures_stages.py`), with each stage's coinflip against the *final* model's
+Assistant, so these r differ a little from the table below, which pairs each stage with its own Assistant:
+
+![OLMo 2 coinflip at each stage vs its final Assistant](figures/scatter_vs_instruct_olmo2.png)
+
+![OLMo 3 coinflip at each stage vs its final Assistant](figures/scatter_vs_instruct_olmo3.png)
 
 | ladder | stage | r [95% CI] | r non-harmful | r within origin | r shift | b | gap | coinflip SD | SD around line | `../coinflip` |
 |---|---|---|---|---|---|---|---|---|---|---|
