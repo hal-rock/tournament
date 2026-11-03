@@ -407,5 +407,6 @@ def test_persona_configs_cover_every_condition_once_per_model():
         by_model.setdefault(m["name"], []).extend(m["conditions"])
     want = sorted([f"{c}@{p}" for c in ("assistant", "coinflip") for p in prompts.PERSONAS] + ["coinflip"])
     assert set(by_model) == {OLMO3, LLAMA}
-    for conditions in by_model.values():
-        assert sorted(conditions) == want
+    for name, conditions in by_model.items():
+        # OLMo also re-scores the plain assistant, as it runs on a different GPU type than the sweep.
+        assert sorted(conditions) == sorted(want + (["assistant"] if name == OLMO3 else []))

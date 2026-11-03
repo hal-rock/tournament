@@ -1850,8 +1850,10 @@ post-training put in the weights), the **persona's** (the character the context 
 - **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders. Per model: `assistant@{helpful,evil,slacker}`,
   `coinflip@{helpful,evil,slacker}`, and the plain `coinflip` re-scored as a check against the sweep. The no-system-prompt
   Assistant utilities come from the sweep (`d8ysbybo` refit on these pairs, `tvlqj8a0`).
-- **GPUs:** as before, 1x A100 for OLMo, 1x H200 without a KV cache for Llama. Each model's conditions are split over two
-  pods (`configs/personas/<model>-{a,b}.yaml`), W&B group `personas`, analysis `personas.py`.
+- **GPUs:** 1x H200 without a KV cache for Llama, as before. OLMo runs on 1x RTX PRO 6000, because no A100 (the sweep's
+  GPU) or H200 was in stock; its pods also re-score the plain `assistant`, so that if the gate below fails, A_0 and C_0 come
+  from the same GPU as the persona cells instead of from the sweep. Each model's conditions are split over two pods
+  (`configs/personas/<model>-{a,b}.yaml`), W&B group `personas`, analysis `personas.py`.
 
 ### Pre-registered before running (2026-11-03)
 
@@ -1889,8 +1891,9 @@ w = β_per / (β_def + β_per) places the coin between the two: 0 is the default
 - **Persona:** β_per's CI is above 0 and β_def's isn't.
 - **Mix:** both CIs are above 0; reported with w.
 
-**Gate:** the re-scored plain coinflip matches the sweep at r >= 0.999 with SD within 2%, and every new cell has split-half
-reliability at least 0.9. A cell with median outcome mass below 0.2 is reported but not interpreted.
+**Gate:** the re-scored plain coinflip (and for OLMo the plain assistant) matches the sweep at r >= 0.999 with SD within 2%,
+and every new cell has split-half reliability at least 0.9. If the match fails, A_0 and C_0 are the re-scored ones (OLMo), or
+the model is reported without calls until the plain assistant is re-scored on its GPU too (Llama). A cell with median outcome mass below 0.2 is reported but not interpreted.
 
 **Predictions:**
 1. **The personas work on the Assistant:** r(A_evil, A_0) < 0 and A_evil's gap < 0 (it prefers harmful tasks) in both models;
