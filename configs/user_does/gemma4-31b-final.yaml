@@ -1,0 +1,21 @@
+# The user does the task (README, "When the user does the task"): ../coinflip's "user does it" framing, with the
+# coin and with the user choosing. Same pairs, settings and GPU type as configs/user_choice/; the Assistant-does-it
+# counterparts (coinflip, user_choice) come from the sweep and the user_choice runs, so nothing is re-scored.
+wandb_project: tournament
+group: user_does
+tags: [gemma4-31b]
+run_name: user-does-gemma4-31b-final
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    conditions: [coinflip_user_does, user_choice_user_does]

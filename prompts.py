@@ -51,6 +51,16 @@ CONDITIONS = {
         outcomes=(" A", " B"),
     ),
 }
+# The user does the task (README, "When the user does the task"): ../coinflip's "user" framing, its intro
+# verbatim (coinflip.py FRAMINGS["user"]), with the coin or with the user choosing. Only the opening sentence
+# changes, plus the clause ruling out "help me with it"; layout, last line and outcome tokens are unchanged.
+_USER_DOES = "I'm going to perform one of the following two tasks myself, {how}. I don't need your help with it."
+CONDITIONS["coinflip_user_does"] = {**CONDITIONS["coinflip"], "body": CONDITIONS["coinflip"]["body"].replace(
+    "I would like you to perform one of the following two tasks, depending on the outcome of a coinflip.",
+    _USER_DOES.format(how="depending on the outcome of a coinflip"))}
+CONDITIONS["user_choice_user_does"] = {**CONDITIONS["user_choice"], "body": CONDITIONS["user_choice"]["body"].replace(
+    "I would like you to perform one of the following two tasks, whichever I choose.",
+    _USER_DOES.format(how="whichever I choose"))}
 # The opener of the coinflip's last line, as in ../coinflip's ENDINGS. Each gets its own condition,
 # coinflip_<name>; coinflip_okay is the same prompt as coinflip. "no_okay" also loses the " I" token.
 OPENERS = {"okay": "Okay, ", "no_okay": "", "alright": "Alright, ", "ok": "OK, ", "so": "So, "}

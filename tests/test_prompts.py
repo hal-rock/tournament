@@ -112,6 +112,47 @@ def test_user_choice_configs_pair_base_and_final():
             assert cfg["group"] == "user_choice" and cfg["tags"] == [family]
 
 
+USER_DOES_INTRO = "I'm going to perform one of the following two tasks myself, {}. I don't need your help with it."
+
+
+def test_user_does_conditions_change_only_the_opening():
+    # ../coinflip's FRAMINGS["user"] verbatim for the coin, the same sentence with "whichever I choose" for the choice.
+    for cond, base, how, old in [
+            ("coinflip_user_does", "coinflip", "depending on the outcome of a coinflip",
+             "I would like you to perform one of the following two tasks, depending on the outcome of a coinflip."),
+            ("user_choice_user_does", "user_choice", "whichever I choose",
+             "I would like you to perform one of the following two tasks, whichever I choose.")]:
+        new, ref = CONDITIONS[cond]["body"], CONDITIONS[base]["body"]
+        assert new.startswith(USER_DOES_INTRO.format(how) + "\n\n")
+        assert new.replace(USER_DOES_INTRO.format(how), old) == ref
+        assert CONDITIONS[cond]["outcomes"] == CONDITIONS[base]["outcomes"] and CONDITIONS[cond]["prefill"] is None
+
+
+@pytest.mark.parametrize("cond,base", [("coinflip_user_does", "coinflip"), ("user_choice_user_does", "user_choice")])
+def test_user_does_continues_human_turn(tok, cond, base):
+    p, ref = render(cond, tok), render(base, tok)
+    assert "assistant" not in p.lower() and "system" not in p and "nothink" not in p
+    assert outcome_token_ids(cond, tok) == outcome_token_ids(base, tok)
+    # Same tokens from "Task A" on as the Assistant-does-it prompt, so the read position matches.
+    tail = "\n\nTask A"
+    ids, ref_ids = (tok(x[x.index(tail):], add_special_tokens=False).input_ids for x in (p, ref))
+    assert ids == ref_ids
+
+
+def test_user_does_configs_pair_base_and_final():
+    finals = {"olmo3.1-32b": OLMO3, "gemma4-31b": GEMMA, "llama-70b": LLAMA}
+    for family, final in finals.items():
+        for stage in ("base", "final"):
+            cfg = yaml.safe_load(open(f"configs/user_does/{family}-{stage}.yaml"))
+            ref = yaml.safe_load(open(f"configs/user_choice/{family}-{stage}.yaml"))
+            (m,), (r,) = cfg["models"], ref["models"]
+            assert m["conditions"] == ["coinflip_user_does", "user_choice_user_does"]
+            assert {k: v for k, v in m.items() if k != "conditions"} == {k: v for k, v in r.items() if k != "conditions"}
+            assert cfg["group"] == "user_does" and cfg["tags"] == [family]
+            assert {k: v for k, v in cfg.items() if k not in ("models", "group", "run_name")} == \
+                   {k: v for k, v in ref.items() if k not in ("models", "group", "run_name")}
+
+
 def test_conditions_share_opening_and_layout(tok):
     a = render("assistant", tok)
     c = render("coinflip", tok)
