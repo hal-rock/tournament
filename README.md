@@ -71,6 +71,7 @@ uv run python cross_model.py                             # Assistant utilities: 
 uv run python olmo2.py                                   # OLMo 2 32B stages next to OLMo 3.1 32B (W&B group "olmo2")
 uv run python figures_stages.py                          # both ladders' coinflip by stage vs the final Assistant, slide style
 uv run python user_choice.py                             # the user's choice vs the Assistant's, base vs final (W&B group "user_choice")
+uv run python user_does.py                               # coin / user's choice when the user does the task (W&B group "user_does")
 uv run python raw_text.py                                # the coinflip as raw text, first person and stories (W&B group "raw_text")
 ```
 
