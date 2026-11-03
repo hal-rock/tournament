@@ -256,15 +256,17 @@ def load_sweep(family):
 
 
 def collect_runs(group):
-    """{(family, stage): latest finished run} of the W&B group. A run counts only if it logged utilities."""
+    """{(family, stage): latest run with all its result files} of the W&B group. A run's state doesn't decide
+    this: a condition's file is written only once it's fully scored, and OLMo's base run failed afterwards, at
+    the end-of-run analysis (fixed since), which this script redoes on the merged stages anyway."""
     import wandb
     runs = {}
-    for run in sorted(wandb.Api().runs(PROJECT, filters={"group": group, "state": "finished", "jobType": "tournament"}),
-                      key=lambda r: r.created_at):
-        if "utilities" in run.summary.keys():
-            (family,) = run.config["tags"]
-            (stage,) = [m["stage"] for m in run.config["models"]]
-            runs[family, stage] = run
+    for run in sorted(wandb.Api().runs(PROJECT, filters={"group": group, "jobType": "tournament"}), key=lambda r: r.created_at):
+        (family,) = run.config["tags"]
+        (m,) = run.config["models"]
+        have = {f.name for f in run.files()}
+        if all(f"results/{m['stage']}__{c}.csv.gz" in have for c in m["conditions"]):
+            runs[family, m["stage"]] = run
     return runs
 
 

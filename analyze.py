@@ -276,6 +276,8 @@ def analyze(rows, tasks, out_dir, seed=0, stage_order=None):
         print(f"{g['group']:12} {g['n']:3d} " + " ".join(f"{g[name]:20.2f}" for name in primitive))
 
     for name, table in (("utilities", util_rows), ("correlations", corr_rows), ("group_means", group_rows)):
+        if not table:  # a run with one measure has nothing to correlate
+            continue
         with open(out_dir / f"{name}.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(table[0]))
             w.writeheader()
@@ -293,7 +295,7 @@ def log_to_wandb(run, result):
                   "pearson_benign", "spearman_benign", "pearson_partial_length"):
             run.summary[f"corr/{c['x']}_vs_{c['y']}/{k}"] = c[k]
     log = {name: wandb.Table(columns=list(result[name][0]), data=[list(r.values()) for r in result[name]])
-           for name in ("utilities", "correlations", "group_means")}
+           for name in ("utilities", "correlations", "group_means") if result[name]}
     log.update({name: wandb.Image(str(path)) for name, path in result["figures"].items()})
     run.log(log)
 

@@ -18,8 +18,8 @@ Assistant and coinflip utilities, per ladder and stage:
 CIs are 95% task bootstraps within origin, with the same resamples for every ladder and stage, so
 differences between stages and between ladders are paired. `sft_share` is a stat's rise from base to
 SFT as a share of its rise from base to final. Not pre-registered, printed last: r between the two
-ladders at each stage (`cross_ladder`), each ladder's stage x stage coinflip correlations and r(A, C)
-within each origin (`by_origin`).
+ladders at each stage (`cross_ladder`), each ladder's stage x stage coinflip correlations, r(A, C)
+within each origin (`by_origin`) and the coinflip with " T" folded into tails (`fold_t`).
 
   outputs/olmo2/analysis/       the merged fit (analyze.py) with every stage
   outputs/olmo2/report/         report.py on it
@@ -33,7 +33,9 @@ Usage: uv run python olmo2.py [--group olmo2]
 
 import argparse
 import csv
+import gzip
 import json
+import math
 import warnings
 from pathlib import Path
 
@@ -43,7 +45,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from analyze import N_BOOTSTRAP, ORIGIN_STYLE, analyze, fetch_wandb, partial_r, pearson, read_jsonl
+from analyze import (N_BOOTSTRAP, ORIGIN_STYLE, analyze, fetch_wandb, fit_utilities, pair_effects, partial_r, pearson,
+                     read_jsonl)
 from matskit import plotstyle
 from models import PROJECT, olmo_on_shared_pairs
 from openers import slope_per_sd, within_groups, write_csv
@@ -174,7 +177,7 @@ def plot_ladders(cells, path):
         ax.set_xticks(x, [STAGE_LABELS[s] for s in STAGES])
         ax.set_title(title, loc="left", fontsize=11, color=INK)
         style(ax)
-    axes[0, 0].legend(frameon=False, fontsize=9, loc="upper left")
+    axes[0, 0].legend(frameon=False, fontsize=9, loc="lower right")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -210,8 +213,11 @@ def plot_vs_coinflip(cells, path):
         errorbar(ax, xs, est, np.minimum(lo, est), np.maximum(hi, est), plotstyle.SERIES[k], LADDER_MARKER[ladder],
                  LADDERS[ladder])
         for xi, yi, s in zip(xs, est, STAGES):
-            ax.annotate(STAGE_LABELS[s], (xi, yi), textcoords="offset points", xytext=(6, -11 if k else 5), fontsize=8,
-                        color=INK_2)
+            # OLMo 3's base and SFT nearly coincide, as do both ladders' DPO and final.
+            dx, dy, ha = {("olmo2", "dpo"): (-6, 5, "right"), ("olmo3", "dpo"): (-6, -12, "right"),
+                          ("olmo3", "instruct"): (7, -3, "left"), ("olmo2", "base"): (7, -3, "left"),
+                          ("olmo3", "base"): (-2, -12, "left"), ("olmo3", "sft"): (-2, 7, "left")}.get((ladder, s), (6, 5, "left"))
+            ax.annotate(STAGE_LABELS[s], (xi, yi), textcoords="offset points", xytext=(dx, dy), ha=ha, fontsize=8, color=INK_2)
     ax.axhline(0, color=RULE, lw=0.8, zorder=1)
     ax.set_xlabel("Effect on the system-card pairs (log-odds, ../coinflip)", color=INK_2)
     ax.set_ylabel("Coinflip, benign minus harmful (nats, 300 tasks)")
@@ -220,6 +226,32 @@ def plot_vs_coinflip(cells, path):
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
+
+
+def fold_t(run_ids, ids, benign):
+    """Sensitivity: ../coinflip found " T" works as another spelling of tails in OLMo 2. Refit the coinflip with it
+    added to tails, where it's among the prompt's logged top 5. {stage: (r, r folded, r benign, r benign folded,
+    gap, gap folded, mean P(" T"))}."""
+    out = {}
+    for s, run_id in run_ids.items():
+        rows = {"a": [], "c": [], "f": []}
+        share = []
+        for cond, key in (("assistant", "a"), ("coinflip", "c")):
+            with gzip.open(Path("outputs") / run_id / "results" / f"{s}__{cond}.csv.gz", "rt", newline="") as fh:
+                for r in csv.DictReader(fh):
+                    row = dict(stage=s, condition=key, first=r["first"], second=r["second"], log_odds=float(r["log_odds"]))
+                    rows[key].append(row)
+                    if cond == "coinflip":
+                        t = dict(json.loads(r["top_tokens"])).get(" T", 0.0)
+                        share.append(t)
+                        fold = math.log(math.exp(float(r["logp_first"])) / (math.exp(float(r["logp_second"])) + t))
+                        rows["f"].append({**row, "condition": "f", "log_odds": fold})
+        eff = pair_effects(rows["a"] + rows["c"] + rows["f"])
+        U = {k[1]: fit_utilities(ids, e) for k, e in eff.items()}
+        gap = lambda x: x[benign].mean() - x[~benign].mean()
+        out[s] = (pearson(U["a"], U["c"]), pearson(U["a"], U["f"]), pearson(U["a"][benign], U["c"][benign]),
+                  pearson(U["a"][benign], U["f"][benign]), gap(U["c"]), gap(U["f"]), float(np.mean(share)))
+    return out
 
 
 def collect_runs(group):
@@ -389,6 +421,11 @@ def main():
             rs = [r for r in origin_rows if r["ladder"] == ladder and r["origin"] == g]
             print(f"  {ladder:14} {g:12} n={rs[0]['n']:2d}  " + " ".join(f"{r['r']:+.2f}" for r in rs) + "  |  "
                   + " ".join(f"{r['mean_c']:+.2f}" for r in rs))
+
+    print("\nExploratory, the coinflip with \" T\" folded into tails (r, then folded; non-harmful; gap; mean P(\" T\")):")
+    runs = collect_runs(args.group)
+    for s, f in fold_t({s: runs[s].id for s in STAGES}, ids, benign).items():
+        print(f"  {s:9} r {f[0]:.3f} {f[1]:.3f}  non-harmful {f[2]:.3f} {f[3]:.3f}  gap {f[4]:.3f} {f[5]:.3f}  P(T) {f[6]:.3f}")
 
     write_csv(out / "olmo2.csv", table)
     write_csv(out / "steps.csv", steps)

@@ -1223,7 +1223,8 @@ be harder ones), so this removes whatever tracks length, not length alone.
 
 In `../coinflip`, OLMo 2 32B has a sizable effect after SFT alone (+0.97 log-odds, from +0.15 at base), while OLMo 3.1
 32B needs DPO (+0.11 at SFT, +2.24 at DPO). Both end at about the same size (+2.42, +2.27). Those effects are measured
-only on benign vs extremely harmful pairs. Does OLMo 2's SFT effect hold across the 300 tasks?
+only on benign vs extremely harmful pairs. Does OLMo 2's SFT effect hold across the 300 tasks? **Yes: r = 0.89 at SFT (OLMo 3:
+0.25), including within task types. See Results.**
 
 ### Design
 
@@ -1306,6 +1307,88 @@ all-pairs utilities at r >= 0.99 in all eight of its cells.
   the opener isn't known.
 - `d8ysbybo`'s GPU type isn't recorded, though its config says A100.
 - One phrasing per condition, no system prompt, bf16.
+
+### Results (2026-11-02)
+
+Runs: base `5f7ymsdk`, SFT `as1txqy2`, DPO `s7p4dncf`, final `760z9ixq`, group `olmo2`. Four 1x A100 SXM pods, $5.81 in all.
+
+**The gate passes:** split-half reliability is 0.990-0.999 in all eight OLMo 2 cells, and OLMo 3's refit matches its all-pairs
+fit at r = 0.996-1.000.
+
+**Bottom line: yes, and far more strongly than the coinflip pairs suggested.** The call is **holds across the range**. At SFT,
+OLMo 2's coinflip already follows the Assistant's ranking at r = 0.89, higher than OLMo 3 reaches at any stage, including over
+non-harmful tasks and within origin. DPO then mostly turns that same coinflip up.
+
+![OLMo 2 and OLMo 3 by stage](figures/olmo2_by_stage.png)
+
+![Assistant vs coinflip utilities by stage](figures/olmo2_scatter.png)
+
+| ladder | stage | r [95% CI] | r non-harmful | r within origin | r shift | b | gap | coinflip SD | SD around line | `../coinflip` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| OLMo 2 32B | base | 0.39 [0.29, 0.50] | 0.32 | 0.27 | | 0.03 | 0.05 | 0.08 | 0.07 | 0.15 |
+| | SFT | **0.89** [0.87, 0.91] | **0.80** | **0.76** | **0.83** | 0.25 | 0.51 | 0.28 | 0.13 | 0.97 |
+| | DPO | 0.93 [0.92, 0.95] | 0.89 | 0.84 | 0.92 | 0.59 | 1.17 | 0.63 | 0.23 | 2.25 |
+| | final | 0.92 [0.91, 0.94] | 0.87 | 0.84 | 0.91 | 0.60 | 1.18 | 0.65 | 0.25 | 2.42 |
+| OLMo 3.1 32B | base | 0.12 [-0.01, 0.25] | 0.05 | 0.23 | | 0.01 | 0.00 | 0.04 | 0.04 | 0.12 |
+| | SFT | 0.25 [0.15, 0.34] | 0.06 | 0.27 | 0.24 | 0.04 | 0.07 | 0.16 | 0.15 | 0.11 |
+| | DPO | 0.65 [0.56, 0.72] | 0.43 | 0.63 | 0.66 | 0.24 | 0.37 | 0.36 | 0.28 | 2.24 |
+| | final | 0.63 [0.54, 0.71] | 0.40 | 0.63 | 0.64 | 0.24 | 0.38 | 0.38 | 0.29 | 2.27 |
+
+(b is the slope of C on A in nats per Assistant SD; gap is the coinflip's mean over non-harmful minus harmful tasks, in nats.)
+
+| OLMo 2 minus OLMo 3 at SFT (paired) | difference [95% CI] |
+|---|---|
+| r non-harmful | +0.75 [0.64, 0.86] |
+| r within origin | +0.50 [0.40, 0.60] |
+| SFT share of the gap (0.41 vs 0.18) | +0.23 [0.16, 0.31] |
+
+| SFT's share of the rise from base to final | r | r non-harmful | r within origin | b | gap | coinflip SD | `../coinflip` |
+|---|---|---|---|---|---|---|---|
+| OLMo 2 32B | 0.94 | 0.87 | 0.87 | 0.38 | 0.41 | 0.35 | 0.36 |
+| OLMo 3.1 32B | 0.25 | 0.03 | 0.08 | 0.15 | 0.18 | 0.34 | 0.00 |
+
+**Predictions, scored:**
+1. **The call: confirmed.** Holds across the range.
+2. **SFT size: confirmed, and I badly underestimated r.** The gap's share is 0.41, in my 0.25-0.5. r at SFT is 0.89, where I'd said at
+   least 0.35.
+3. **Final stage: confirmed.** r is 0.92 and r shift 0.91.
+4. **Coarser than OLMo 3: wrong.** r non-harmful is only 0.05 below r at the final stage (limit 0.1), and OLMo 3's is 0.23 below. OLMo 2's
+   coinflip is the finer-grained of the two. I'd read its uniform effect across `../coinflip`'s pairs as coarseness, and that was wrong.
+5. **Stage order: half wrong.** DPO is the largest step in b (+0.35 vs +0.22) and the gap (+0.66 vs +0.46), but not in r, where SFT takes
+   nearly all of it (+0.50 vs +0.04). The DPO to final step in the gap has no CI above 0: +0.01 [-0.01, +0.03]. `../coinflip`'s +0.17
+   doesn't show up here.
+6. **Coin mass: wrong at two stages.** 0.77 at base and 0.795 at SFT, then 0.83 and 0.84.
+
+### Findings
+
+1. **SFT sets which tasks the coinflip favors, and DPO turns it up.** OLMo 2's SFT and DPO coinflips correlate 0.98. DPO's coinflip is 97%
+   explained by SFT's alone, and adding DPO's Assistant utilities takes that only to 97.4% (OLMo 3: 68%, then 85%). b and the gap both
+   more than double while r moves 0.04. So OLMo 2 has two distinct steps: SFT for what's tracked, DPO for how strongly.
+2. **`../coinflip`'s 36% SFT share is the scale, not the whole effect.** The shares of b (0.38) and the gap (0.41) match it closely. SFT's
+   share of r is 0.94. On benign vs extremely harmful pairs alone, you see only the first of those.
+3. **The same `../coinflip` effect hides very different coinflips.** The ladders end within 0.15 of each other on those pairs (2.42, 2.27),
+   but OLMo 2's final r is 0.92 vs 0.63, r non-harmful 0.87 vs 0.40, b 0.60 vs 0.24 and gap 1.18 vs 0.38. OLMo 2's r matches Llama, Gemma and
+   GLM's (0.91-0.92) and OLMo 3 is the low one. OLMo 3's scatter shows why: most of its slope comes from the most harmful tasks.
+4. **At SFT the ladders differ in what the coinflip follows, not in its size or in the Assistant's preferences.** OLMo 2's slope is six times
+   OLMo 3's, with a coinflip only 1.7x as wide, and its SD around the line is smaller (0.13 vs 0.15). Their Assistant utilities agree at
+   SFT (r = 0.91, SD 1.9 vs 2.3). Both SFT models hold similar preferences; only OLMo 2's reach the coinflip.
+5. **It holds in every origin (exploratory).** r at SFT, OLMo 2 vs OLMo 3: MATH 0.68 vs 0.09, Alpaca 0.54 vs 0.41, WildChat 0.70 vs 0.22,
+   STRESS-TEST 0.83 vs 0.31, BailBench 0.90 vs 0.50.
+6. **The two ladders' coinflips converge at DPO (exploratory).** Between ladders their coinflips correlate -0.02 at base, 0.17 at SFT and 0.51
+   at DPO and final. Their Assistant utilities are 0.63, then 0.90-0.91.
+7. **OLMo 2's base already has r = 0.39 (OLMo 3: 0.12).** Most of that is between origins (r over origin means 0.88; within origin 0.27,
+   about the same as OLMo 3's 0.23), and its gap is small (0.05). r shift at SFT removes it and is still 0.83.
+
+### Caveats
+
+- This shows SFT is enough in OLMo 2, not why. The ladders differ in SFT data, chat frame and more. OLMo 2's frame is an obvious candidate,
+  since `<|user|>` is ordinary tokens and the user turn has no closing token, but this doesn't test it, and `../coinflip`'s OLMo 2 13B has the
+  same frame with an effect 5-7x smaller at SFT and DPO, so the frame alone can't be enough.
+- Coin mass is 0.77-0.84, and about 5% goes to " T" (3% at base), which `../coinflip` found works as a spelling of "tails". Folding it in moves r by at most
+  0.004 and raises the gap by at most 0.064 (`fold_t`), so nothing above depends on it.
+- All at "Okay,", where OLMo 3's bleedthrough is largest. OLMo 2's opener sensitivity isn't measured, so the ladder gap could change with
+  the opener, in either direction.
+- CIs cover task sampling only: one phrasing, one seed of 15,000 pairs, no system prompt, bf16.
 
 ## Does post-training make the user's choice more like the Assistant's?
 
