@@ -1585,6 +1585,11 @@ three, the base model's user already correlates 0.80-0.91 with its Assistant, an
 
 ![Mean user-choice utility by origin](figures/user_choice_by_origin.png)
 
+**On `../coinflip`'s 25 benign vs extremely harmful pairs** (its RESULTS.md, "The user chooses instead of a coin"), the same prompt gives user
+effects of 1.01 to 1.80 (OLMo), 0.62 to 3.75 (Gemma) and 0.21 to 5.58 (Llama), base to final, against coin effects of 2.27, 7.81 and 4.13 at
+the final stage. Llama's user ends above its coin and Gemma's below, as here. OLMo's coin rises more than its user on those pairs, the
+reverse of its 300-task harm gap. Gemma's final user mostly picks Task B there too (bias -5.74).
+
 ### Caveats
 
 - **This doesn't say who the model takes to be speaking.** One token is read, and the line ends in the Assistant's own prefill words. "The user has taken on the Assistant's tastes" and "the model speaks as the Assistant
