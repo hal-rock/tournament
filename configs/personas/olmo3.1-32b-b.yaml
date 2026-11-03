@@ -1,0 +1,24 @@
+# Personas in the system prompt (README, "Personas in the system prompt"): the Assistant's choice and the coinflip with
+# Gilg et al.'s evil and slacker personas, and a "You are a helpful assistant." control, as the system message. Final
+# models only. Each model's conditions are split over two pods (a and b) for wall-clock time; together they cover
+# assistant@{helpful,evil,slacker}, coinflip@{helpful,evil,slacker} and the plain coinflip, re-scored as a check
+# against the sweep. 1x A100, as the sweep's OLMo runs. ~80 GB of disk.
+wandb_project: tournament
+group: personas
+tags: [olmo3.1-32b]
+run_name: personas-olmo3.1-32b-b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none  # the persona conditions set their own
+# The fixed 15,000 pairs of the model sweep, so the no-system-prompt Assistant utilities can come from it.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+models:
+  - name: allenai/Olmo-3.1-32B-Instruct
+    stage: instruct
+    conditions: [coinflip@slacker, assistant@slacker, coinflip]

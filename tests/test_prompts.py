@@ -354,3 +354,58 @@ def test_raw_text_configs_pair_base_and_final():
             assert cfg["max_pairs"] == 15000 and cfg["seed"] == 0 and cfg["system_prompt"] == "none"
             assert cfg["tasks_file"] == "data/tasks_n300_max500_seed0.jsonl"
             assert cfg["group"] == "raw_text" and cfg["tags"] == [family]
+
+
+# Personas in the system prompt: the system block each final model's template writes for a system message.
+PERSONA_SYSTEM = {
+    OLMO3: ("", "<|im_start|>system\n{}<|im_end|>\n"),
+    LLAMA: ("<|begin_of_text|>", "<|start_header_id|>system<|end_header_id|>\n\n"
+            "Cutting Knowledge Date: December 2023\nToday Date: 26 Jul 2024\n\n{}<|eot_id|>"),
+}
+
+
+@pytest.mark.parametrize("name", list(PERSONA_SYSTEM))
+@pytest.mark.parametrize("condition", ["assistant", "coinflip"])
+@pytest.mark.parametrize("persona", list(prompts.PERSONAS))
+def test_persona_adds_only_its_system_block(name, condition, persona):
+    """The persona prompt is the plain one with one system block added after the BOS, in text and in tokens,
+    with the same outcome tokens."""
+    tok = AutoTokenizer.from_pretrained(name)
+    lead, block = PERSONA_SYSTEM[name]
+    plain, with_persona = render(condition, tok), render(f"{condition}@{persona}", tok)
+    assert plain.startswith(lead) and "system" not in plain
+    head = lead + block.format(prompts.PERSONAS[persona])
+    assert with_persona == head + plain[len(lead):]
+    enc = lambda s: tok(s, add_special_tokens=False).input_ids
+    assert enc(with_persona) == enc(head) + enc(plain[len(lead):])
+    assert enc(plain) == enc(lead) + enc(plain[len(lead):])
+    assert outcome_token_ids(f"{condition}@{persona}", tok) == outcome_token_ids(condition, tok)
+
+
+def test_persona_conditions_parse():
+    assert prompts.split_condition("coinflip@evil") == ("coinflip", "evil")
+    assert prompts.split_condition("assistant") == ("assistant", None)
+    for bad in ("coinflip@nobody", "nothing@evil"):
+        with pytest.raises(KeyError):
+            prompts.split_condition(bad)
+    tok = AutoTokenizer.from_pretrained(OLMO3)
+    with pytest.raises(AssertionError):  # a persona can't be combined with another system prompt
+        build_prompt("coinflip@evil", "X", "Y", tok, "Be brief.")
+
+
+def test_persona_configs_cover_every_condition_once_per_model():
+    """Each model's two pods together score assistant and coinflip under each persona, plus the plain coinflip,
+    on the sweep's pairs."""
+    from pathlib import Path
+    by_model = {}
+    for path in sorted(Path("configs/personas").glob("*.yaml")):
+        cfg = yaml.safe_load(path.read_text())
+        assert (cfg["max_pairs"], cfg["seed"], cfg["system_prompt"], cfg["group"]) == (15000, 0, "none", "personas")
+        assert cfg["tasks_file"] == "data/tasks_n300_max500_seed0.jsonl"
+        (m,) = cfg["models"]
+        assert m["stage"] == "instruct"
+        by_model.setdefault(m["name"], []).extend(m["conditions"])
+    want = sorted([f"{c}@{p}" for c in ("assistant", "coinflip") for p in prompts.PERSONAS] + ["coinflip"])
+    assert set(by_model) == {OLMO3, LLAMA}
+    for conditions in by_model.values():
+        assert sorted(conditions) == want
