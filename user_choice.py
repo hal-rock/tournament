@@ -20,13 +20,14 @@ base and final stages. Per model:
 
 CIs are 95% task bootstraps within origin, with the same resamples for every statistic, so differences
 are paired. `classify` gives the pre-registered call per model. Not pre-registered, printed last: mean U
-within each origin (`by_origin`), r(U_f, the other models' mean Assistant) and r(A, U_f) holding it fixed
-(`consensus`), and where the probability goes (`top_token_shares`).
+within each origin (`by_origin`), r(U_f, the other models' mean Assistant) and r(A, U_f) holding it fixed,
+the final user beyond the Assistant and the main contrast with log length held fixed (`length_part`), slot
+bias, and where the probability goes (`top_token_shares`).
 
   outputs/user_choice/analysis/<family>/   the merged fit (analyze.py) of one model's stages
   outputs/user_choice/user_choice.csv      one row per model
   outputs/user_choice/contrasts.csv        the paired differences
-  outputs/user_choice/by_origin.csv
+  outputs/user_choice/by_origin.csv, length.csv
   figures/user_choice_*.png
 
 Usage: uv run python user_choice.py [--group user_choice]
@@ -130,6 +131,25 @@ def classify(cell):
     if d <= -R_MEANINGFUL and hi < 0:
         return "less Assistant-like"
     return "aligned shift only" if aligned else "no change"
+
+
+def length_part(arrays, benign, origins, loglen, resamples):
+    """Exploratory: what the final user prefers beyond the Assistant, and the pre-registered contrast with log task
+    length partialled out of both sides. {name: (estimate, ci_low, ci_high)}."""
+    resid = lambda a, y: y - np.polyval(np.polyfit(a, y, 1), a)
+
+    def stats(ab, af, ub, uf, cb, cf, ll):
+        ru = resid(af, uf)
+        pf, pb = partial_r(af, uf, ll), partial_r(af, ub, ll)
+        return np.array([pearson(ub, ll), pearson(uf, ll), pearson(af, ll), pearson(ru, ll), float(ru.var() / uf.var()),
+                         partial_r(uf, cf, af), pb, pf, pf - pb, partial_r(af - ab, uf - ub, ll)])
+
+    est = stats(*arrays, loglen)
+    lo, hi = ci(np.array([stats(*(x[i] for x in arrays), loglen[i]) for i in resamples]))
+    names = ("r(U_b, length)", "r(U_f, length)", "r(A_f, length)", "r(U_f beyond A_f, length)", "U_f's share beyond A_f",
+             "r(U_f, C_f | A_f)", "r(A_f, U_b | length)", "r(A_f, U_f | length)", "difference, length held fixed",
+             "r shift | length")
+    return {n: (est[j], lo[j], hi[j]) for j, n in enumerate(names)}
 
 
 def by_origin(data, origins, labels):
@@ -410,6 +430,22 @@ def main():
         s = cons[final]
         print("  {:14} r(U_f, others' A) {:+.2f} [{:+.2f}, {:+.2f}]  r(A, U_f | others' A) {:+.2f} [{:+.2f}, {:+.2f}]".format(
             labels[family], *s["r_consensus"], *s["r_own_given_consensus"]))
+    print("\nExploratory, the final user beyond the Assistant, and with log task length held fixed:")
+    loglen = task_arrays(rows)[3]
+    length_rows = []
+    for family, arrays in data.items():
+        for name, (est, lo, hi) in length_part(arrays, task_arrays(rows)[2], origins, loglen, resamples).items():
+            length_rows.append(dict(model=labels[family], stat=name, est=est, lo=lo, hi=hi))
+            print(f"  {labels[family]:14} {name:30} {est:+.2f} [{lo:+.2f}, {hi:+.2f}]")
+    print("\nExploratory, mean U_f minus its line on A_f, by origin:")
+    for family, arrays in data.items():
+        ru = arrays[3] - np.polyval(np.polyfit(arrays[1], arrays[3], 1), arrays[1])
+        print(f"  {labels[family]:14} " + "  ".join(f"{g} {ru[origins == g].mean():+.2f}" for g in ORIGIN_STYLE))
+    print("\nExploratory, final-stage slot (A/B) bias, user choice vs the re-scored Assistant:")
+    for r, family in zip(table, data):
+        print(f"  {r['model']:14} user {r['instruct_slot_bias_mean']:+.2f}  Assistant "
+              f"{json.loads((out / 'analysis' / family / 'summary.json').read_text())['instruct/assistant/slot_bias_mean']:+.2f}")
+    write_csv(out / "length.csv", length_rows)
     print("\nExploratory, where the probability goes (mean over prompts, tokens logged in each top 5):")
     for family, by_stage in tops.items():
         for s, top in by_stage.items():

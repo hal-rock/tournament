@@ -1368,7 +1368,8 @@ non-harmful tasks and within origin. DPO then mostly turns that same coinflip up
    share of r is 0.94. On benign vs extremely harmful pairs alone, you see only the first of those.
 3. **The same `../coinflip` effect hides very different coinflips.** The ladders end within 0.15 of each other on those pairs (2.42, 2.27),
    but OLMo 2's final r is 0.92 vs 0.63, r non-harmful 0.87 vs 0.40, b 0.60 vs 0.24 and gap 1.18 vs 0.38. OLMo 2's r matches Llama, Gemma and
-   GLM's (0.91-0.92) and OLMo 3 is the low one. OLMo 3's scatter shows why: most of its slope comes from the most harmful tasks.
+   GLM's (0.91-0.92) and OLMo 3 is the low one. OLMo 3's scatter shows why: most of its slope comes from the most harmful tasks
+   (`figures/olmo2_vs_coinflip.png` sets the gap against the `../coinflip` effect, stage by stage).
 4. **At SFT the ladders differ in what the coinflip follows, not in its size or in the Assistant's preferences.** OLMo 2's slope is six times
    OLMo 3's, with a coinflip only 1.7x as wide, and its SD around the line is smaller (0.13 vs 0.15). Their Assistant utilities agree at
    SFT (r = 0.91, SD 1.9 vs 2.3). Both SFT models hold similar preferences; only OLMo 2's reach the coinflip.
@@ -1393,7 +1394,8 @@ non-harmful tasks and within origin. DPO then mostly turns that same coinflip up
 ## Does post-training make the user's choice more like the Assistant's?
 
 The coinflip asks whether Assistant preferences leak into a Human turn through a coin. Here nothing mediates: the user
-chooses the task. Does post-training pull the user the model writes toward the Assistant it was trained to be?
+chooses the task. Does post-training pull the user the model writes toward the Assistant it was trained to be? **In Llama and
+Gemma, yes. In OLMo, not by the pre-registered measure, mostly because its user comes to favor long tasks. See Results.**
 
 ### Design
 
@@ -1494,6 +1496,98 @@ reliability is at least 0.9 in all six cells.
 - Llama runs on one H200 where the sweep used two. The openers run reproduced the sweep that way at r = 1.0000, and only the final
   stage gets re-scored here. Gemma's and OLMo's GPU types match their sweep runs.
 - One phrasing, no system prompt, bf16.
+
+### Results (2026-11-02)
+
+Runs (base, final), group `user_choice`: OLMo `wtf6085z`, `zr5su3zo` (two 1x A100, $2.13); Gemma `oejp2bs9`, `rxow1qso` (1x H200, $3.17);
+Llama `7v41hj1v`, `bhv8okeh` (1x H200, $4.20). $9.50 in all. Two changes from the plan, neither touching the data: H200 stock was short, so
+Gemma and Llama each ran both stages in turn on one pod, not one pod per stage. And the OLMo and Gemma base runs show as failed in W&B,
+because the end-of-run analysis couldn't handle a run with one measure. That was after their results were complete, and `user_choice.py`
+refits from those results anyway (`analyze.py` is fixed).
+
+**The gate passes:** the re-scored Assistant conditions match the sweep at r = 1.0000 with SD within 0.1%, and U's split-half reliability
+is 0.992-0.999.
+
+**Bottom line: in Llama and Gemma, yes; in OLMo, not by the pre-registered measure.** Post-training moves the Llama and Gemma user well toward
+that model's Assistant, over all tasks, non-harmful tasks and within origin. OLMo's call is **less Assistant-like**: its user's slope on the
+Assistant nearly triples, but a preference for long tasks grows more. With length held fixed (exploratory), OLMo's change is about zero. In all
+three, the base model's user already correlates 0.80-0.91 with its Assistant, and the final user stays far weaker than the final Assistant.
+
+![Summary](figures/user_choice_summary.png)
+
+![Utilities by model and stage](figures/user_choice_scatter.png)
+
+| model | call | r(A_b, U_b) | r(A_f, U_b) | r(A_f, U_f) | d = r(A_f, U_f) - r(A_f, U_b) | r shift | d, length fixed (exploratory) |
+|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | less Assistant-like | 0.91 | 0.79 | 0.72 | **-0.07** [-0.11, -0.03] | 0.63 | +0.01 [-0.03, +0.05] |
+| Gemma 4 31B | more Assistant-like | 0.80 | 0.68 | 0.90 | **+0.22** [+0.16, +0.30] | 0.89 | +0.22 [+0.17, +0.29] |
+| Llama 70B | more Assistant-like | 0.82 | 0.60 | 0.95 | **+0.36** [+0.28, +0.43] | 0.96 | +0.30 [+0.24, +0.37] |
+
+| model | stage | r non-harmful | r within origin | b | gap | U SD | SD around line | U SD / A SD |
+|---|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | base user | 0.92 | 0.87 | 0.32 | 0.40 | 0.35 | 0.14 | 0.86 |
+| | final user | 0.81 | 0.69 | 0.88 | 1.06 | 1.23 | 0.86 | 0.21 |
+| | final coinflip | 0.40 | 0.63 | 0.24 | 0.38 | 0.38 | 0.29 | 0.06 |
+| Gemma 4 31B | base user | 0.75 | 0.65 | 0.15 | 0.24 | 0.19 | 0.11 | 0.32 |
+| | final user | 0.91 | 0.78 | 2.85 | 4.07 | 3.16 | 1.36 | 0.32 |
+| | final coinflip | 0.87 | 0.75 | 3.07 | 5.74 | 3.38 | 1.41 | 0.34 |
+| Llama 70B | base user | 0.80 | 0.74 | 0.09 | 0.11 | 0.11 | 0.06 | 0.73 |
+| | final user | 0.94 | 0.88 | 1.62 | 3.20 | 1.69 | 0.50 | 0.19 |
+| | final coinflip | 0.88 | 0.78 | 1.06 | 2.13 | 1.15 | 0.45 | 0.13 |
+
+| model | r(A_f, U_f) - r(A_f, C_f) | r shift, U vs C | r(U_b, C_b) | r(U_f, C_f) | r(A_f, U_f given C_f) | r(A_f, C_f given U_f) |
+|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | +0.09 [+0.02, +0.17] | 0.63 vs 0.64 | 0.11 | 0.66 | 0.51 | 0.30 [0.15, 0.42] |
+| Gemma 4 31B | -0.01 [-0.03, +0.02] | 0.89 vs 0.90 | 0.49 | 0.88 | 0.52 | 0.56 [0.45, 0.66] |
+| Llama 70B | +0.03 [+0.02, +0.05] | 0.96 vs 0.92 | 0.16 | 0.96 | 0.65 | 0.07 [-0.05, 0.19] |
+
+**Predictions, scored:**
+1. **The call: right for two of three, wrong for OLMo.** Gemma and Llama are more Assistant-like. I expected OLMo to be the least clear, not to reverse.
+2. **The base already correlates: confirmed.** r(A_b, U_b) is 0.80-0.91, above the base coinflip's 0.12-0.50. The rise in r is smaller than the coinflip's in
+   all three (-0.19, +0.10, +0.14 vs +0.51, +0.41, +0.77).
+3. **Larger than the coinflip: right only in OLMo.** OLMo's SD and b are 3.2x and 3.7x the coinflip's. Llama narrowly misses on SD (1.47x; b is 1.52x).
+   Gemma is simply wrong: its coin tilts as hard as its user chooses (SD and b 0.93x), and harder on harm (gap 4.07 vs 5.74).
+4. **At least as close as the coinflip: confirmed.** See the table: OLMo's CI is above 0, and Gemma's and Llama's differences are within the limits.
+5. **Not only harm: confirmed, in two of three.** r over non-harmful tasks and within origin rise by 0.13-0.16 in Gemma and Llama, CIs above 0. Both fall in OLMo
+   (-0.11, -0.18).
+6. **Harm: confirmed.** The gap rises in all three (+0.67, +3.83, +3.10), CIs above 0.
+7. **Mass: confirmed.** 0.96-1.00 in all six cells.
+
+### Findings
+
+1. **A base model hardly separates the two speakers.** The base user's and base Assistant's choices correlate 0.80-0.91 on near-identical prompts, on a similar
+   scale in OLMo and Llama (U SD / A SD 0.86, 0.73). So base-model "Assistant preferences" here are mostly what a base model does with this kind of choice,
+   whoever is choosing.
+2. **Post-training then separates them in scale.** The final Assistant's SD grows 15-58x and the user's 3.5-17x, leaving the final user at about a fifth to a third of the
+   Assistant's scale. The user's slope on the Assistant does rise a lot: 2.8x, 19x and 18x.
+3. **The change in the user lines up with the change in the Assistant about as well as the coinflip's does.** r shift is 0.63, 0.89 and 0.96, against the coinflip's 0.64,
+   0.90 and 0.92, and it orders the models the same way. Whatever moves the coinflip seems to move the user's choice too, so it isn't specific to the coin.
+4. **The coin and the user converge.** r(U, C) goes from 0.11, 0.49 and 0.16 at base to 0.66, 0.88 and 0.96. In Llama, the coin has no Assistant alignment left once the
+   user's choice is held fixed (0.07 [-0.05, 0.19]): its coin looks like its user's choice at about two-thirds the slope. That isn't so in Gemma, where each keeps its own share (0.52,
+   0.56) and the coin outweighs the user on harm.
+5. **OLMo's reversal is about length (exploratory).** r(U, log length) rises from 0.39 to 0.67 in OLMo, while it falls from 0.42 to 0.09 in Llama and stays at 0.15 in Gemma. In OLMo, 48% of the final user's variance
+   is beyond its line on the Assistant, and that part correlates 0.74 with length (Gemma: 19%, 0.44; Llama: 9%, 0.33). It also favors STRESS-TEST (+0.84) and penalizes Alpaca (-0.92), so long, specific requests
+   rank high, including two harmful ones the Assistant puts at -12 to -14, and short list and fact tasks rank low. With length held fixed, r(A_f, U_f) is 0.79 and d is +0.01, and r shift rises to 0.70.
+   Length was not in the pre-registered call, so the call stands and this explains it after the fact. OLMo's final user is then no closer to the final Assistant, but no further either.
+6. **The final user tracks this model's own Assistant, not just shared taste (exploratory).** With the other sweep models' mean Assistant utilities held fixed, r(A_f, U_f) is 0.65 [0.57, 0.71], 0.70 [0.64, 0.75] and
+   0.64 [0.55, 0.72]; the coinflip's equivalents ("Model families") are 0.69, 0.49 and 0.35. As there, own and consensus utilities correlate highly, so read these loosely. This is some evidence against "post-training
+   just teaches what people want", though a model's own training data could still shape both.
+7. **The final Llama and Gemma user steers clear of harmful tasks it just offered.** Mean U on BailBench goes from -0.12 to -2.82 and from -0.21 to -3.26 (`figures/user_choice_by_origin.png`). OLMo's goes from -0.43 to -1.47.
+   A real user who has listed a harmful task might well pick it, so this looks more Assistant-like than user-like, but that's an interpretation, not a test.
+
+![Mean user-choice utility by origin](figures/user_choice_by_origin.png)
+
+### Caveats
+
+- **This doesn't say who the model takes to be speaking.** One token is read, and the line ends in the Assistant's own prefill words. "The user has taken on the Assistant's tastes" and "the model speaks as the Assistant
+  inside the user's turn" predict the same numbers here. Testing that needs sampled continuations and a voice judge, as in `../coinflip`.
+- **No clean null.** Final models saw far more chat data, including user turns, so some of this may be better modelling of users. Findings 6 and 7 bear on that but don't settle it.
+- **Base model chat frames differ.** Llama's base has zero-vector turn markers and Gemma's an untrained frame. Both still gave r = 0.80-0.82 with their Assistant condition.
+- **Gemma's slot bias is large at the final stage** (-4.27, with P(" B") averaging 0.76; its Assistant condition is -2.11). Scoring both orders cancels it to first order, and reliability is 0.998, but near the
+  saturated end log-odds may not add up as cleanly.
+- **"Okay," is OLMo's strongest opener** for the coinflip, so OLMo may look different at others.
+- **Llama:** its base and final are different releases (3.1, 3.3). It ran on one H200 where the sweep used two; its re-scored final stage matches, and its base stage wasn't re-scored.
+- One phrasing, no system prompt, bf16. CIs cover task sampling only. Three models, chosen for their coinflip pattern, so model-level comparisons are descriptive.
 
 ## Tasks
 
