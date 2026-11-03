@@ -197,11 +197,17 @@ def main():
         if "use_cache" in m:  # no KV cache: scoring doesn't need one, and it costs memory on a tight fit
             model.config.use_cache = m["use_cache"]
 
+        if "doc_prefix" in m:
+            # Raw-text conditions open with it: it must tokenize to the model's special token(s), not characters.
+            prefix_ids = tokenizer.encode(m["doc_prefix"], add_special_tokens=False)
+            assert prefix_ids and all(i in tokenizer.all_special_ids or i in tokenizer.added_tokens_decoder
+                                      for i in prefix_ids), f"doc_prefix {m['doc_prefix']!r} is not special tokens: {prefix_ids}"
+
         for condition in m["conditions"]:
             outcome_ids = tuple(outcome_token_ids(condition, tokenizer))
             items = [(build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
                                    turn_format=m.get("turn_format"), close_think=m.get("close_think", False),
-                                   strip_think=m.get("strip_think", False)),
+                                   strip_think=m.get("strip_think", False), doc_prefix=m.get("doc_prefix")),
                       outcome_ids) for a, b in ordered]
             examples[f"{stage}/{condition}"] = items[0][0]
             print(f"\n[{stage}/{condition}] example prompt:\n{items[0][0]}\n", flush=True)

@@ -1,0 +1,26 @@
+# Raw text (README, "The coinflip as raw text"): the coinflip prompt as a bare document, no chat template,
+# in its own first-person words (with and without "Okay, ") and as ../coinflip's two third-person stories.
+# One config per stage, each on its own pod. 1x H200 without a KV cache, as the openers and user-choice runs (the sweep used 2x H200; the openers run reproduced it at r = 1.0000). ~250 GB of disk.
+wandb_project: tournament
+group: raw_text
+tags: [llama-70b]
+run_name: raw-text-llama-70b-final
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep, so the Assistant and chat coinflip utilities can come from it.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    # Llama 3's BOS.
+    doc_prefix: "<|begin_of_text|>"
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [raw_okay, raw_no_okay, raw_story_ai, raw_story_person]

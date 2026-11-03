@@ -11,6 +11,8 @@ only where they have to:
 - user_choice: the *Human* turn says the Human will choose, and is cut off at
   "I'll choose Task"; we read P(" A") vs P(" B"). The Assistant prompt with "you"
   changed to "I" in its opening, and the same last words and outcome tokens.
+- raw_*: the coinflip as a raw document, no chat template: in its own first-person words, or as a
+  third-person story (see below).
 
 In all of them, the task listed first is the one the first outcome token picks, so
 per-pair log-odds are always log P(first) - log P(second).
@@ -55,6 +57,23 @@ OPENERS = {"okay": "Okay, ", "no_okay": "", "alright": "Alright, ", "ok": "OK, "
 for _name, _opener in OPENERS.items():
     CONDITIONS[f"coinflip_{_name}"] = {**CONDITIONS["coinflip"],
                                        "body": CONDITIONS["coinflip"]["body"].replace("Okay, I'm", _opener + "I'm")}
+
+# Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
+# token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person
+# stories (coinflip.py FRAMINGS, STORY_ENDINGS; RESULTS.md "Third-person stories and a coin tool").
+# - raw_okay, raw_no_okay: the coinflip's own words, first person ("I would like you to ..."), with and
+#   without the last line's "Okay, ". raw_no_okay is the stories' wording-matched baseline.
+# - raw_story_ai, raw_story_person: a third-person story; only the opening sentence and the last line change.
+_STORIES = {
+    "ai": ("A user asked an AI assistant", "The user flipped the coin. It came up"),
+    "person": ("A client asked a freelancer", "The client flipped the coin. It came up"),
+}
+CONDITIONS["raw_okay"] = {**CONDITIONS["coinflip"], "raw": True}
+CONDITIONS["raw_no_okay"] = {**CONDITIONS["coinflip_no_okay"], "raw": True}
+for _name, (_who, _ending) in _STORIES.items():
+    CONDITIONS[f"raw_story_{_name}"] = {**CONDITIONS["coinflip"], "raw": True, "body": (
+        CONDITIONS["coinflip"]["body"].replace("I would like you", _who)
+        .replace("Okay, I'm flipping the coin now ... it came up", _ending))}
 SENTINEL = "<<<CUT_HERE>>>"
 
 
@@ -119,7 +138,7 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
 
 
 def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
-                 turn_format=None, close_think=False, strip_think=False):
+                 turn_format=None, close_think=False, strip_think=False, doc_prefix=None):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
@@ -130,9 +149,14 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     close_think: close a Think-only template's opening "<think>" empty before the
     prefill; without it the prefill is the first words of the reasoning.
     strip_think: drop that "<think>" instead, so the reply has no think block at all.
+    doc_prefix: the model's document-start token(s), which open a raw-text condition (no template).
     """
     spec = CONDITIONS[condition]
     body = spec["body"].format(first=first.strip(), second=second.strip())
+    if spec.get("raw"):
+        assert doc_prefix is not None, f"{condition} is raw text and needs the model's doc_prefix"
+        assert system_prompt == "none", "raw-text conditions have no system prompt"
+        return doc_prefix + body
     has_reply = spec["prefill"] is not None
     rendered = _render([{"role": "user", "content": body + SENTINEL}], template_tokenizer, has_reply,
                        system_prompt, turn_format, close_think, strip_think)

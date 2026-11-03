@@ -50,8 +50,17 @@ REPLY_HEADER = {
 }
 
 
+# Document-start token(s) for the raw-text conditions, as in ../coinflip's frames configs.
+DOC_PREFIX = {OLMO3: "<|endoftext|>", OLMO3_BASE: "<|endoftext|>", GEMMA: "<bos>", GEMMA_BASE: "<bos>",
+              LLAMA: "<|begin_of_text|>", LLAMA_BASE: "<|begin_of_text|>", GLM: "[gMASK]<sop>", GLM_BASE: "[gMASK]<sop>",
+              DEEPSEEK: "<｜begin▁of▁sentence｜>", DEEPSEEK_BASE: "<｜begin▁of▁sentence｜>"}
+CHAT_CONDITIONS = [c for c in CONDITIONS if not CONDITIONS[c].get("raw")]
+RAW_CONDITIONS = [c for c in CONDITIONS if CONDITIONS[c].get("raw")]
+
+
 def render(condition, tok, first="FIRST", second="SECOND", **kw):
-    return build_prompt(condition, first, second, tok, turn_format=TURN_FORMAT.get(tok.name_or_path), **kw)
+    return build_prompt(condition, first, second, tok, turn_format=TURN_FORMAT.get(tok.name_or_path),
+                        doc_prefix=DOC_PREFIX.get(tok.name_or_path), **kw)
 
 
 @pytest.fixture(scope="module", params=list(REPLY_HEADER))
@@ -169,7 +178,7 @@ def test_deepseek_matches_reference_encoding():
     enc = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(enc)
     tok = AutoTokenizer.from_pretrained(DEEPSEEK)
-    for condition in CONDITIONS:
+    for condition in CHAT_CONDITIONS:
         body = CONDITIONS[condition]["body"].format(first="FIRST", second="SECOND")
         reference = enc.encode_messages([{"role": "user", "content": body}], thinking_mode="chat")
         if CONDITIONS[condition]["prefill"] is None:
@@ -184,7 +193,7 @@ def test_deepseek_matches_reference_encoding():
 def test_base_model_with_borrowed_template(base_name, template_name):
     base = AutoTokenizer.from_pretrained(base_name)
     template = AutoTokenizer.from_pretrained(template_name)
-    for condition in CONDITIONS:
+    for condition in CHAT_CONDITIONS:
         p = render(condition, template)
         # Same tokenization under the base tokenizer as under the Instruct one.
         assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
@@ -245,3 +254,62 @@ def test_openers_change_only_the_last_lines_opener(name):
         pre = next((k for k, (x, y) in enumerate(zip(ids, base)) if x != y), len(base))
         suf = next((k for k, (x, y) in enumerate(zip(ids[::-1], base[::-1])) if x != y), len(base))
         assert len(base) - pre - suf <= 3 and len(ids) - pre - suf <= 3
+
+
+# ../coinflip's plain-text frames, verbatim (coinflip.py FRAMINGS, STORY_ENDINGS, ENDINGS; the tasks are joined
+# by its usual "\n\nTask A (if heads): ..." block).
+COINFLIP_RAW = {
+    "raw_okay": ("I would like you to perform one of the following two tasks, depending on the outcome of a coinflip.",
+                 "Okay, I'm flipping the coin now ... it came up"),
+    "raw_no_okay": ("I would like you to perform one of the following two tasks, depending on the outcome of a coinflip.",
+                    "I'm flipping the coin now ... it came up"),
+    "raw_story_ai": ("A user asked an AI assistant to perform one of the following two tasks, depending on the outcome "
+                     "of a coinflip.", "The user flipped the coin. It came up"),
+    "raw_story_person": ("A client asked a freelancer to perform one of the following two tasks, depending on the "
+                         "outcome of a coinflip.", "The client flipped the coin. It came up"),
+}
+RAW_FAMILIES = {"olmo3.1-32b": (OLMO3_BASE, OLMO3), "gemma4-31b": (GEMMA_BASE, GEMMA), "llama-70b": (LLAMA_BASE, LLAMA),
+                "glm-4.5-air": (GLM_BASE, GLM), "deepseek-v4-flash": (DEEPSEEK_BASE, DEEPSEEK)}
+
+
+def test_raw_conditions_are_coinflips_text():
+    assert sorted(RAW_CONDITIONS) == sorted(COINFLIP_RAW)
+    for condition, (opening, ending) in COINFLIP_RAW.items():
+        p = build_prompt(condition, " FIRST ", "SECOND", None, doc_prefix="<DOC>")
+        assert p == f"<DOC>{opening}\n\nTask A (if heads): FIRST\n\nTask B (if tails): SECOND\n\n{ending}"
+        assert CONDITIONS[condition]["outcomes"] == (" heads", " tails")
+    # raw_okay is the chat coinflip's user text exactly.
+    assert CONDITIONS["raw_okay"]["body"] == CONDITIONS["coinflip"]["body"]
+    with pytest.raises(AssertionError):
+        build_prompt("raw_okay", "FIRST", "SECOND", None)  # no doc_prefix
+
+
+@pytest.mark.parametrize("family", list(RAW_FAMILIES))
+def test_raw_prompts_open_with_special_tokens_and_match_across_stages(family):
+    base, final = (AutoTokenizer.from_pretrained(n) for n in RAW_FAMILIES[family])
+    prefix = DOC_PREFIX[final.name_or_path]
+    assert DOC_PREFIX[base.name_or_path] == prefix
+    for tok in (base, final):
+        ids = tok.encode(prefix, add_special_tokens=False)
+        assert ids and all(i in tok.all_special_ids or i in tok.added_tokens_decoder for i in ids)
+    for condition in RAW_CONDITIONS:
+        p = render(condition, final)
+        ids = final(p, add_special_tokens=False).input_ids
+        assert ids == base(render(condition, base), add_special_tokens=False).input_ids
+        assert ids[:len(final.encode(prefix, add_special_tokens=False))] == final.encode(prefix, add_special_tokens=False)
+        assert final.decode(ids).endswith(" came up") or final.decode(ids).endswith(" it came up")
+        assert outcome_token_ids(condition, base) == outcome_token_ids(condition, final) == outcome_token_ids("coinflip", final)
+
+
+def test_raw_text_configs_pair_base_and_final():
+    for family, (base_name, final_name) in RAW_FAMILIES.items():
+        base = yaml.safe_load(open(f"configs/raw_text/{family}-base.yaml"))
+        last = yaml.safe_load(open(f"configs/raw_text/{family}-final.yaml"))
+        (b,), (f,) = base["models"], last["models"]
+        assert (b["name"], b["stage"]) == (base_name, "base") and (f["name"], f["stage"]) == (final_name, "instruct")
+        assert b["conditions"] == f["conditions"] == RAW_CONDITIONS
+        assert b["doc_prefix"] == f["doc_prefix"] == DOC_PREFIX[final_name]
+        for cfg in (base, last):
+            assert cfg["max_pairs"] == 15000 and cfg["seed"] == 0 and cfg["system_prompt"] == "none"
+            assert cfg["tasks_file"] == "data/tasks_n300_max500_seed0.jsonl"
+            assert cfg["group"] == "raw_text" and cfg["tags"] == [family]
