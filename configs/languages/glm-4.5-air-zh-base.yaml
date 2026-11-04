@@ -1,0 +1,23 @@
+# Other languages (README, "Other languages"): the Assistant and coinflip conditions in Simplified Chinese, on the 300 tasks
+# translated by translate.py (data/tasks_n300_max500_seed0_zh.jsonl, not in git; same ids and order as the English file,
+# so select_pairs draws the sweep's 15,000 pairs). One config per stage and language. 2x H200, as the sweep. ~450 GB of disk for both stages.
+wandb_project: tournament
+group: languages
+tags: [glm-4.5-air, zh]
+run_name: languages-glm-4.5-air-zh-base
+tasks_file: data/tasks_n300_max500_seed0_zh.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep, so the English Assistant and coinflip utilities can come from it.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: zai-org/GLM-4.5-Air-Base
+    stage: base
+    chat_template_from: zai-org/GLM-4.5-Air
+    conditions: [assistant_zh, coinflip_zh]

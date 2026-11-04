@@ -7,3 +7,7 @@ artifacts/
 .pods.tsv
 # upstream task source, only needed for `make_tasks.py extract`
 probing-persona-preferences/
+# Language conditions: translations of WildChat prompts are third-party chat text (translate.py)
+data/translations/
+data/tasks_n300_max500_seed0_es.jsonl
+data/tasks_n300_max500_seed0_zh.jsonl

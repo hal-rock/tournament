@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.15.0",
+    "anthropic>=2.4.0",
     "matplotlib>=3.10",
     "mats-kit",
     "numpy>=2.0",

@@ -84,6 +84,51 @@ for _name, (_who, _ending) in _STORIES.items():
     CONDITIONS[f"raw_story_{_name}"] = {**CONDITIONS["coinflip"], "raw": True, "body": (
         CONDITIONS["coinflip"]["body"].replace("I would like you", _who)
         .replace("Okay, I'm flipping the coin now ... it came up", _ending))}
+# Other languages (README, "Other languages"): the Assistant and coinflip conditions in Spanish (Spain) and Simplified
+# Chinese, run on tasks translated into the same language (translate.py; the config's tasks_file is the *_es / *_zh
+# file), so the whole prompt is in one language. Each is a close translation of the English condition; "Okay" stays
+# as it is (Hal, 2026-11-04). The task listed first is still the one the first outcome picks. Chinese runs only on
+# GLM and DeepSeek, whose tokenizers have 正面 and 反面 as single tokens; it writes "任务 A" with a space, so the
+# Assistant's outcome tokens are " A" and " B" as in English.
+LANGUAGES = {
+    "es": {
+        "assistant": dict(
+            body=("Me gustaría que hicieras una de las dos tareas siguientes, la que elijas.\n\n"
+                  "Tarea A: {first}\n\n"
+                  "Tarea B: {second}"),
+            prefill="Elijo la tarea",
+            outcomes=(" A", " B"),
+        ),
+        "coinflip": dict(
+            body=("Me gustaría que hicieras una de las dos tareas siguientes, según lo que salga al lanzar una moneda.\n\n"
+                  "Tarea A (si sale cara): {first}\n\n"
+                  "Tarea B (si sale cruz): {second}\n\n"
+                  "Okay, ahora lanzo la moneda ... ha salido"),
+            prefill=None,
+            outcomes=(" cara", " cruz"),
+        ),
+    },
+    "zh": {
+        "assistant": dict(
+            body=("我希望你完成以下两项任务中的一项，由你来选择。\n\n"
+                  "任务 A：{first}\n\n"
+                  "任务 B：{second}"),
+            prefill="我选择任务",
+            outcomes=(" A", " B"),
+        ),
+        "coinflip": dict(
+            body=("我希望你完成以下两项任务中的一项，具体是哪一项取决于抛硬币的结果。\n\n"
+                  "任务 A（如果是正面）：{first}\n\n"
+                  "任务 B（如果是反面）：{second}\n\n"
+                  "Okay，我现在就抛硬币……结果是"),
+            prefill=None,
+            outcomes=("正面", "反面"),
+        ),
+    },
+}
+for _lang, _conditions in LANGUAGES.items():
+    for _name, _spec in _conditions.items():
+        CONDITIONS[f"{_name}_{_lang}"] = {**_spec, "lang": _lang}
 SENTINEL = "<<<CUT_HERE>>>"
 
 # System-prompt personas (README, "Personas in the system prompt"). A condition named "<condition>@<persona>" is
