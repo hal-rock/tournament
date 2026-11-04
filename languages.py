@@ -28,7 +28,7 @@ differences are paired. `classify` gives the pre-registered call.
   outputs/languages/contrasts.csv                paired differences
   figures/languages_*.png
 
-Usage: uv run python languages.py [--group languages]
+Usage: uv run python languages.py [--group languages] [--english sweep]
 """
 
 import argparse
@@ -153,28 +153,45 @@ def merged_fit(runs, family, lang, out):
         return list(csv.DictReader(fh)), json.loads((out / "summary.json").read_text()), paths
 
 
-def plot_summary(cells, labels, path):
+def plot_summary(cells, labels, path, unreadable=None):
     """Per model and language: r with the Assistant in the same language (English for reference), the share of
-    the English coinflip's post-training tilt it keeps, and how well the Assistant's ranking survives translation."""
+    the English coinflip's post-training tilt it keeps, and how well the Assistant's ranking survives translation.
+    unreadable: {(family, lang): median outcome mass} of cells whose final coinflip fails the readability rule; their
+    coinflip statistics are drawn faded and labelled, since the pre-registration doesn't interpret them."""
+    unreadable = unreadable or {}
     keys = list(cells)
     x = np.arange(len(keys))
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.4))
     panels = (
-        (axes[0], (("r_en", "English (sweep)", 0), ("r_final", "this language", 1)), "r(Assistant, coinflip), final model"),
+        (axes[0], (("r_en", "English", 0), ("r_final", "this language", 1)), "r(Assistant, coinflip), final model", True),
         (axes[1], (("retention", "same-language Assistant", 1), ("retention_cross", "English Assistant", 2)),
-         "Post-training tilt toward the final Assistant,\nshare of the English coinflip's"),
-        (axes[2], (("r_aa", "final", 1), ("r_aa_base", "base", 3)), "r(English Assistant, this language's Assistant)"),
+         "Post-training tilt toward the final Assistant,\nshare of the English coinflip's", True),
+        (axes[2], (("r_aa", "final", 1), ("r_aa_base", "base", 3)), "r(English Assistant, this language's Assistant)", False),
     )
-    for ax, series, ylab in panels:
+    for ax, series, ylab, uses_coin in panels:
         for j, (stat, name, color) in enumerate(series):
             off = x + (j - (len(series) - 1) / 2) * 0.22
             est = np.array([cells[k]["est"][K[stat]] for k in keys])
             lo, hi = (np.array(v) for v in zip(*(ci(cells[k]["boot"][:, K[stat]]) for k in keys)))
-            errorbar(ax, off, est, np.minimum(lo, est), np.maximum(hi, est), plotstyle.SERIES[color], "o", name, ls="none")
+            lo, hi = np.minimum(lo, est), np.maximum(hi, est)
+            faded = np.array([uses_coin and stat != "r_en" and k in unreadable for k in keys])
+            ok = ~faded
+            errorbar(ax, off[ok], est[ok], lo[ok], hi[ok], plotstyle.SERIES[color], "o", name, ls="none")
+            if faded.any():
+                ax.errorbar(off[faded], est[faded], yerr=[est[faded] - lo[faded], hi[faded] - est[faded]], ls="none",
+                            marker="o", ms=7, mfc="white", mec=plotstyle.SERIES[color], color=plotstyle.SERIES[color],
+                            alpha=0.45, elinewidth=1.2, zorder=3)
+        if uses_coin:
+            for i, k in enumerate(keys):
+                if k in unreadable:
+                    stats = [st for st, _, _ in series if st != "r_en"]
+                    y = min(ci(cells[k]["boot"][:, K[st]])[0] for st in stats) - 0.03
+                    ax.annotate(f"coinflip unreadable\n(median mass {unreadable[k]:.2f})", (x[i], y), ha="center",
+                                va="top", fontsize=7, color=INK_2)
         ax.axhline(0, color=RULE, lw=0.8, zorder=1)
         ax.set_ylabel(ylab, color=INK_2)
         ax.set_xticks(x, [f"{labels[f]}\n{LANG_NAME[lang]}" for f, lang in keys], fontsize=8)
-        ax.legend(frameon=False, fontsize=8)
+        ax.legend(frameon=False, fontsize=8, loc="lower left")
         style(ax)
     axes[1].axhline(1, color=RULE, lw=0.8, ls="--", zorder=1)
     fig.tight_layout()
@@ -212,8 +229,11 @@ def plot_scatter(data, origins, labels, path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--group", default="languages")
+    p.add_argument("--english", choices=["same-gpu", "sweep"], default="same-gpu",
+                   help="English reference: the same-GPU re-score where there is one (pre-registered), or the H200 sweep")
     args = p.parse_args()
-    out = Path("outputs/languages")
+    out = Path("outputs/languages" if args.english == "same-gpu" else "outputs/languages_sweep_ref")
+    fig_prefix = "figures/languages" if args.english == "same-gpu" else "figures/languages_sweep_ref"
     out.mkdir(parents=True, exist_ok=True)
     runs = collect_runs(args.group)
     keys = [(f, lang) for f, (_, _, langs) in FAMILIES.items() for lang in langs
@@ -227,15 +247,15 @@ def main():
     for f, lang in keys:
         final = FAMILIES[f][0]
         labels[f] = MODEL_INFO[final][0]
-        rows, summary, paths = merged_fit(runs, f, lang, out / "analysis" / f"{f}-{lang}")
+        rows, summary, paths = merged_fit(runs, f, lang, Path("outputs/languages/analysis") / f"{f}-{lang}")
         sweep_rows, sweep_summary = load_sweep(f)
         ids = [r["id"] for r in rows]
         assert ids == [r["id"] for r in sweep_rows], "task sets differ"
         U, origins, benign, _ = task_arrays(rows)
         B = task_arrays(sweep_rows)[0]
-        if all((f, "en", s) in runs for s in STAGES):
+        if args.english == "same-gpu" and all((f, "en", s) in runs for s in STAGES):
             # The same-GPU English re-score is the reference; the sweep is a reproduction check.
-            en_rows, en_summary, _ = merged_fit(runs, f, "en", out / "analysis" / f"{f}-en")
+            en_rows, en_summary, _ = merged_fit(runs, f, "en", Path("outputs/languages/analysis") / f"{f}-en")
             assert [r["id"] for r in en_rows] == ids, "task sets differ"
             E = task_arrays(en_rows)[0]
             for m in ("base/assistant", "instruct/assistant", "base/coinflip", "instruct/coinflip"):
@@ -314,9 +334,11 @@ def main():
     write_csv(out / "languages.csv", table)
     write_csv(out / "contrasts.csv", contrasts)
     plotstyle.setup()
-    plot_summary(cells, labels, "figures/languages_summary.png")
-    plot_scatter(data, origins0, labels, "figures/languages_scatter.png")
-    print(f"\nWrote {out}/ and figures/languages_*.png")
+    unreadable = {(f, r["lang"]): r["instruct_coinflip_mass_median"] for r in table for f in FAMILIES
+                  if labels.get(f) == r["model"] and r["instruct_coinflip_mass_median"] < MIN_MASS}
+    plot_summary(cells, labels, f"{fig_prefix}_summary.png", unreadable)
+    plot_scatter(data, origins0, labels, f"{fig_prefix}_scatter.png")
+    print(f"\nWrote {out}/ and {fig_prefix}_*.png")
 
 
 if __name__ == "__main__":

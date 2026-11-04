@@ -2607,6 +2607,103 @@ A_en and C_en. The sweep becomes a reproduction check, expected at r ≥ 0.99 pe
 re-scored utilities. A lower value is reported, with the analysis shown both ways. DeepSeek still waits for a multi-GPU node; if it
 runs on a GPU type other than the sweep's, it gets the same re-score. The predictions and calls are unchanged.
 
+### Results (2026-11-04): Llama, Gemma, GLM; DeepSeek not yet run
+
+Runs, group `languages` (base, final). Llama on 1x B200 (`tourn-lang-b200-llama`, $12.53):
+- Spanish `462etud6`, `zjeyluyl`;
+- English re-score `m07wtbui`, `gpgizcrl`.
+
+GLM then Gemma on 1x B300 (`tourn-lang-b300-glm-gemma`, $19.06):
+- GLM Spanish `bnxkrbty`, `mfra54sn`; Chinese `od91i8w0`, `p7y0soex`; English `r71dbpou`, `ks9kbuka`;
+- Gemma Spanish `7r0sugnf`, `xtrei0mm`; English `ladp07xx`, `xip108uu`.
+
+GPU $31.59 plus $6.49 of API, $38.08 in all. Every job's batching check passed. DeepSeek V4 Flash didn't run: no multi-GPU node of any type was in stock all afternoon, and its ~290 GB FP8 base needs one. Its predictions are open. Full printout: `outputs/languages/analysis_printout.txt` (not in git); tables `outputs/languages/languages.csv`, `contrasts.csv`.
+
+**Reproduction:** the same-GPU English re-scores match the H200 sweep at r 0.994-1.000 for every condition and stage except two base
+coinflips. Those are GLM (0.982) and Gemma (0.967), conditions with near-zero spread (SD 0.08-0.09 nats), where GPU rounding is a
+larger share. As pre-registered, the analysis was also run against the sweep (`--english sweep`). No reported number moves by more
+than 0.01, and no call changes.
+
+**Readability:** Gemma's final Spanish coinflip is **unreadable** (median outcome mass 0.02, against 0.99 in English), so by the
+pre-registered rule its coinflip numbers are reported but not interpreted. It mostly opens the outcome in bold (" \*\*", 64%), or
+starts the "own own own" degeneration that `~/mats/CLAUDE.md` documents for Gemma-it continuing an open turn (" own", 18%). Only
+" cruz" (9%) and " cara" (3%) remain. Every other cell is readable, GLM's Chinese base coinflip just barely (median mass 0.21).
+Split-half reliability is 0.983-0.999 everywhere.
+
+**Bottom line: the Assistant's preferences survive translation almost unchanged, and in every readable cell the coinflip still
+tracks them. In Spanish it does so at a smaller scale than in English: Llama keeps half the English tilt, GLM two thirds. GLM's
+Chinese coin keeps the full English tilt but correlates less, because its base model's Chinese coin starts out leaning against the
+Assistant across task sources.** So the effect isn't a property of English phrasing, but its size depends on the language.
+
+![Summary](figures/languages_summary.png)
+
+![Utilities across languages](figures/languages_scatter.png)
+
+| model | language | call | r(A_L_f, C_L_f) | English r | r(A_L_f, C_L_b) | r shift | retention | r non-harmful | r within origin | r(A_en_f, A_L_f) | Assistant SD, L / en | coin mass, final |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Llama 3.3 70B | Spanish | tracks | 0.86 [0.84, 0.89] | 0.92 | 0.10 | 0.87 | 0.49 [0.46, 0.51] | 0.75 | 0.69 | 0.96 [0.95, 0.97] | 0.70 | 0.75 |
+| Gemma 4 31B | Spanish | unreadable | (0.91 [0.89, 0.92]) | 0.91 | (0.40) | (0.91) | (0.80 [0.76, 0.86]) | (0.85) | (0.79) | 0.98 [0.98, 0.99] | 0.64 | 0.02 |
+| GLM-4.5-Air | Spanish | tracks | 0.88 [0.85, 0.90] | 0.92 | 0.07 | 0.80 | 0.66 [0.59, 0.73] | 0.79 | 0.69 | 0.97 [0.97, 0.98] | 0.86 | 0.64 |
+| GLM-4.5-Air | Chinese | tracks | 0.73 [0.68, 0.77] | 0.92 | -0.41 | 0.72 | 0.99 [0.90, 1.09] | 0.45 | 0.44 | 0.95 [0.94, 0.97] | 0.97 | 0.52 |
+
+Parenthesized: Gemma's coinflip numbers, reported but not interpreted.
+- **Paired differences in r(A_L_f, C_L_f) from English:** Llama Spanish -0.058 [-0.081, -0.036], GLM Spanish -0.043 [-0.069,
+  -0.018], GLM Chinese -0.191 [-0.235, -0.150].
+- **GLM, Chinese minus Spanish:** r -0.148 [-0.198, -0.100], retention +0.33 [+0.23, +0.44], r(A_en_f, A_L_f) -0.020 [-0.033,
+  -0.009].
+- **Measured against the English Assistant instead** (retention_cross), retention is within 0.03 of the numbers above in every cell.
+
+**Predictions, scored on the three families that ran** (four cells, three with a readable coinflip):
+1. **Confirmed (4 of 4).** The Assistant survives translation: r(A_en_f, A_L_f) is 0.95-0.98, against the 0.85 threshold.
+2. **Confirmed for every readable cell (3 of 3).** The coin tracks in Llama Spanish, GLM Spanish and GLM Chinese. Gemma's cell
+   isn't interpreted; its numbers would also say "tracks".
+3. **Not confirmed (2 of 3 readable).** r(A_L_f, C_L_f) is within 0.1 of English in Llama Spanish (-0.06) and GLM Spanish (-0.04),
+   but GLM Chinese is 0.19 below.
+4. **Not confirmed (2 of 3 readable).** Retention is between 0.5 and 1.5 in GLM Spanish (0.66) and GLM Chinese (0.99), but Llama
+   Spanish keeps 0.49 [0.46, 0.51], just below.
+5. **Wrong for GLM (DeepSeek open).** Chinese keeps more of the English tilt than Spanish: +0.33 [+0.23, +0.44] in retention.
+6. **Wrong.** Gemma's final Spanish coinflip is unreadable.
+
+### Findings
+
+1. **Translation leaves the Assistant's ranking intact but compresses it in Spanish.** The final Assistant's utilities correlate
+   0.95-0.98 with English in every cell (disattenuated 0.96-0.98). In Spanish their spread is smaller: 0.70x English's SD in Llama,
+   0.64x in Gemma and 0.86x in GLM. The benign-harmful gap shrinks with it: Llama 13.1 vs 17.8 nats, Gemma 11.5 vs 18.2, GLM 5.9 vs
+   7.0. GLM in Chinese is at English scale (0.97x, gap 6.9 vs 7.0). So in Spanish the same preferences are held less sharply,
+   including in Llama, which officially supports Spanish.
+2. **The Spanish coinflip tracks its Assistant, at about half to two thirds of the English scale.** Llama's Spanish coin
+   correlates 0.86 with its Spanish Assistant (English 0.92), up from 0.10 at base (r shift 0.87), within task sources too (0.69).
+   But it keeps 49% of the English tilt: its benign-harmful gap is 1.21 nats vs 2.14 in English. GLM's keeps 66% (r 0.88, gap 0.47
+   vs 0.72). The gain, a slope per Assistant SD, equals r times the coin's SD, so it doesn't depend on the Assistant's scale. This
+   isn't the Assistant's compression passed on: the coin's Assistant-aligned spread falls to 0.49 of English where the Assistant's
+   spread falls to 0.70 (GLM: 0.66 vs 0.86). Gemma's numbers point the same way (80%) but aren't interpreted.
+3. **GLM's Chinese coinflip keeps the full English tilt but correlates less.** Its post-training gain matches English's (retention
+   0.99 [0.90, 1.09]), more than Spanish's (paired +0.33). But its correlation with the Assistant is 0.73, lower than Spanish (0.88)
+   or English (0.92), and only 0.44 within task sources and 0.45 on non-harmful tasks.
+   Part of the gap is the base model (exploratory). GLM's base Chinese coin anti-correlates with the final Assistant (-0.41).
+   Almost all of that is between sources (-0.08 within origin), chiefly MATH, which the base Chinese coin pushes down by 0.26 nats
+   while the Assistant likes it most. Post-training adds an English-sized tilt on top of that offset. The low within-origin r of the
+   final model (0.44, against 0.69 in Spanish) isn't explained by the base, though: in Chinese the coin follows the Assistant's
+   between-source ordering better than its ranking of tasks within a source.
+4. **The coin tracks the English Assistant as well as its own.** r(A_en_f, C_L_f) is 0.87 (Llama Spanish), 0.86 (GLM Spanish) and
+   0.72 (GLM Chinese), within 0.02 of the same-language r. Retention measured against the English Assistant is within 0.03. With
+   the Assistant this stable across languages, the data can't separate "the coin follows the Assistant in its own language" from
+   "the coin follows a language-independent preference".
+5. **Spanish weakens the Gemma frame itself.** Gemma's English coinflip puts 0.99 of its mass on " heads"/" tails". In Spanish it
+   mostly reaches for Markdown bold or degenerates, which is closer to `~/mats/CLAUDE.md`'s note that 31B-it can't continue an open
+   turn than to its English behavior.
+
+### Caveats (from the results)
+
+- The scale findings (retention below 1 in Spanish) rest on comparing a translated task set against the English one. The Assistant
+  correlates 0.95-0.98 across languages, but every task's translation differs somewhat. Retention doesn't depend on the
+  Assistant's scale (the slope per SD is r times the coin's SD), so the Spanish Assistant's compression doesn't produce it.
+- One phrasing per language. Spanish keeps "Okay" but says the coin "ha salido", where English says it "came up". The Spanish
+  Assistant prefill is in the present tense. Any of these could change the scale.
+- Gemma's coinflip may be readable with a frame that leaves room for its bold opener (e.g. reading " cara"/" cruz" after " \*\*").
+  That would be a new, exploratory condition.
+- DeepSeek is unrun, so the Chinese-vs-Spanish comparison has one family.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
