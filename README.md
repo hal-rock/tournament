@@ -2435,6 +2435,21 @@ Every new cell has split-half reliability 0.994-0.997 and median outcome mass 0.
    over, differently in each model.
 5. **The final evil user picks harmful tasks** in both models (gap -0.57 and -1.17, from +3.20 and +4.07 without the prompt).
 
+**Within task source (exploratory, added after the results).** r of the evil-prompted user's change (final - base) with each Assistant,
+within each source, 95% bootstrap CIs:
+
+| model | vs | math (75) | alpaca (75) | wildchat (75) | stress_test (45) | bailbench (30) | all |
+|---|---|---|---|---|---|---|---|
+| Llama | default Assistant | +0.59 [0.44, 0.72] | +0.43 [0.21, 0.60] | +0.26 [0.04, 0.48] | -0.03 [-0.28, 0.21] | +0.22 [-0.27, 0.51] | +0.05 |
+| Llama | evil Assistant | +0.74 [0.62, 0.82] | +0.78 [0.70, 0.85] | +0.87 [0.82, 0.91] | +0.84 [0.75, 0.90] | +0.88 [0.78, 0.94] | +0.88 |
+| Gemma | default Assistant | +0.54 [0.33, 0.70] | +0.59 [0.42, 0.72] | +0.59 [0.45, 0.72] | -0.28 [-0.49, 0.00] | +0.11 [-0.40, 0.38] | +0.31 |
+| Gemma | evil Assistant | +0.37 [0.18, 0.55] | +0.51 [0.31, 0.66] | +0.64 [0.50, 0.76] | +0.70 [0.54, 0.82] | +0.54 [0.19, 0.76] | +0.59 |
+
+Llama's evil-prompted user follows the evil Assistant within every source. Gemma's follows the default Assistant at least as closely
+within the benign sources, and the evil Assistant on STRESS-TEST (where the two Assistants disagree, r -0.45) and BailBench. Within the
+benign sources the two Assistants are themselves positively correlated (Llama 0.16-0.34, Gemma 0.32-0.42), so these correlations
+overlap.
+
 ### What this says
 
 Hal's question was whether post-training makes the system-prompted user more like the default Assistant or the persona. For the evil
