@@ -196,14 +196,11 @@ def plot_pulls(cells, labels, path):
             top = max(top, hi[x], hi[y])
         b0 = K["b0"]
         ax.errorbar(0, est[b0], yerr=[[est[b0] - lo[b0]], [hi[b0] - est[b0]]], color=INK_2, marker="D", ms=7,
-                    lw=0, elinewidth=1.5, mec="white", mew=0.8, zorder=3)
-        ax.annotate("no system prompt (b_0)", (0, est[b0]), xytext=(8, -12), textcoords="offset points",
-                    color=INK_2, fontsize=9)
+                    lw=0, elinewidth=1.5, mec="white", mew=0.8, zorder=3, label="coin slope on A_0, no system prompt (b_0)")
         bh = K["b_h"]
         ax.errorbar(0, est[bh], yerr=[[est[bh] - lo[bh]], [hi[bh] - est[bh]]], color=INK_2, marker="s", ms=7,
-                    lw=0, elinewidth=1.5, mec="white", mew=0.8, zorder=3, mfc="white")
-        ax.annotate("helpful control (b_h)", (0, est[bh]), xytext=(8, 4), textcoords="offset points",
-                    color=INK_2, fontsize=9)
+                    lw=0, elinewidth=1.5, mec=INK_2, mew=1.2, zorder=3, mfc="white",
+                    label="coin slope on A_helpful, helpful control (b_h)")
         top = max(top, hi[b0], hi[bh]) * 1.15
         bottom = min(0.0, *(lo[K[f"{p}:{s}"]] for p in PERSONAS for s in ("b_per", "b_def"))) * 1.15
         ax.plot([0, top], [0, top], color=RULE, ls="--", lw=1, zorder=1)
@@ -218,8 +215,10 @@ def plot_pulls(cells, labels, path):
         ax.set_ylabel("pull toward the default Assistant, b_def\n(coin nats per SD of A_0)", color=INK_2, fontsize=9)
         ax.set_title(labels[family], color=INK)
         style(ax)
+    handles, names = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(names))
     fig.suptitle("Whose preferences does the coin follow under a persona?", color=INK)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
 

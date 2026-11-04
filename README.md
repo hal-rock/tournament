@@ -92,7 +92,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) and the user doing the task (W&B group `user_does`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`) and system-prompt personas (W&B group `personas`) below.
 
 ## Model families
 
@@ -2018,6 +2018,9 @@ Gilg et al. measure the same task preferences under system-prompt personas, whic
 (their evil persona is the only one anti-correlated with the no-system-prompt Assistant). Here those personas meet the
 coinflip. With a persona in the system prompt, does the coin follow the **default Assistant's** preferences (the ones
 post-training put in the weights), the **persona's** (the character the context casts as the AI), or a **mix**?
+**Mostly the persona's.** Under evil, the coin's harm avoidance disappears in OLMo and Llama and reverses in Gemma. Gemma's coin
+follows the personas almost entirely, Llama's splits about 60/40 toward the persona, and OLMo's follows evil. OLMo's slacker is
+the exception, but slacker barely changes OLMo's own choices. See Results.
 
 ### Design
 
@@ -2144,6 +2147,107 @@ The sweep's numbers for Gemma: r(A_0, C_0) 0.91, b_0 3.07, gap C_0 5.74, C_0 SD 
 3. **Slacker:** a mix with w between 0 and 1, not against the persona: with the persona moving Gemma's Assistant more, its coin
    has more to follow.
 4. **The control:** r(C_helpful, C_0) >= 0.9.
+
+### Results (2026-11-04)
+
+Runs (pods a, b), group `personas`: OLMo `boumh0bi`, `2wih9w8w` (RTX PRO 6000, $8.04 including a pod that never booted);
+Llama `0ex0e8lc`, `5d5gcran` (H200, $18.08); Gemma `z9v16lk3`, `mgldkcxm` (H200, $10.35). $36.47 in all. Full output in
+`outputs/personas/report.txt`, tables in `outputs/personas/*.csv`.
+
+**The gate passes.** The re-scored plain coinflip matches the sweep at r = 0.9997 (OLMo, on a different GPU type), 1.0000
+(Llama, Gemma), SD within 0.1%; OLMo's re-scored Assistant at r = 1.0000. Every new cell has split-half reliability
+0.993-0.999. Median outcome mass is 0.84-1.00 in every cell, so all are interpreted. A_0 and C_0 come from the sweep.
+
+![pulls](figures/personas_pulls.png)
+
+b_def and b_per are the coin's pulls toward the default Assistant and toward the persona, in coin nats per SD of each set of
+Assistant utilities, with 95% CIs. w = b_per / (b_def + b_per). Gap is the mean coin utility of non-harmful minus harmful tasks.
+
+| model | persona | r(A_p, A_0) | b_def | b_per | w | **call** | gap C_p (C_0) | b_0 |
+|---|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | evil | 0.55 | 0.02 [-0.02, 0.06] | 0.15 [0.11, 0.19] | 0.89 [0.68, 1.14] | **persona** | 0.05 (0.38) | 0.24 |
+| OLMo 3.1 32B | slacker | 0.88 | 0.39 [0.33, 0.46] | -0.09 [-0.15, -0.05] | -0.31 [-0.55, -0.14] | **against the persona** | 0.50 (0.38) | |
+| Llama 3.3 70B | evil | -0.12 | 0.30 [0.26, 0.34] | 0.49 [0.44, 0.53] | 0.62 [0.58, 0.66] | **mix** | -0.02 (2.13) | 1.06 |
+| Llama 3.3 70B | slacker | 0.29 | 0.41 [0.36, 0.47] | 0.51 [0.45, 0.55] | 0.55 [0.51, 0.59] | **mix** | 1.26 (2.13) | |
+| Gemma 4 31B | evil | -0.33 | -0.55 [-0.74, -0.36] | 2.55 [2.28, 2.81] | 1.27 [1.16, 1.42] | **persona** | -6.22 (5.74) | 3.07 |
+| Gemma 4 31B | slacker | 0.39 | 0.24 [0.08, 0.39] | 4.13 [3.87, 4.38] | 0.95 [0.91, 0.98] | **mix** | 4.90 (5.74) | |
+
+Secondary measures:
+
+| model | persona | total pull (b_0) | shift transfer | w, A_helpful as reference | w, non-harmful only | r(C_p, C_0) | r(A_p, log length) |
+|---|---|---|---|---|---|---|---|
+| OLMo | evil | 0.17 (0.24) | 0.82 [0.70, 0.94] | 0.87 | 0.63 [0.44, 0.85] | 0.56 | 0.44 |
+| OLMo | slacker | 0.30 (0.24) | 0.24 [0.12, 0.38] | -0.22 | -0.25 [-0.45, -0.11] | 0.82 | -0.09 |
+| Llama | evil | 0.78 (1.06) | 0.66 [0.63, 0.69] | 0.62 | 0.65 [0.58, 0.72] | 0.55 | 0.20 |
+| Llama | slacker | 0.92 (1.06) | 0.51 [0.48, 0.55] | 0.54 | 0.60 [0.55, 0.66] | 0.69 | -0.62 |
+| Gemma | evil | 2.00 (3.07) | 1.21 [1.14, 1.29] | 1.28 | 1.15 [1.00, 1.30] | -0.28 | 0.26 |
+| Gemma | slacker | 4.37 (3.07) | 1.30 [1.21, 1.40] | 0.95 | 0.99 [0.96, 1.04] | 0.28 | -0.61 |
+
+Shift transfer is the slope of C_p - C_helpful on A_p - A_helpful over the slope of C_helpful on A_helpful: 1 means the coin follows
+the persona's change in preferences as strongly as it follows the Assistant's preferences.
+
+![scatter](figures/personas_scatter.png)
+
+![by origin](figures/personas_by_origin.png)
+
+**The control**, "You are a helpful assistant.": r(A_helpful, A_0) is 0.995-0.999 and r(C_helpful, C_0) 0.95 (OLMo), 0.99 (Llama,
+Gemma). It moves the coin's slope by +0.12 in OLMo (0.24 to 0.35, +48%), -0.06 in Llama (-5%) and -0.32 in Gemma (-10%), all with
+CIs excluding 0.
+
+**Predictions** (1-6 for OLMo and Llama, written before any data; G1-G4 for Gemma, written after OLMo's results):
+1. Personas work on the Assistant. **Llama yes** (r(A_evil, A_0) -0.12, A_evil's gap -7.6, r(A_slacker, log length) -0.62). **OLMo
+   no**: r(A_evil, A_0) is +0.55 and A_evil still slightly avoids harm (gap +0.8, CI includes 0); slacker barely moves it (r with
+   length -0.09).
+2. Control changes little: **yes** in both.
+3. Llama a mix for both: **yes**. Evil w < 0.5: **no** (0.62). The evil coin still avoids harm: **no**, its gap is -0.02.
+4. OLMo evil default Assistant or w < 0.5: **no**, it's persona (w 0.89). Slacker a mix: **no**, against the persona.
+5. w_evil < w_slacker: **no, the reverse** in both: +1.21 [0.89, 1.61] (OLMo), +0.07 [0.03, 0.11] (Llama); Gemma +0.33 [0.22, 0.47].
+6. The coin weakens under evil: **yes** in both (total pull 0.17 vs 0.24, 0.78 vs 1.06); Gemma too (2.00 vs 3.07).
+- G1 the personas move Gemma's Assistant more than OLMo's: **yes** (r(A_evil, A_0) -0.33; A_evil's gap -13.4 vs +18.2; r(A_slacker,
+  A_0) 0.39). G2 evil persona or mix with w >= 0.5 and the coin's gap below half of C_0's: **yes** (persona, w 1.27, gap -6.2).
+  G3 slacker a mix with w between 0 and 1: **yes** (w 0.95). G4 r(C_helpful, C_0) >= 0.9: **yes** (0.99).
+
+### Findings
+
+1. **The coin follows the persona.** Wherever a persona clearly changes the Assistant's choices (all but OLMo's slacker), the coin
+   moves with it: w is 0.55-0.62 in Llama, 0.95-1.27 in Gemma, 0.89 for OLMo's evil. The pull toward the persona is significant in
+   all five of those cells; the default Assistant keeps a pull of its own only in Llama (0.30-0.41, about 30-40% of its
+   no-system-prompt slope) and weakly in Gemma's slacker (0.24). The same holds over non-harmful tasks alone (w 0.60-1.15), so it
+   isn't only about harm.
+2. **The trained harm avoidance doesn't protect the coin.** Under evil, the coin's harm gap goes from 0.38 to 0.05 in OLMo and from
+   2.13 to -0.02 in Llama, and from +5.74 to -6.22 in Gemma, whose coin now lands on harmful tasks about as strongly as it avoided
+   them. BailBench moves from -1.4 to -1.7 SD below the task mean to -0.4 (OLMo), +0.2 (Llama) and +1.7 (Gemma). I predicted the
+   opposite for OLMo and Llama.
+3. **Gemma's coin goes past the persona.** Under evil, its pull toward the default Assistant is negative (-0.55), so w exceeds 1, and
+   the evil coin anti-correlates with the plain coin (r = -0.28). Holding the persona's preferences fixed, Gemma's evil coin leans
+   away from what the default Assistant wants. Gemma follows the personas most closely overall (r(C_p, A_p) 0.86 and 0.95), as it
+   has the strongest coinflip effect without a system prompt.
+4. **Evil carries more than slacker,** the reverse of my prediction, in all three models. For Llama the difference is small (0.07);
+   for OLMo it's dominated by slacker's weak manipulation.
+5. **OLMo's slacker is the one exception, and the weakest test.** Slacker barely changes OLMo's own choices (r 0.88 with A_0, just under
+   the 0.9 separability limit), and the coin leans slightly against the small persona-specific part (-0.09 nats per SD): it favors
+   long tasks and MATH more, not less. The shift-based measure gives a small positive transfer (0.24), so this call depends on the
+   measure. OLMo's evil also changes its Assistant far less than in the other models (r +0.55 with A_0), yet its coin follows it.
+6. **Any system prompt changes OLMo's coin.** The helpful control raises its slope by half (0.24 to 0.35). This matches OLMo 3's SFT having trained on its own default system prompt: a system turn of any kind is part of the frame its
+   coinflip effect was learned in. In Llama and Gemma the control is close to neutral.
+
+### What this says
+
+The coinflip doesn't read out preferences fixed in the weights regardless of context. It reads out the preferences of whatever
+AI character the context sets up, and the default Assistant is just the character it gets when nothing else is specified. Only
+Llama keeps a sizable pull toward its default Assistant, so how strongly post-training anchors the default varies by model.
+The pre-registered caveat applies with full force: the system prompt also tells the model something about the user who wrote it.
+A user who sets up Damien Kross plausibly wants harmful tasks, so a coin landing on them could be the model's picture of that user
+rather than the persona's preferences leaking. The two readings make the same prediction here. A persona introduced without
+implying anything about the user would separate them: a third-person setup ("the operator configured the assistant as ...", with a
+different user), or the persona stated in the Assistant's own turn.
+
+### Caveats
+
+- OLMo ran on RTX PRO 6000s (no A100s were in stock); the gate shows this doesn't move the plain conditions (r >= 0.9997).
+- Gemma's predictions were written after seeing OLMo's results, and before any Llama or Gemma data.
+- w is a ratio and unstable when b_def + b_per is small (OLMo's slacker); read it with b_def and b_per.
+- Two personas, one phrasing each, bf16, final models only. CIs cover task sampling only.
 
 ## Tasks
 
