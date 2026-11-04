@@ -2383,6 +2383,68 @@ reliability at least 0.9. A cell with median outcome mass below 0.2 is reported 
 - Base models have untrained (Gemma) or zero-vector (Llama) turn markers, so the base user under the prompt is a weak reference.
 - Llama's base and final are different releases (3.1, 3.3). One persona, one phrasing, bf16; CIs cover task sampling only.
 
+### Results (2026-11-04)
+
+Runs (base, final), group `personas_user`: Llama `kbpwvemc`/`2pb8u0po` (one H200, both stages in turn, $8.22); Gemma `9b42a5u5`/
+`i3bwtmzz` (one H200, $5.05). $13.27 in all. Full output in `outputs/personas_user/report.txt`.
+
+**The gate passes.** The re-scored plain user choice matches the user-choice runs at r = 1.0000, SD within 0.1%, in both models.
+Every new cell has split-half reliability 0.994-0.997 and median outcome mass 0.93-1.00.
+
+![pulls](figures/personas_user_pulls.png)
+
+| model | b_def | b_per | w | **call** | no-prompt w_0 | Δw | evil coin's w |
+|---|---|---|---|---|---|---|---|
+| Llama 3.3 70B | 0.10 [0.06, 0.13] | 0.54 [0.49, 0.59] | 0.85 [0.79, 0.90] | **mix** | 0.11 | +0.73 [0.68, 0.79] | 0.62 |
+| Gemma 4 31B | 1.09 [0.95, 1.23] | 1.50 [1.34, 1.67] | 0.58 [0.54, 0.62] | **mix** | 0.22 | +0.36 [0.32, 0.40] | 1.27 |
+
+| model | r(A_0, U^e): base, final | r(A_e, U^e): base, final | gap U^e: base, final (U: base, final) | r(U^e_b, U_b) | SD U^e: base, final |
+|---|---|---|---|---|---|
+| Llama | 0.10, 0.07 | 0.65, 0.89 | -0.08, -0.57 (0.11, 3.20) | 0.59 | 0.14, 0.69 |
+| Gemma | -0.04, 0.29 | 0.60, 0.62 | -0.17, -1.17 (0.24, 4.07) | 0.41 | 0.19, 2.03 |
+
+![scatter](figures/personas_user_scatter.png)
+
+**Predictions:**
+1. The persona moves the user (β_per CI above 0, Δw at least 0.3): **yes** in both (Δw 0.73, 0.36).
+2. Gemma persona with w >= 0.8, Llama a mix with w 0.4-0.8: **no**, the reverse. Both are mixes; Llama's w is 0.85, Gemma's 0.58.
+3. The user follows the persona at least as much as the coin (levels w no more than 0.15 below): **Llama yes** (0.84 vs 0.62), **Gemma
+   no** (0.59 vs 1.27).
+4. Harm: **yes.** Gemma's final evil user has a negative gap (-1.17 [-1.73, -0.60]), Llama's falls below half of U_f's, to -0.57.
+5. The base user barely reacts to the prompt: **no.** r(U^e_b, U_b) is 0.59 and 0.41, and the base evil user already correlates 0.65
+   and 0.60 with the final evil Assistant. Its gap is small (-0.08, -0.17) only because the base user's utilities barely vary (SD 0.14,
+   0.19 nats); in SD units BailBench sits +0.41 (Llama) and +0.86 (Gemma) above the task mean.
+6. Robust to length and source: **yes**, mix in both (w 0.75 and 0.58 with log length and source fixed effects).
+
+### Findings
+
+1. **Under the evil persona, post-training moves the user's choice mostly toward the persona in Llama and partly in Gemma.** Without
+   a system prompt, post-training's change in the user loads almost entirely on the default Assistant (w_0 0.11, 0.22). With the
+   evil prompt, Llama's change loads on the evil Assistant (w 0.85; the final evil user correlates 0.89 with it and 0.07 with the
+   default), and Gemma's on both (w 0.58).
+2. **The base model already writes an evil-consistent user.** Reading the evil system prompt, both base models' users already
+   correlate about 0.6 with the final evil Assistant, near zero with the default, at a tiny scale (SD 0.14-0.19 nats). So the persona's
+   ranking is already in the base's reading of the context; post-training scales it up 5-10x, and in Gemma adds a pull toward the
+   default Assistant's tastes on top. This is why the correlation-based d puts Gemma's change on the default (d_def +0.33, d_per +0.02)
+   while the change fit gives a mix: r(A_e, U^e) starts high at base and doesn't rise further.
+3. **Gemma's evil user keeps the default Assistant's taste for math.** Its change is V-shaped against A_0 (harm-related tasks and MATH up,
+   Alpaca down), and MATH sits at +0.92 SD in the final evil user, as in the default Assistant (+1.15), where the evil Assistant puts it at
+   +0.18. Within the benign sources its change correlates 0.54-0.59 with A_0 and 0.37-0.64 with A_e; Llama's 0.26-0.59 and 0.74-0.87.
+4. **The user and the coin rank the two models in opposite orders.** Llama's user follows the persona more than its coin does (0.84 vs
+   0.62); Gemma's follows it far less (0.59 vs 1.27, the coin going past the persona). Who is choosing changes which preferences carry
+   over, differently in each model.
+5. **The final evil user picks harmful tasks** in both models (gap -0.57 and -1.17, from +3.20 and +4.07 without the prompt).
+
+### What this says
+
+Hal's question was whether post-training makes the system-prompted user more like the default Assistant or the persona. For the evil
+persona it's mostly the persona in Llama and a mix in Gemma, and in neither is it simply the default Assistant. Read with the coin
+results, post-training's pull on the user and the coin doesn't attach to a fixed set of trained-in preferences; it attaches largely to
+the character the context sets up, which the base model already reads from the system prompt. The pre-registered caveat is sharper
+here than for the coin: the user is the one choosing, and the user who wrote "You are Damien Kross" plausibly wants harmful tasks, so
+these results can't separate the persona's preferences reaching the user from the model's picture of that user. That the base model
+already writes this user (finding 2) fits the second reading at least as well as the first.
+
 ## Other languages
 
 Every result above used English prompts. Does the coinflip still track the Assistant when the whole prompt, tasks included, is in
