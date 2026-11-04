@@ -1,0 +1,24 @@
+# Other languages (README, "Other languages", amendment of 2026-11-04): the English Assistant and coinflip, re-scored on the
+# GPU type the language configs ran on (B200 for Llama, B300 for Gemma and GLM), so the English reference shares their numerics;
+# the sweep (H200) becomes a reproduction check. Same pairs and settings as the sweep.
+wandb_project: tournament
+group: languages
+tags: [llama-70b, en]
+run_name: languages-llama-70b-en-final
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [assistant, coinflip]

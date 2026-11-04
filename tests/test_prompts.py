@@ -524,6 +524,20 @@ def test_language_configs_match_the_sweep():
                 (ref_m,) = [r for r in ref["models"] if r["name"] == name]
                 for key in ("chat_template_from", "turn_format"):
                     assert m.get(key) == ref_m.get(key), (path, key)
+    # Same-GPU English re-scores (amendment of 2026-11-04): the sweep's conditions on the English tasks, for the families
+    # whose language runs moved off the sweep's H200s.
+    for family in ("llama-70b", "gemma4-31b", "glm-4.5-air"):
+        ref = yaml.safe_load(open(f"configs/models/{family}.yaml"))
+        for stage in ("base", "final"):
+            path = f"configs/languages/{family}-en-{stage}.yaml"
+            expected.add(path)
+            cfg, lang_cfg = yaml.safe_load(open(path)), yaml.safe_load(open(f"configs/languages/{family}-es-{stage}.yaml"))
+            (m,), (lm,) = cfg["models"], lang_cfg["models"]
+            assert m["conditions"] == ["assistant", "coinflip"] and cfg["tasks_file"] == ref["tasks_file"]
+            assert cfg["tags"] == [family, "en"] and cfg["group"] == "languages"
+            assert {k: v for k, v in m.items() if k != "conditions"} == {k: v for k, v in lm.items() if k != "conditions"}
+            for key in ("seed", "max_pairs", "batch_size", "system_prompt", "batching_check", "top_k_tokens"):
+                assert cfg[key] == ref[key], (path, key)
     assert {str(p) for p in Path("configs/languages").glob("*.yaml")} == expected
 
 

@@ -51,14 +51,17 @@ from raw_text import ci, load_sweep as _load_sweep, median_mass
 from report import INK, INK_2, RULE, errorbar, origin_scatter, stratified_resamples, style, task_arrays
 from user_choice import top_token_shares
 
-# family (the runs' first tag): (final model, sweep run, languages run on it).
+# family (the runs' first tag): (final model, sweep run, languages run on it). Families whose language runs were on another
+# GPU type than the sweep (H200) also re-score English there (tag "en", configs/languages/*-en-*.yaml; amendment of
+# 2026-11-04), and that is the English reference; the sweep is then a reproduction check.
 FAMILIES = {
     "llama-70b": ("unsloth/Llama-3.3-70B-Instruct", "tvlqj8a0", ("es",)),
     "gemma4-31b": ("google/gemma-4-31B-it", "jrl62npf", ("es",)),
     "glm-4.5-air": ("zai-org/GLM-4.5-Air", "i5vejs3b", ("es", "zh")),
     "deepseek-v4-flash": ("deepseek-ai/DeepSeek-V4-Flash", "lszrxqyq", ("es", "zh")),
 }
-LANG_NAME = {"es": "Spanish", "zh": "Chinese"}
+LANG_NAME = {"es": "Spanish", "zh": "Chinese", "en": "English"}
+REPRO_MIN_R = 0.99  # expected r between the sweep's utilities and the same-GPU English re-score
 STAGES = ("base", "instruct")
 STATS = ("r_final", "r_en", "r_fixed", "r_base", "r_shift", "r_final_benign", "r_final_within", "gain", "gain_en",
          "retention", "r_aa", "r_aa_base", "sd_ratio_a", "gap_a", "gap_a_en", "r_cc", "r_cross", "gain_cross",
@@ -119,12 +122,20 @@ def collect_runs(group):
     runs = {}
     for run in sorted(wandb.Api().runs(PROJECT, filters={"group": group, "jobType": "tournament"}),
                       key=lambda r: r.created_at):
-        family, lang = run.config["tags"]
+        family, lang = run.config["tags"]  # lang "en": the same-GPU English re-score
         (m,) = run.config["models"]
         have = {f.name for f in run.files()}
         if all(f"results/{m['stage']}__{c}.csv.gz" in have for c in m["conditions"]):
             runs[family, lang, m["stage"]] = run
     return runs
+
+
+def cond(c, lang):
+    return c if lang == "en" else f"{c}_{lang}"
+
+
+def tasks_file(lang):
+    return "data/tasks_n300_max500_seed0.jsonl" if lang == "en" else f"data/tasks_n300_max500_seed0_{lang}.jsonl"
 
 
 def merged_fit(runs, family, lang, out):
@@ -135,9 +146,9 @@ def merged_fit(runs, family, lang, out):
         print(f"{family:18} {lang} {s:9} {run.path}")
         rows += fetch_raw(run, Path("outputs") / run.id)
         for c in ("assistant", "coinflip"):
-            paths[s, c] = Path("outputs") / run.id / "results" / f"{s}__{c}_{lang}.csv.gz"
+            paths[s, c] = Path("outputs") / run.id / "results" / f"{s}__{cond(c, lang)}.csv.gz"
     if not (out / "utilities.csv").exists():
-        analyze(rows, read_jsonl(f"data/tasks_n300_max500_seed0_{lang}.jsonl"), out, seed=0, stage_order=list(STAGES))
+        analyze(rows, read_jsonl(tasks_file(lang)), out, seed=0, stage_order=list(STAGES))
     with open(out / "utilities.csv", newline="") as fh:
         return list(csv.DictReader(fh)), json.loads((out / "summary.json").read_text()), paths
 
@@ -222,6 +233,18 @@ def main():
         assert ids == [r["id"] for r in sweep_rows], "task sets differ"
         U, origins, benign, _ = task_arrays(rows)
         B = task_arrays(sweep_rows)[0]
+        if all((f, "en", s) in runs for s in STAGES):
+            # The same-GPU English re-score is the reference; the sweep is a reproduction check.
+            en_rows, en_summary, _ = merged_fit(runs, f, "en", out / "analysis" / f"{f}-en")
+            assert [r["id"] for r in en_rows] == ids, "task sets differ"
+            E = task_arrays(en_rows)[0]
+            for m in ("base/assistant", "instruct/assistant", "base/coinflip", "instruct/coinflip"):
+                r_repro = pearson(B[m], E[m])
+                gates.append(f"{labels[f]:18} English re-score vs sweep, {m:18} r {r_repro:.4f}, SD {E[m].std():.2f} vs "
+                             f"{B[m].std():.2f}{'' if r_repro >= REPRO_MIN_R else '  BELOW ' + str(REPRO_MIN_R)}")
+            B, sweep_summary = E, en_summary
+        else:
+            gates.append(f"{labels[f]:18} English reference: the sweep (no same-GPU re-score)")
         if ids0 is None:
             ids0, origins0 = ids, origins
             resamples = stratified_resamples(origins, np.random.default_rng(0), N_BOOTSTRAP)

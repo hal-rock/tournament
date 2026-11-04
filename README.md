@@ -2521,6 +2521,15 @@ The English numbers, computed with `languages.py`'s code before writing this:
   the families that did.
 - bf16; CIs cover task sampling only.
 
+**Amendment (2026-11-04, before any data):** no H200 of any size was in stock for over an hour. So Llama runs on 1x B200 (US-NC-2,
+$7.99/hr), and GLM and then Gemma on 1x B300 (US-WA-2, $8.99/hr). GLM's ~220 GB of bf16 weights fit on the B300's 288 GB, so GLM
+isn't split across GPUs. bf16 numerics differ between GPU types (`~/mats/CLAUDE.md`: Nemotron on B200 vs H200, Gemma across GPU
+types). So each pod also re-scores the English Assistant and coinflip, base and final, on the same GPU
+(`configs/languages/*-en-*.yaml`), and every English quantity above comes from those runs: r(A_en_f, C_en_f), the English gain,
+A_en and C_en. The sweep becomes a reproduction check, expected at r ≥ 0.99 per condition and stage between the sweep's and the
+re-scored utilities. A lower value is reported, with the analysis shown both ways. DeepSeek still waits for a multi-GPU node; if it
+runs on a GPU type other than the sweep's, it gets the same re-score. The predictions and calls are unchanged.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
