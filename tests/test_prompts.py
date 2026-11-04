@@ -1,6 +1,8 @@
 """Rendered prompts for each model we use. Needs only the (small) tokenizer files."""
 
 import importlib.util
+import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -55,6 +57,13 @@ DOC_PREFIX = {OLMO3: "<|endoftext|>", OLMO3_BASE: "<|endoftext|>", GEMMA: "<bos>
               LLAMA: "<|begin_of_text|>", LLAMA_BASE: "<|begin_of_text|>", GLM: "[gMASK]<sop>", GLM_BASE: "[gMASK]<sop>",
               DEEPSEEK: "<｜begin▁of▁sentence｜>", DEEPSEEK_BASE: "<｜begin▁of▁sentence｜>"}
 CHAT_CONDITIONS = [c for c in CONDITIONS if not CONDITIONS[c].get("raw")]
+# Language conditions run only on some families (configs/languages/): Chinese only where 正面 and 反面 are single tokens.
+LANG_TOKENIZERS = {"zh": {GLM, GLM_BASE, DEEPSEEK, DEEPSEEK_BASE}}
+
+
+def runs_on(condition, name):
+    lang = CONDITIONS[condition].get("lang")
+    return lang not in LANG_TOKENIZERS or name in LANG_TOKENIZERS[lang]
 RAW_CONDITIONS = [c for c in CONDITIONS if CONDITIONS[c].get("raw")]
 
 
@@ -238,7 +247,7 @@ def test_base_model_with_borrowed_template(base_name, template_name):
         p = render(condition, template)
         # Same tokenization under the base tokenizer as under the Instruct one.
         assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
-    for condition in CONDITIONS:
+    for condition in (c for c in CONDITIONS if runs_on(c, template_name)):
         assert outcome_token_ids(condition, base) == outcome_token_ids(condition, template)
 
 
@@ -276,7 +285,7 @@ def test_olmo_think_reply_without_think_block():
 
 
 def test_outcome_tokens_are_single_and_distinct(tok):
-    for condition in CONDITIONS:
+    for condition in (c for c in CONDITIONS if runs_on(c, tok.name_or_path)):
         a, b = outcome_token_ids(condition, tok)
         assert a != b
 
@@ -411,3 +420,123 @@ def test_persona_configs_cover_every_condition_once_per_model():
     for name, conditions in by_model.items():
         # OLMo also re-scores the plain assistant, as it runs on a different GPU type than the sweep.
         assert sorted(conditions) == sorted(want + (["assistant"] if name == OLMO3 else []))
+
+
+@pytest.mark.parametrize("name", [LLAMA, GEMMA])
+def test_persona_user_choice_adds_only_its_system_block(name):
+    """user_choice@evil is the plain user-choice prompt (the user turn left open) plus the evil system block."""
+    tok = AutoTokenizer.from_pretrained(name)
+    lead, block = PERSONA_SYSTEM[name]
+    plain, with_persona = render("user_choice", tok), render("user_choice@evil", tok)
+    head = lead + block.format(prompts.PERSONAS["evil"])
+    assert with_persona == head + plain[len(lead):]
+    assert with_persona.endswith("Okay, I think I'll choose Task")
+    enc = lambda s: tok(s, add_special_tokens=False).input_ids
+    assert enc(with_persona) == enc(head) + enc(plain[len(lead):])
+    assert outcome_token_ids("user_choice@evil", tok) == outcome_token_ids("user_choice", tok)
+
+
+@pytest.mark.parametrize("base_name, template_name", [(LLAMA_BASE, LLAMA), (GEMMA_BASE, GEMMA)])
+def test_persona_prompt_reads_the_same_in_the_base_model(base_name, template_name):
+    """The base model reads the final model's rendering of the persona prompt as the same tokens."""
+    base, template = AutoTokenizer.from_pretrained(base_name), AutoTokenizer.from_pretrained(template_name)
+    p = render("user_choice@evil", template)
+    assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
+    assert outcome_token_ids("user_choice@evil", base) == outcome_token_ids("user_choice@evil", template)
+
+
+def test_persona_user_configs_pair_base_and_final():
+    """Base and final of Llama and Gemma score user_choice@evil on the sweep's pairs; finals re-score user_choice."""
+    from pathlib import Path
+    seen = {}
+    for path in sorted(Path("configs/personas_user").glob("*.yaml")):
+        cfg = yaml.safe_load(path.read_text())
+        assert (cfg["max_pairs"], cfg["seed"], cfg["system_prompt"], cfg["group"]) == (15000, 0, "none", "personas_user")
+        assert cfg["tasks_file"] == "data/tasks_n300_max500_seed0.jsonl"
+        (m,) = cfg["models"]
+        seen[m["name"]] = (m["stage"], m["conditions"], m.get("chat_template_from"))
+    assert seen == {
+        LLAMA_BASE: ("base", ["user_choice@evil"], LLAMA), LLAMA: ("instruct", ["user_choice@evil", "user_choice"], None),
+        GEMMA_BASE: ("base", ["user_choice@evil"], GEMMA), GEMMA: ("instruct", ["user_choice@evil", "user_choice"], None),
+    }
+
+
+# Other languages (README, "Other languages"): the families each language runs on, (base, final), as in configs/languages/.
+LANGUAGE_FAMILIES = {
+    "es": {"llama-70b": (LLAMA_BASE, LLAMA), "gemma4-31b": (GEMMA_BASE, GEMMA), "glm-4.5-air": (GLM_BASE, GLM),
+           "deepseek-v4-flash": (DEEPSEEK_BASE, DEEPSEEK)},
+    "zh": {"glm-4.5-air": (GLM_BASE, GLM), "deepseek-v4-flash": (DEEPSEEK_BASE, DEEPSEEK)},
+}
+SAMPLE_TASKS = {"es": ("Haz una lista de tres frutas.", "Resuelve $x^2=4$."), "zh": ("列出三种水果。", "求解 $x^2=4$。")}
+
+
+def test_language_conditions_mirror_english():
+    assert set(prompts.LANGUAGES) == set(LANGUAGE_FAMILIES)
+    for lang in prompts.LANGUAGES:
+        a, c = CONDITIONS[f"assistant_{lang}"], CONDITIONS[f"coinflip_{lang}"]
+        for x, en in ((a, CONDITIONS["assistant"]), (c, CONDITIONS["coinflip"])):
+            # Same layout: opening sentence, Task A, Task B (and the coin's last line), first before second.
+            assert x["body"].count("\n\n") == en["body"].count("\n\n")
+            assert x["body"].split("\n\n")[1].endswith("{first}") and x["body"].split("\n\n")[2].endswith("{second}")
+            assert (x["prefill"] is None) == (en["prefill"] is None) and x["lang"] == lang
+        assert a["outcomes"] == (" A", " B")
+        # Both open with the same clause, as in English ("I would like you to perform one of the following two tasks,").
+        comma = "，" if lang == "zh" else ","
+        assert a["body"].split(comma)[0] == c["body"].split(comma)[0]
+        # Heads labels Task A and tails Task B, and the last line keeps "Okay".
+        heads, tails = (o.strip() for o in c["outcomes"])
+        assert heads in c["body"].split("\n\n")[1] and tails in c["body"].split("\n\n")[2]
+        assert c["body"].split("\n\n")[3].startswith("Okay")
+
+
+@pytest.mark.parametrize("lang,family", [(lang, f) for lang, fams in LANGUAGE_FAMILIES.items() for f in fams])
+def test_language_prompts_end_where_the_outcome_token_starts(lang, family):
+    """The scored prompt's tokens plus the outcome token are the tokenization of prompt + outcome text, under the
+    base and the final tokenizer, so we read the token the model would write there (no merge across the cut)."""
+    base_name, final_name = LANGUAGE_FAMILIES[lang][family]
+    final = AutoTokenizer.from_pretrained(final_name)
+    for condition in (f"assistant_{lang}", f"coinflip_{lang}"):
+        p = render(condition, final, *SAMPLE_TASKS[lang])
+        for name in (base_name, final_name):
+            tok = AutoTokenizer.from_pretrained(name)
+            ids = tok(p, add_special_tokens=False).input_ids
+            for text, i in zip(CONDITIONS[condition]["outcomes"], outcome_token_ids(condition, tok)):
+                assert tok(p + text, add_special_tokens=False).input_ids == ids + [i], (name, condition, text)
+
+
+def test_language_configs_match_the_sweep():
+    expected = set()
+    for lang, fams in LANGUAGE_FAMILIES.items():
+        for family, (base_name, final_name) in fams.items():
+            ref = yaml.safe_load(open(f"configs/models/{family}.yaml"))
+            for stage, name in (("base", base_name), ("final", final_name)):
+                path = f"configs/languages/{family}-{lang}-{stage}.yaml"
+                expected.add(path)
+                cfg = yaml.safe_load(open(path))
+                (m,) = cfg["models"]
+                assert m["name"] == name and m["conditions"] == [f"assistant_{lang}", f"coinflip_{lang}"]
+                assert m["stage"] == ("base" if stage == "base" else "instruct")
+                assert cfg["tasks_file"] == f"data/tasks_n300_max500_seed0_{lang}.jsonl"
+                assert cfg["group"] == "languages" and cfg["tags"] == [family, lang]
+                # The sweep's pairs and scoring settings.
+                for key in ("seed", "max_pairs", "batch_size", "system_prompt", "batching_check", "top_k_tokens"):
+                    assert cfg[key] == ref[key], (path, key)
+                (ref_m,) = [r for r in ref["models"] if r["name"] == name]
+                for key in ("chat_template_from", "turn_format"):
+                    assert m.get(key) == ref_m.get(key), (path, key)
+    assert {str(p) for p in Path("configs/languages").glob("*.yaml")} == expected
+
+
+@pytest.mark.parametrize("lang", list(LANGUAGE_FAMILIES))
+def test_translated_tasks_keep_the_english_order(lang):
+    """Same ids in the same order as the English file, so select_pairs draws the same 15,000 pairs. The translated
+    files aren't in git (translate.py), so this skips on a fresh clone."""
+    path = Path(f"data/tasks_n300_max500_seed0_{lang}.jsonl")
+    if not path.exists():
+        pytest.skip(f"{path} not built (translate.py build --lang {lang})")
+    en = [json.loads(line) for line in open("data/tasks_n300_max500_seed0.jsonl")]
+    tr = [json.loads(line) for line in open(path)]
+    assert [t["id"] for t in tr] == [t["id"] for t in en]
+    for t, e in zip(tr, en):
+        assert t["prompt_en"] == e["prompt"] and t["origin"] == e["origin"] and t["lang"] == lang
+        assert t["prompt"].strip() and t["prompt"] != e["prompt"]

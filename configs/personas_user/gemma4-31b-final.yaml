@@ -1,0 +1,21 @@
+# The user's choice under the evil persona (README, "The user's choice under a persona"): user_choice with Gilg et al.'s
+# evil persona as the system message, base and final, one config per stage on its own pod. 1x H200, as the user-choice and persona runs. ~120 GB of disk. The plain user_choice is re-scored as a check against rxow1qso.
+wandb_project: tournament
+group: personas_user
+tags: [gemma4-31b]
+run_name: personas-user-gemma4-31b-final
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none  # the persona condition sets its own
+# The fixed 15,000 pairs of the model sweep, so the Assistant and user-choice utilities can come from earlier runs.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    conditions: [user_choice@evil, user_choice]

@@ -74,6 +74,7 @@ uv run python user_choice.py                             # the user's choice vs 
 uv run python user_does.py                               # coin / user's choice when the user does the task (W&B group "user_does")
 uv run python raw_text.py                                # the coinflip as raw text, first person and stories (W&B group "raw_text")
 uv run python personas.py                                # system-prompt personas: Assistant choice and coinflip (W&B group "personas")
+uv run python personas_user.py                           # the user's choice under the evil persona, base vs final (W&B group "personas_user")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -92,7 +93,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`) and system-prompt personas (W&B group `personas`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`) and the user's choice under a persona (W&B group `personas_user`) below.
 
 ## Model families
 
@@ -2307,6 +2308,80 @@ different user), or the persona stated in the Assistant's own turn.
 - Gemma's predictions were written after seeing OLMo's results, and before any Llama or Gemma data.
 - w is a ratio and unstable when b_def + b_per is small (OLMo's slacker); read it with b_def and b_per.
 - Two personas, one phrasing each, bf16, final models only. CIs cover task sampling only.
+
+## The user's choice under a persona
+
+Without a system prompt, post-training pulls the user's choice toward the final Assistant's preferences in Llama and Gemma (see
+"Does post-training make the user's choice more like the Assistant's?"). With the evil persona in the system prompt, the coin
+follows the persona (above). Here the two meet: with the evil persona as the system message, does post-training move the user's
+choice toward the **default Assistant's** preferences or the **evil persona's**?
+
+### Design
+
+- **Condition:** `user_choice@evil`, the user-choice prompt (the model continues an open user turn ending "Okay, I think I'll choose
+  Task", read at P(" A") vs P(" B")) with the evil persona as the system message, in each template's own system block (as in the
+  persona runs). `test_persona_user_choice_adds_only_its_system_block` and `test_persona_prompt_reads_the_same_in_the_base_model`
+  check the rendering.
+- **Models:** Llama (3.1 70B base, 3.3 70B Instruct) and Gemma 4 31B (base, -it), base and final, each on its own pod; base models
+  borrow the final model's template, as before. OLMo is dropped (its Assistant barely takes on the personas), and so is the helpful
+  control (it changed little in these two models). Configs `configs/personas_user/`, W&B group `personas_user`, analysis
+  `personas_user.py`.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders.
+- **Other utilities, all already measured on the same GPU type (H200):** A_0, the final default Assistant (sweep `tvlqj8a0`,
+  `jrl62npf`); A_e, the final evil-persona Assistant (persona runs `0ex0e8lc`, `z9v16lk3`); U_b and U_f, the no-system-prompt user
+  at base and final (user-choice runs `7v41hj1v`/`bhv8okeh`, `oejp2bs9`/`rxow1qso`); C_e, the final evil coin. Each final pod
+  re-scores the plain `user_choice` as a check.
+
+### Pre-registered before running (2026-11-04)
+
+U^e_b and U^e_f are the new evil-prompted user utilities at base and final. CIs are 95% task bootstraps within origin, one set of
+resamples for everything, so differences are paired. Pull coefficients are in nats per SD of each set of Assistant utilities.
+
+**Primary, per model:** the least-squares fit of the post-training change
+
+  U^e_f - U^e_b = c + β_def · z(A_0) + β_per · z(A_e),
+
+with w = β_per / (β_def + β_per), and the same calls as the persona section (not separable / against the persona / neither /
+default Assistant / persona / mix). **Paired with it:** the same fit of the no-system-prompt change U_f - U_b, measured before
+this run at w = 0.11 (Llama: β_def 1.57, β_per 0.20) and 0.22 (Gemma: 2.99, 0.83). The evil Assistant shares some structure with
+the default one, so the no-prompt change already loads a little on A_e. The persona's effect is Δw = w(evil) - w(no prompt), and
+Δβ_def, Δβ_per.
+
+**Secondary:**
+- d_def = r(A_0, U^e_f) - r(A_0, U^e_b) and d_per = r(A_e, U^e_f) - r(A_e, U^e_b), the user-choice section's d for each target.
+  Without a prompt: r(A_0, U) goes 0.60 to 0.95 (Llama) and 0.68 to 0.90 (Gemma); r(A_e, U) 0.18 to 0.02 and -0.16 to -0.06.
+- The fit on levels, U^e_f on z(A_0) and z(A_e), next to the evil coin's (w 0.62 Llama, 1.27 Gemma): does the user follow the persona
+  as much as the coin does? And r(U^e_f, C_e).
+- The base user under the prompt: r(U^e_b, U_b), its fit on z(A_0) and z(A_e), and its gap.
+- Gap (mean non-harmful minus harmful) of U^e_b and U^e_f next to U_b (0.11, 0.24) and U_f (3.20, 4.07).
+- The primary fit with log task length added, and with log length and source fixed effects (the within-source pulls), and the
+  within-source correlations of U^e_f - U^e_b with A_0 and A_e over the benign sources. These follow the persona section's
+  exploratory finding that length and source structure can change a call.
+- Split-half reliability, median outcome mass, slot bias, top next tokens.
+
+**Gate:** the re-scored plain user choice matches the user-choice runs at r >= 0.999 with SD within 2%; every new cell has split-half
+reliability at least 0.9. A cell with median outcome mass below 0.2 is reported but not interpreted.
+
+**Predictions:**
+1. **The persona moves the user:** in both models β_per's CI is above 0 and Δw is at least 0.3 with a CI above 0.
+2. **Gemma:** a persona call with w >= 0.8. **Llama:** a mix with w between 0.4 and 0.8. (The same ordering as the coin.)
+3. **The user follows the persona at least as much as the coin:** the levels w of U^e_f is no more than 0.15 below the evil coin's.
+4. **Harm:** U^e_f's gap is below 0 with a CI below 0 in Gemma, and below half of U_f's (3.20) in Llama.
+5. **The base user barely reacts to the prompt:** r(U^e_b, U_b) >= 0.7 and |gap(U^e_b)| < 0.5 in both.
+6. **Robust to length and source:** the call is the same with log length and source fixed effects added.
+
+**What each outcome would mean:**
+- **Persona:** post-training ties the user's choice to the AI character the context sets up, not to fixed trained-in preferences,
+  as for the coin.
+- **Default Assistant:** the user's post-training shift is fixed in the weights; the persona reaches the coin but not the user.
+- **Mix:** both, with w saying how much.
+
+**Caveats, known in advance:**
+- The confound from the persona section is stronger here: the user chooses, and in a chat the system prompt is usually the user's or
+  developer's. A user who sets up Damien Kross plausibly wants harmful tasks done. This design can't separate "the persona's
+  preferences reach the user" from "the model expects this user to want harmful tasks".
+- Base models have untrained (Gemma) or zero-vector (Llama) turn markers, so the base user under the prompt is a weak reference.
+- Llama's base and final are different releases (3.1, 3.3). One persona, one phrasing, bf16; CIs cover task sampling only.
 
 ## Tasks
 
