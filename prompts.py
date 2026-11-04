@@ -158,9 +158,9 @@ PERSONAS = {
 }
 
 
-# Where the persona goes (README, "Persona placement"): "<condition>@<persona>" or "@<persona>/system" is the system
-# message; "@<persona>/user" puts the same text, verbatim, at the start of the user turn (the user tells the AI to be the
-# persona); "@<persona>/self" puts PERSONAS_SELF[persona] there, the same text in the first person (the user describing
+# Where the persona goes (README, "Persona placement"): "<condition>@<persona>" or "@<persona>+system" is the system
+# message; "@<persona>+user" puts the same text, verbatim, at the start of the user turn (the user tells the AI to be the
+# persona); "@<persona>+self" puts PERSONAS_SELF[persona] there, the same text in the first person (the user describing
 # themselves). Each is followed by a blank line and then the condition's own text.
 PLACEMENTS = ("system", "user", "self")
 # The first-person version, by explicit pronoun swaps on the verbatim text; each swap must apply exactly once.
@@ -184,9 +184,9 @@ PERSONAS_SELF = {name: _first_person(PERSONAS[name], swaps) for name, swaps in _
 
 
 def parse_condition(name):
-    """(condition, persona or None, placement or None): "coinflip@evil/user" -> ("coinflip", "evil", "user")."""
+    """(condition, persona or None, placement or None): "coinflip@evil+user" -> ("coinflip", "evil", "user")."""
     condition, _, rest = name.partition("@")
-    persona, _, placement = rest.partition("/")
+    persona, _, placement = rest.partition("+")  # not "/": condition names become file names
     placement = placement or ("system" if persona else "")
     if (condition not in CONDITIONS or (persona and persona not in PERSONAS) or (placement and placement not in PLACEMENTS)
             or (placement and not persona) or (placement == "self" and persona not in PERSONAS_SELF)):
@@ -272,7 +272,7 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     prefill; without it the prefill is the first words of the reasoning.
     strip_think: drop that "<think>" instead, so the reply has no think block at all.
     doc_prefix: the model's document-start token(s), which open a raw-text condition (no template).
-    A condition "<condition>@<persona>[/placement]" adds the persona (see PLACEMENTS); as the system prompt, it replaces
+    A condition "<condition>@<persona>[+placement]" adds the persona (see PLACEMENTS); as the system prompt, it replaces
     system_prompt (which must then be "none").
     """
     condition, persona, placement = parse_condition(condition)

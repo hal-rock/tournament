@@ -20,4 +20,4 @@ models:
   - name: google/gemma-4-31B
     stage: base
     chat_template_from: google/gemma-4-31B-it
-    conditions: [coinflip@evil, coinflip@evil/user, coinflip@evil/self]
+    conditions: [coinflip@evil, coinflip@evil+user, coinflip@evil+self]

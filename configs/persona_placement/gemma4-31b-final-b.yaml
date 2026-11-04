@@ -19,4 +19,4 @@ batching_check: {n_prompts: 16, tolerance: 0.5}
 models:
   - name: google/gemma-4-31B-it
     stage: instruct
-    conditions: [coinflip@evil/self, assistant@evil/self]
+    conditions: [coinflip@evil+self, assistant@evil+self]

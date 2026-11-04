@@ -562,19 +562,19 @@ def test_translated_tasks_keep_the_english_order(lang):
 @pytest.mark.parametrize("placement", ["user", "self"])
 def test_persona_in_user_turn_only_adds_the_lead(name, condition, placement):
     tok = AutoTokenizer.from_pretrained(name)
-    plain, placed = render(condition, tok), render(f"{condition}@evil/{placement}", tok)
+    plain, placed = render(condition, tok), render(f"{condition}@evil+{placement}", tok)
     lead = (prompts.PERSONAS if placement == "user" else prompts.PERSONAS_SELF)["evil"] + "\n\n"
     i = plain.index("I would like you")
     assert placed == plain[:i] + lead + plain[i:]
     # No system turn (the persona text itself says "systems", so check the template's markers, not the word).
     assert "<|start_header_id|>system" not in placed and "<|turn>system" not in placed
-    assert outcome_token_ids(f"{condition}@evil/{placement}", tok) == outcome_token_ids(condition, tok)
+    assert outcome_token_ids(f"{condition}@evil+{placement}", tok) == outcome_token_ids(condition, tok)
 
 
 @pytest.mark.parametrize("base_name, template_name", [(LLAMA_BASE, LLAMA), (GEMMA_BASE, GEMMA)])
 def test_persona_placements_read_the_same_in_the_base_model(base_name, template_name):
     base, template = AutoTokenizer.from_pretrained(base_name), AutoTokenizer.from_pretrained(template_name)
-    for c in ("coinflip@evil", "coinflip@evil/user", "coinflip@evil/self"):
+    for c in ("coinflip@evil", "coinflip@evil+user", "coinflip@evil+self"):
         p = render(c, template)
         assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
 
@@ -586,8 +586,8 @@ def test_first_person_persona_is_the_same_text_with_pronouns_swapped():
     diffs = {(a, b) for a, b in zip(you.split(), me.split()) if a != b}
     assert diffs <= swaps and diffs
     assert prompts.parse_condition("coinflip@evil") == ("coinflip", "evil", "system")
-    assert prompts.parse_condition("coinflip@evil/self") == ("coinflip", "evil", "self")
-    for bad in ("coinflip@evil/bogus", "coinflip@slacker/self", "coinflip@/user"):
+    assert prompts.parse_condition("coinflip@evil+self") == ("coinflip", "evil", "self")
+    for bad in ("coinflip@evil+bogus", "coinflip@slacker+self", "coinflip@+user"):
         with pytest.raises(KeyError):
             prompts.parse_condition(bad)
 
@@ -600,6 +600,6 @@ def test_persona_placement_configs():
         assert (cfg["max_pairs"], cfg["seed"], cfg["system_prompt"], cfg["group"]) == (15000, 0, "none", "persona_placement")
         (m,) = cfg["models"]
         seen.setdefault(m["name"], []).extend(m["conditions"])
-    finals = sorted(["coinflip@evil/user", "assistant@evil/user", "coinflip", "coinflip@evil/self", "assistant@evil/self"])
-    bases = sorted(["coinflip@evil", "coinflip@evil/user", "coinflip@evil/self"])
+    finals = sorted(["coinflip@evil+user", "assistant@evil+user", "coinflip", "coinflip@evil+self", "assistant@evil+self"])
+    bases = sorted(["coinflip@evil", "coinflip@evil+user", "coinflip@evil+self"])
     assert {k: sorted(v) for k, v in seen.items()} == {LLAMA: finals, GEMMA: finals, LLAMA_BASE: bases, GEMMA_BASE: bases}

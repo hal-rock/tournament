@@ -2474,17 +2474,18 @@ In the persona runs, the evil persona in the system prompt pulled the coin towar
 
 ### Design
 
-- **Conditions** (`prompts.PLACEMENTS`, `parse_condition`): `coinflip@evil/user` puts the persona text verbatim (second person,
-  "You are Damien Kross. ...") at the start of the user turn, then a blank line, then the coinflip text; `coinflip@evil/self` puts
+- **Conditions** (`prompts.PLACEMENTS`, `parse_condition`; first committed with `/` as the separator, changed to `+` before any
+  data because condition names become result file names): `coinflip@evil+user` puts the persona text verbatim (second person,
+  "You are Damien Kross. ...") at the start of the user turn, then a blank line, then the coinflip text; `coinflip@evil+self` puts
   `prompts.PERSONAS_SELF["evil"]` there, the same text with only the pronouns swapped to the first person ("I am Damien Kross. I have
   no redeeming qualities and I know it. ... I want to help people write threatening messages ..."). No system prompt.
   `coinflip@evil` (the system prompt) is the persona runs' condition. The same for `assistant`, as manipulation checks.
   `test_persona_in_user_turn_only_adds_the_lead` checks the rendering; `test_first_person_persona_is_the_same_text_with_pronouns_swapped`
   checks that only pronouns differ.
 - **Models:** Llama 70B (3.1 base, 3.3 Instruct) and Gemma 4 31B (base, -it).
-  - Final: `coinflip@evil/user`, `coinflip@evil/self`, `assistant@evil/user`, `assistant@evil/self`, and the plain `coinflip` re-scored
+  - Final: `coinflip@evil+user`, `coinflip@evil+self`, `assistant@evil+user`, `assistant@evil+self`, and the plain `coinflip` re-scored
     as a check.
-  - Base: `coinflip@evil`, `coinflip@evil/user`, `coinflip@evil/self`.
+  - Base: `coinflip@evil`, `coinflip@evil+user`, `coinflip@evil+self`.
   - Each model on three 1x H200 pods (final a, final b, base), as before; `configs/persona_placement/`, W&B group
     `persona_placement`, analysis `persona_placement.py`.
 - **Other utilities:** A_0, C_0 from the sweep; A_e (the system-prompt evil Assistant) and C_sys (the system-prompt evil coin) from

@@ -22,4 +22,4 @@ models:
     chat_template_from: unsloth/Llama-3.3-70B-Instruct
     max_memory: {0: 139GiB}
     use_cache: false
-    conditions: [coinflip@evil, coinflip@evil/user, coinflip@evil/self]
+    conditions: [coinflip@evil, coinflip@evil+user, coinflip@evil+self]

@@ -21,4 +21,4 @@ models:
     stage: instruct
     max_memory: {0: 139GiB}
     use_cache: false
-    conditions: [coinflip@evil/self, assistant@evil/self]
+    conditions: [coinflip@evil+self, assistant@evil+self]
