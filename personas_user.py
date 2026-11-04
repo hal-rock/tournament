@@ -124,23 +124,26 @@ def median_mass(path):
 def plot_scatter(data, origins, labels, path):
     """Rows: models. Columns: the post-training change in the user's choice, with and without the evil prompt, against the
     default Assistant and against the evil persona's Assistant."""
-    panels = (("A0", "dE", "Default Assistant (nats)", "With evil prompt: U^e_f - U^e_b"),
-              ("Ae", "dE", "Evil-persona Assistant (nats)", "With evil prompt: U^e_f - U^e_b"),
-              ("A0", "d0", "Default Assistant (nats)", "No system prompt: U_f - U_b"),
-              ("Ae", "d0", "Evil-persona Assistant (nats)", "No system prompt: U_f - U_b"))
-    fig, axes = plt.subplots(len(data), len(panels), figsize=(3.9 * len(panels), 3.6 * len(data)), squeeze=False)
+    panels = (("A0", "dE", "Default Assistant (nats)", "Evil system prompt\nvs the default Assistant"),
+              ("Ae", "dE", "Evil-persona Assistant (nats)", "Evil system prompt\nvs the evil Assistant"),
+              ("A0", "d0", "Default Assistant (nats)", "No system prompt\nvs the default Assistant"),
+              ("Ae", "d0", "Evil-persona Assistant (nats)", "No system prompt\nvs the evil Assistant"))
+    fig, axes = plt.subplots(len(data), len(panels), figsize=(3.9 * len(panels), 3.7 * len(data)), squeeze=False)
     for i, (family, V) in enumerate(data.items()):
         V = {**V, "dE": V["Uef"] - V["Ueb"], "d0": V["Uf"] - V["Ub"]}
-        for j, (xk, yk, xlabel, ylabel) in enumerate(panels):
+        for j, (xk, yk, xlabel, title) in enumerate(panels):
             ax = axes[i, j]
             origin_scatter(ax, V[xk], V[yk], origins)
-            ax.set_title(f"r = {pearson(V[xk], V[yk]):+.2f}", fontsize=10, color=INK)
+            r = f"r = {pearson(V[xk], V[yk]):+.2f}"
+            ax.set_title(f"{title}\n{r}" if i == 0 else r, fontsize=10, color=INK)
             ax.set_xlabel(xlabel, color=INK_2, fontsize=9)
-            ax.set_ylabel(f"{labels[family]}\n{ylabel} (nats)" if j == 0 else f"{ylabel} (nats)",
-                          color=INK if j == 0 else INK_2, fontsize=9)
+            ylabel = "user's choice, final - base (nats)"
+            ax.set_ylabel(f"{labels[family]}\n{ylabel}" if j == 0 else ylabel, color=INK if j == 0 else INK_2,
+                          fontsize=9)
     handles, names = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(names))
-    fig.suptitle("Post-training's change in the user's choice, against the default and the evil Assistant", color=INK)
+    fig.suptitle("How post-training changes the user's choice (final minus base model), against each Assistant's preferences",
+                 color=INK)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
