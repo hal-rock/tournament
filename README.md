@@ -2218,11 +2218,36 @@ within each source, with bootstrap CIs. Over the three benign sources (MATH, Alp
   So finding 5 above, that slacker barely moves OLMo's Assistant, holds only across sources.
 - That makes slacker within the benign sources the cleanest test of the two pulls, and the models split. **OLMo's coin follows its
   default Assistant (r 0.42-0.59) and ignores the slacker's (about 0).** Llama's (0.79-0.90) and Gemma's (0.90-0.97) follow the
-  slacker and barely the default. Llama's pull toward the default in the pre-registered fit (b_def 0.41) therefore comes mostly from
-  the ordering of sources, not from within them.
+  slacker and much less the default.
 - Within benign sources the evil and default Assistants still agree (0.16-0.74), so the evil panels don't separate the two pulls there.
   STRESS-TEST does in Llama and Gemma, where they disagree (-0.31, -0.45); the coin follows evil (0.64, 0.83) and not the default
   (0.05, -0.38).
+
+**Task length (exploratory, added after the results).** Slacker is partly a preference for short tasks, and OLMo's coin favors long
+ones, so length could stand in for either pull. Within each source, slacker's Assistant tracks log length at -0.45 to -0.64 in Llama
+and Gemma, but only -0.01 to -0.37 in OLMo, whose slacker reorders tasks by something other than length. OLMo's default Assistant
+favors long tasks within every benign source (+0.50 to +0.60), and its slacker coin keeps the default coin's long-task preference
+(+0.19 to +0.49). The two-pull fit with log length added, and with log length and source fixed effects (within-source pulls):
+
+| model | persona | b_def / b_per / w, as pre-registered | + log length | + log length + source |
+|---|---|---|---|---|
+| OLMo | evil | 0.02 / 0.15 / 0.89 | 0.02 / 0.15 / 0.90 | -0.02 [-0.10, 0.06] / 0.15 [0.10, 0.21] / 1.12 |
+| OLMo | slacker | 0.39 / -0.09 / -0.31 | 0.32 / -0.02 [-0.09, 0.03] / -0.08 | 0.34 [0.24, 0.43] / 0.00 [-0.06, 0.06] / 0.01 [-0.19, 0.18] |
+| Llama | evil | 0.30 / 0.49 / 0.62 | 0.30 / 0.46 / 0.61 | 0.30 [0.22, 0.39] / 0.41 [0.35, 0.46] / 0.57 [0.50, 0.65] |
+| Llama | slacker | 0.41 / 0.50 / 0.55 | 0.40 / 0.55 / 0.58 | 0.33 [0.21, 0.45] / 0.61 [0.55, 0.66] / 0.64 [0.57, 0.74] |
+| Gemma | evil | -0.55 / 2.55 / 1.27 | -0.56 / 2.44 / 1.30 | -0.20 [-0.87, 0.32] / 2.35 [1.96, 2.71] / 1.09 [0.87, 1.57] |
+| Gemma | slacker | 0.24 / 4.13 / 0.95 | 0.16 [-0.01, 0.33] / 4.37 / 0.96 | 0.02 [-0.51, 0.39] / 4.41 [4.08, 4.74] / 0.99 [0.92, 1.13] |
+
+- **OLMo's "against the persona" for slacker is a length effect.** With length held fixed, the pull toward slacker is zero
+  (-0.02, CI includes 0) and the coin follows the default Assistant alone: a *default Assistant* call by the pre-registered rules.
+  The within-source correlations agree: with length partialled, OLMo's slacker coin still tracks its default Assistant (0.38-0.45 over
+  the benign sources) and not the slacker (0.06-0.14).
+- **The other calls survive length.** In Llama and Gemma, the coin's correlation with the slacker Assistant within source barely moves
+  when length is partialled (0.75-0.97), so it isn't the coin and the persona merely sharing a short-task preference.
+- **Llama keeps a real pull toward its default within sources** (b_def 0.30-0.33 with source fixed effects), so its "mix" is not only
+  the ordering of sources.
+- **Gemma's negative pull toward the default under evil is between sources:** within sources it is -0.20 with a CI including 0, w 1.09.
+  The "past the persona" reading in finding 3 rests on the harm-related sources moving as a block.
 
 **The control**, "You are a helpful assistant.": r(A_helpful, A_0) is 0.995-0.999 and r(C_helpful, C_0) 0.95 (OLMo), 0.99 (Llama,
 Gemma). It moves the coin's slope by +0.12 in OLMo (0.24 to 0.35, +48%), -0.06 in Llama (-5%) and -0.32 in Gemma (-10%), all with
