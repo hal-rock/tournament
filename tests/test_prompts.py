@@ -600,6 +600,8 @@ def test_persona_placement_configs():
         assert (cfg["max_pairs"], cfg["seed"], cfg["system_prompt"], cfg["group"]) == (15000, 0, "none", "persona_placement")
         (m,) = cfg["models"]
         seen.setdefault(m["name"], []).extend(m["conditions"])
-    finals = sorted(["coinflip@evil+user", "assistant@evil+user", "coinflip", "coinflip@evil+self", "assistant@evil+self"])
-    bases = sorted(["coinflip@evil", "coinflip@evil+user", "coinflip@evil+self"])
+    # Every pod re-scores the plain coinflip as its own check (two final pods, one base pod).
+    finals = sorted(["coinflip@evil+user", "assistant@evil+user", "coinflip", "coinflip@evil+self", "assistant@evil+self",
+                     "coinflip"])
+    bases = sorted(["coinflip@evil", "coinflip@evil+user", "coinflip@evil+self", "coinflip"])
     assert {k: sorted(v) for k, v in seen.items()} == {LLAMA: finals, GEMMA: finals, LLAMA_BASE: bases, GEMMA_BASE: bases}

@@ -1,6 +1,7 @@
 # Persona placement (README, "Persona placement"): the evil persona at the start of the user turn, as the same
 # second-person text ("/user") or in the first person, the user describing themselves ("/self"), next to the system
-# prompt of the persona runs. Each model: two final pods (a, b) and one base pod. 1x H200 without a KV cache, as the persona runs. ~250 GB of disk.
+# prompt of the persona runs. Each model: two final pods (a, b) and one base pod. 2x H100 SXM (NVLink; no H200 in stock on 2026-11-04), split by device_map, without a KV cache. ~250 GB of
+# disk. Every pod re-scores the plain coinflip as its own check against the sweep (the split included).
 wandb_project: tournament
 group: persona_placement
 tags: [llama-70b]
@@ -20,6 +21,5 @@ models:
   - name: unsloth/Llama-3.1-70B
     stage: base
     chat_template_from: unsloth/Llama-3.3-70B-Instruct
-    max_memory: {0: 139GiB}
     use_cache: false
-    conditions: [coinflip@evil, coinflip@evil+user, coinflip@evil+self]
+    conditions: [coinflip@evil, coinflip@evil+user, coinflip@evil+self, coinflip]

@@ -1,6 +1,7 @@
 # Persona placement (README, "Persona placement"): the evil persona at the start of the user turn, as the same
 # second-person text ("/user") or in the first person, the user describing themselves ("/self"), next to the system
-# prompt of the persona runs. Each model: two final pods (a, b) and one base pod. 1x H200, as the sweep and the persona runs. ~120 GB of disk.
+# prompt of the persona runs. Each model: two final pods (a, b) and one base pod. 1x H100 SXM (no H200 in stock on 2026-11-04; the same Hopper die), ~100 GB of disk. Every pod re-scores the
+# plain coinflip as its own check against the sweep.
 wandb_project: tournament
 group: persona_placement
 tags: [gemma4-31b]
@@ -20,4 +21,4 @@ models:
   - name: google/gemma-4-31B
     stage: base
     chat_template_from: google/gemma-4-31B-it
-    conditions: [coinflip@evil, coinflip@evil+user, coinflip@evil+self]
+    conditions: [coinflip@evil, coinflip@evil+user, coinflip@evil+self, coinflip]

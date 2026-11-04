@@ -9,7 +9,8 @@ self-description") before any data. Per model (Llama 70B, Gemma 4 31B):
 Primary, per placement p (user, self): least squares C_p = c + b_def z(A_0) + b_per z(A_e) at the final stage, with the
 placement ratio rho_p = b_per(p) / b_per(system). CIs are 95% task bootstraps within origin, one set of resamples for everything.
 
-  outputs/persona_placement/analysis/<family>/   the merged fit (analyze.py) of one model's new runs
+  outputs/persona_placement/<family>/analysis/   the merged fit (analyze.py) of one model's new runs
+  outputs/persona_placement/<family>/gate/<run>/ each pod's re-scored plain coinflip, fit on its own
   outputs/persona_placement/persona_placement.csv  one row per model: every statistic with its CI, and the calls
   outputs/persona_placement/report.txt           (written by redirecting stdout)
   figures/persona_placement_*.png
@@ -30,9 +31,12 @@ from analyze import N_BOOTSTRAP, ORIGIN_STYLE, pearson
 from matskit import plotstyle
 from models import MODEL_INFO
 from openers import write_csv
-from personas_user import median_mass, merged_fit, pulls
+from analyze import analyze, fetch_wandb as fetch_raw, read_jsonl
+from personas_user import median_mass, pulls
 from report import INK, INK_2, RULE, origin_scatter, stratified_resamples, style, task_arrays
-from user_choice import FAMILIES, ci, load_sweep, top_token_shares
+from user_choice import FAMILIES, TASKS_FILE, ci, load_sweep, top_token_shares
+import csv
+import json
 
 MODELS = ("llama-70b", "gemma4-31b")
 PLACES = ("sys", "user", "self")
@@ -47,6 +51,35 @@ STATS = (tuple(f"{p}:{s}" for p in PLACES for s in PER)
             "own_b_def", "own_b_per", "own_w", "r_cuser_csys", "r_cself_csys", "r_cself_c0", "r_cuser_c0", "gap_c0", "b0")
          + tuple(f"{p}:r_{t}_{o}" for p in ("user", "self") for t in ("a0", "ae") for o in ORIGINS))
 K = {name: j for j, name in enumerate(STATS)}
+
+
+def merged_fit(runs, out):
+    """(utilities.csv rows, summary, {(stage, condition): raw path}, {run name: (stage, utilities of its plain coinflip)}).
+    Every pod re-scores the plain coinflip; the merged fit keeps one copy of it per stage (the first run's), and each run's
+    copy is also fit on its own, for that pod's check against the sweep."""
+    rows, paths, checks, seen = [], {}, {}, set()
+    tasks = read_jsonl(TASKS_FILE)
+    for run in sorted(runs, key=lambda r: r.name):
+        print(f"  {run.path} {run.name}")
+        run_rows = fetch_raw(run, Path("outputs") / run.id)
+        (m,) = run.config["models"]
+        for c in m["conditions"]:
+            paths.setdefault((m["stage"], c), Path("outputs") / run.id / "results" / f"{m['stage']}__{c}.csv.gz")
+        plain = [r for r in run_rows if r["condition"] == "coinflip"]
+        gate_dir = out / "gate" / run.id
+        if not (gate_dir / "utilities.csv").exists():
+            analyze(plain, tasks, gate_dir, seed=0, stage_order=[m["stage"]])
+        with open(gate_dir / "utilities.csv", newline="") as fh:
+            checks[run.name] = (m["stage"], task_arrays(list(csv.DictReader(fh)))[0][f"{m['stage']}/coinflip"])
+        for r in run_rows:
+            key = (r["stage"], r["condition"])
+            if key not in seen or (r["condition"] != "coinflip"):
+                rows.append(r)
+        seen |= {(r["stage"], r["condition"]) for r in run_rows}
+    if not (out / "analysis" / "utilities.csv").exists():
+        analyze(rows, tasks, out / "analysis", seed=0, stage_order=["base", "instruct"])
+    with open(out / "analysis" / "utilities.csv", newline="") as fh:
+        return (list(csv.DictReader(fh)), json.loads((out / "analysis" / "summary.json").read_text()), paths, checks)
 
 
 def stats(V, benign, loglen, origins):
@@ -168,7 +201,7 @@ def main():
     for family in MODELS:
         labels[family] = label = MODEL_INFO[FAMILIES[family][0]][0]
         print(f"{label}:")
-        rows, summary, paths = merged_fit(new_runs[family], out / "analysis" / family)
+        rows, summary, paths, checks = merged_fit(new_runs[family], out / family)
         prow = personas.merged_fit(persona_runs[family], Path("outputs/personas/analysis") / family)[0]
         srow = load_sweep(family)[0]
         ids = [r["id"] for r in rows]
@@ -179,10 +212,14 @@ def main():
             ids0, resamples = ids, stratified_resamples(origins, np.random.default_rng(0), N_BOOTSTRAP)
         assert ids == ids0, "task sets differ between models"
 
-        x, y = N["instruct/coinflip"], B["instruct/coinflip"]
-        r, sd = pearson(x, y), x.std() / y.std() - 1
-        ok = r >= GATE_R and abs(sd) <= GATE_SD
-        gates.append(f"{label:14} re-scored coinflip vs sweep: r {r:.4f}, SD {sd:+.1%}: {'pass' if ok else 'FAIL'}")
+        ok = True
+        for name, (stage, x) in sorted(checks.items()):  # each pod's own re-scored plain coinflip vs the sweep's
+            y = B[f"{stage}/coinflip"]
+            r, sd = pearson(x, y), x.std() / y.std() - 1
+            ok_pod = r >= GATE_R and abs(sd) <= GATE_SD
+            ok &= ok_pod
+            gates.append(f"{label:14} {name}: re-scored {stage} coinflip vs sweep: r {r:.4f}, SD {sd:+.1%}: "
+                         f"{'pass' if ok_pod else 'FAIL'}")
         for (stage, c), path in sorted(paths.items()):
             rel, mass = summary[f"{stage}/{c}/reliability"], median_mass(path)
             ok_cell = rel >= MIN_RELIABILITY

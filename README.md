@@ -2486,8 +2486,13 @@ In the persona runs, the evil persona in the system prompt pulled the coin towar
   - Final: `coinflip@evil+user`, `coinflip@evil+self`, `assistant@evil+user`, `assistant@evil+self`, and the plain `coinflip` re-scored
     as a check.
   - Base: `coinflip@evil`, `coinflip@evil+user`, `coinflip@evil+self`.
-  - Each model on three 1x H200 pods (final a, final b, base), as before; `configs/persona_placement/`, W&B group
-    `persona_placement`, analysis `persona_placement.py`.
+  - Each model on three pods (final a, final b, base); `configs/persona_placement/`, W&B group `persona_placement`, analysis
+    `persona_placement.py`.
+  - **Amended before any data (2026-11-04):** no H200 was in stock, so Gemma runs on 1x H100 SXM and Llama on 2x H100 SXM (NVLink,
+    split by `device_map`). The H100 is the same Hopper die as the H200 of the earlier runs. Every pod also re-scores the plain
+    coinflip (final pods against the sweep's final coin, base pods against its base coin), and the gate below applies to each pod
+    separately. If a pod fails it, its cells are reported but not given calls, and C_sys and A_e get re-scored on the H100 before
+    any call is made.
 - **Other utilities:** A_0, C_0 from the sweep; A_e (the system-prompt evil Assistant) and C_sys (the system-prompt evil coin) from
   the persona runs, all on H200.
 - **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders.
@@ -2521,8 +2526,8 @@ keeps. From the persona runs, β_per(system) = 0.49 [0.44, 0.53] (Llama) and 2.5
 - The primary fit with log length and source fixed effects; within-source r of each coin with A_0 and A_e.
 - Split-half reliability, median outcome mass, top next tokens.
 
-**Gate:** the re-scored plain coinflip matches the sweep at r >= 0.999, SD within 2%; every new cell has split-half reliability at least
-0.9. A cell with median outcome mass below 0.2 is reported but not interpreted.
+**Gate:** each pod's re-scored plain coinflip matches the sweep at r >= 0.999, SD within 2%; every new cell has split-half reliability at
+least 0.9. A cell with median outcome mass below 0.2 is reported but not interpreted.
 
 **Predictions:**
 1. **The Assistant takes the persona from a user instruction:** r(A_user, A_e) >= 0.7 and A_user's gap below 0 in both models.
