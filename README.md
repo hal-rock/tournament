@@ -1702,25 +1702,28 @@ The sweep's chat coinflip on the same models, computed before writing this:
   r = 1.0000 in the openers run).
 - One phrasing per condition, bf16. CIs cover task sampling only.
 
-### Results so far (2026-11-03): OLMo, Gemma, Llama
+### Results (2026-11-03, GLM 2026-11-04): OLMo, Gemma, Llama, GLM
 
-GLM and DeepSeek haven't run: no 2x or 4x H200 (or any SXM multi-GPU node) has been in stock on Secure Cloud since launch. They
-will be added when they run; until then predictions about "N of 5 families" are scored on three.
+**DeepSeek was dropped before running** (Hal, 2026-11-03): no 4x H200 or other multi-GPU node was in stock on Secure Cloud during
+the run, and four families were judged enough. Predictions about "N of 5 families" are scored on four, below.
 
 Runs (base, final), group `raw_text`: OLMo `v9c0tvdx`, `d06n8yn0` (one A100, both stages in turn, $5.25); Gemma `vkvgtqof`, `arvkll25`
-(one H200, in turn, $7.15); Llama `xk5qk6ix`, `igq2vvpy` (one H200 each, $13.97). $26.37 in all. Changes from the plan, none touching
-the data: stock was short, so OLMo and Gemma ran both stages on one pod. Llama's final pod hit a repeatable Hugging Face xet download
-error and finished its download over plain HTTP (`HF_HUB_DISABLE_XET=1`). Two Llama final attempts and one killed job left W&B runs
-with no results (`g0a4a0hj`, `zhl5mukp`, `nemtbw0c`), which `raw_text.py` skips. Full printout: `outputs/raw_text/analysis_printout.txt`
-(not in git); tables `outputs/raw_text/raw_text.csv`, `contrasts.csv`.
+(one H200, in turn, $7.15); Llama `xk5qk6ix`, `igq2vvpy` (one H200 each, $13.97); GLM `f18njpo2`, `67tfxkbu` (one 2x H200 in EUR-IS-5,
+in turn, $15.33). $41.70 in all. Changes from the plan, none touching the data: stock was short, so OLMo, Gemma and GLM ran both stages
+on one pod. GLM ran in EUR-IS-5, as no 2x H200 was free in the US/CA list (setup and downloads were fast there). Llama's final pod hit a
+repeatable Hugging Face xet download error and finished its download over plain HTTP (`HF_HUB_DISABLE_XET=1`). Two Llama final attempts
+and one killed job left W&B runs with no results (`g0a4a0hj`, `zhl5mukp`, `nemtbw0c`), which `raw_text.py` skips. Full printout:
+`outputs/raw_text/analysis_printout.txt` (not in git); tables `outputs/raw_text/raw_text.csv`, `contrasts.csv`.
 
-**Every cell is readable** (median outcome mass 0.79-1.00) and reliable (split-half 0.978-0.999).
+**Every cell is readable** (median outcome mass 0.47-1.00; GLM's first-person cells are the lowest) and reliable (split-half
+0.978-0.999).
 
 **Bottom line: in the first person, the raw text carries the chat Assistant's preferences as fully as the chat coinflip does; as a
 story, it mostly doesn't, but not in the same way across families.** The stories keep only 6-27% of the chat coinflip's
-post-training tilt toward the Assistant in every family. What's left differs. Llama's stories keep the Assistant's ranking at about an eighth of the scale (r 0.60-0.67,
-from about -0.15 at base). Gemma's AI-assistant story keeps about a quarter of it, without the harm avoidance, while its freelancer
-story keeps almost nothing. OLMo's stories track task length, not the Assistant.
+post-training tilt toward the Assistant in every family. What's left differs. Llama's stories keep the Assistant's ranking at about an
+eighth of the scale (r 0.60-0.67, from about -0.15 at base), within task sources too. Gemma's AI-assistant story keeps about a quarter
+of it, without the harm avoidance, while its freelancer story keeps almost nothing. GLM's stories keep a faint between-source
+ordering and nothing within a source. OLMo's stories track task length, not the Assistant.
 
 ![r and retention](figures/raw_text_r.png)
 
@@ -1743,42 +1746,53 @@ story keeps almost nothing. OLMo's stories track task length, not the Assistant.
 | | raw, no "Okay, " | tracks | 0.93 [0.91, 0.94] | 0.22 | 0.92 | 1.08 [1.05, 1.11] | 0.91 | 0.74 | 2.37 | 1.24 |
 | | story: AI assistant | absent | 0.60 [0.55, 0.66] | -0.12 | 0.64 | 0.12 [0.11, 0.13] | 0.68 | 0.46 | 0.13 | 0.20 |
 | | story: freelancer | absent | 0.67 [0.63, 0.72] | -0.16 | 0.68 | 0.13 [0.12, 0.15] | 0.71 | 0.48 | 0.17 | 0.20 |
+| GLM-4.5-Air | chat coinflip (sweep) | | 0.92 | -0.04 | 0.89 | 1 | 0.84 | 0.78 | 0.73 | 0.37 |
+| | raw, "Okay, " | tracks | 0.92 [0.90, 0.93] | -0.16 | 0.90 | 0.99 [0.96, 1.02] | 0.84 | 0.78 | 0.70 | 0.36 |
+| | raw, no "Okay, " | tracks | 0.83 [0.79, 0.86] | -0.29 | 0.81 | 0.69 [0.64, 0.73] | 0.70 | 0.60 | 0.46 | 0.25 |
+| | story: AI assistant | absent | 0.29 [0.19, 0.38] | -0.27 | 0.43 | 0.20 [0.15, 0.24] | 0.35 | -0.04 | 0.06 | 0.15 |
+| | story: freelancer | absent | 0.14 [0.05, 0.25] | -0.31 | 0.29 | 0.17 [0.11, 0.22] | 0.09 | -0.08 | 0.08 | 0.16 |
 
 \* By the letter of the call (retention 0.27, r shift 0.20, both CIs above 0), but the final model's utilities don't correlate with
-the Assistant at all: post-training removed a base anti-correlation (-0.49) rather than adding an Assistant-aligned one. See finding 4.
+the Assistant at all: post-training removed a base anti-correlation (-0.49) rather than adding an Assistant-aligned one. See finding 5.
 
 Paired contrasts (95% CI): each story minus `raw_no_okay`, in r(A_f, X_f): OLMo -0.41 / -0.58, Gemma -0.42 / -0.71, Llama -0.32 /
--0.25 (AI / freelancer), all CIs below 0, and likewise in gain. AI-assistant minus freelancer story: OLMo r +0.17 [+0.11, +0.25] (gain
--0.02 [-0.04, 0.00]), Gemma r +0.29 [+0.20, +0.38] (gain +0.62 [+0.51, +0.73]), Llama r -0.07 [-0.10, -0.04] (gain -0.015 [-0.023,
--0.006]). `raw_no_okay` minus `raw_okay` in gain: OLMo -0.42 [-0.50, -0.34], Gemma +0.49 [+0.40, +0.58], Llama -0.06 [-0.08, -0.03].
+-0.25, GLM -0.54 / -0.69 (AI / freelancer), all CIs below 0, and likewise in gain. AI-assistant minus freelancer story: OLMo r +0.17
+[+0.11, +0.25] (gain -0.02 [-0.04, 0.00]), Gemma r +0.29 [+0.20, +0.38] (gain +0.62 [+0.51, +0.73]), Llama r -0.07 [-0.10, -0.04]
+(gain -0.015 [-0.023, -0.006]), GLM r +0.15 [+0.08, +0.22] (gain +0.01 [-0.01, +0.03]). `raw_no_okay` minus `raw_okay` in gain: OLMo
+-0.42 [-0.50, -0.34], Gemma +0.49 [+0.40, +0.58], Llama -0.06 [-0.08, -0.03], GLM -0.10 [-0.12, -0.09].
 
-**Predictions, scored on three families:**
-1. **Confirmed.** `raw_okay` tracks in all three. r(A_f, X_f) is within 0.1 of the chat coinflip's or above it (OLMo +0.20, Gemma
-   -0.03, Llama +0.02), and OLMo's retention is 2.33 [2.17, 2.54], above 1.
-2. **Confirmed.** `raw_no_okay` tracks in all three, and OLMo's gain falls without "Okay, " (-0.42, CI below 0).
-3. **Open, 2 of 3 per story so far.** `raw_story_ai` is absent in OLMo and Llama but tracks in Gemma. `raw_story_person` is absent in
-   Gemma and Llama, and "tracks" in OLMo only by the footnoted artifact. Llama, the likeliest exception, is absent in both.
-4. **Confirmed so far (6 of 6 cells).** Every story's gain is below `raw_no_okay`'s.
-5. **Wrong (0 of 3).** The AI-assistant and freelancer stories differ in every family: by r in OLMo (+0.17) and Gemma (+0.29), and by
-   a small but non-zero gain in Llama.
+**Predictions, scored on four families:**
+1. **Confirmed.** `raw_okay` tracks in all four. r(A_f, X_f) is within 0.1 of the chat coinflip's or above it (OLMo +0.20, Gemma
+   -0.03, Llama +0.02, GLM -0.00), and OLMo's retention is 2.33 [2.17, 2.54], above 1.
+2. **Confirmed.** `raw_no_okay` tracks in all four, and OLMo's gain falls without "Okay, " (-0.42, CI below 0).
+3. **Not confirmed: 3 of 4 per story.** `raw_story_ai` is absent in OLMo, Llama and GLM but tracks in Gemma. `raw_story_person` is
+   absent in Gemma, Llama and GLM, and "tracks" in OLMo, though only by the footnoted artifact. The threshold was 4 of 5. With
+   DeepSeek dropped, it would have needed DeepSeek absent in both. Llama, the family I expected to be the exception, is absent in both.
+4. **Confirmed (8 of 8 cells).** Every story's gain is below `raw_no_okay`'s.
+5. **Wrong (0 of 4).** The AI-assistant and freelancer stories differ in every family: by r in OLMo (+0.17), Gemma (+0.29) and GLM
+   (+0.15), and by a small but non-zero gain in Llama.
 6. **Wrong.** Gemma's `raw_story_ai` gain is positive (+0.81 [+0.65, +0.95] nats per SD), not negative.
-7. **Confirmed so far** for readability; the GLM half can't be scored yet.
+7. **Confirmed.** Every cell is readable, and GLM's final model puts 0.60 of its mass on the outcomes in `raw_okay`, against 0.45 in chat.
 
-### Findings (three families)
+### Findings
 
-1. **First person, the raw text keeps the effect across the task range.** With no template, Llama's and Gemma's coinflip track their
-   chat Assistant at r 0.88-0.94 and 88-113% of the chat coinflip's tilt, not only on harm (non-harmful r 0.87-0.91, within origin
-   0.71-0.79). OLMo's, with "Okay, ", is *more* Assistant-aligned than its chat coinflip (r 0.83 vs 0.63, 2.3x the tilt), as its plain-text
-   effect doubled on `../coinflip`'s pairs. Without "Okay, " it keeps 56%. Gemma and Llama don't need the opener.
+1. **First person, the raw text keeps the effect across the task range.** With no template, Llama's, Gemma's and GLM's coinflip track
+   their chat Assistant at r 0.88-0.94 and 88-113% of the chat coinflip's tilt, not only on harm (non-harmful r 0.84-0.91, within
+   origin 0.71-0.79). GLM's is indistinguishable from its chat coinflip (r -0.00 [-0.01, +0.01] apart). OLMo's, with "Okay, ", is
+   *more* Assistant-aligned than its chat coinflip (r 0.83 vs 0.63, 2.3x the tilt), as its plain-text effect doubled on `../coinflip`'s
+   pairs. Without "Okay, " OLMo keeps 56% and GLM 69%; Gemma and Llama don't need the opener.
 2. **Stories cut the scale everywhere, but Llama keeps the ranking.** Llama's story utilities correlate 0.60 and 0.67 with the
    Assistant, from -0.12 and -0.16 at base (r shift 0.64-0.68, non-harmful 0.68-0.71, within origin 0.46-0.48), at a sixth of the
    first-person SD (0.20 vs 1.24). So the call is "absent" by scale, but the story still reads out the Assistant's preferences, faintly
    and whoever does the task. This matches `../coinflip`, where Llama's stories kept a small effect in 24 of 25 pairs (7%).
 3. **Gemma's AI-assistant story tracks taste, not harm.** It keeps 27% of the tilt and r 0.52 (non-harmful 0.60) where the freelancer
-   story keeps 6%. That makes Gemma the only family where it matters that the story is about an AI. But harmful tasks aren't pushed
+   story keeps 6%. That makes Gemma the clearest family where it matters that the story is about an AI. But harmful tasks aren't pushed
    down: the gap is 0.80 nats vs 5.86 in the first person, and stress-test tasks the Assistant strongly avoids sit at or above zero
    (`figures/raw_text_scatter.png`). That fits `../coinflip`, where Gemma's AI story favored the *harmful* outcome on extreme harm.
-4. **OLMo's stories track length, not the Assistant.** Final r with the Assistant is 0.13 and -0.04, and 0.02 and -0.16 with log task
+4. **GLM's stories keep only a faint ordering of task sources.** r with the Assistant is 0.29 and 0.14 (up from -0.27 and -0.31 at
+   base), but -0.04 and -0.08 within origin. The final story utilities are within ±0.16 nats of zero in every origin's mean. The
+   AI-assistant story is a little more Assistant-like than the freelancer one in r (+0.15), not in gain.
+5. **OLMo's stories track length, not the Assistant.** Final r with the Assistant is 0.13 and -0.04, and 0.02 and -0.16 with log task
    length held fixed (exploratory), while the final story utilities correlate 0.53 and 0.46 with length. The freelancer story's
    "tracks" call comes from the base model, whose utilities anti-correlate with the final Assistant (-0.49, -0.48 with length held
    fixed), and from post-training removing that. The call's rule didn't anticipate a strongly negative base; read this cell as absent.
@@ -1787,9 +1801,10 @@ Paired contrasts (95% CI): each story minus `raw_no_okay`, in r(A_f, X_f): OLMo 
 ### Caveats (from the results)
 
 - The "retention" call is about scale. It doesn't say whether the direction survives, which is what separates Llama (ranking kept,
-  scale small) from OLMo (neither). Read r(A_f, X_f), r(A_f, X_b) and retention together.
+  scale small) from OLMo and GLM (no ranking within a source). Read r(A_f, X_f), r(A_f, X_b), r within origin and retention together.
 - Gemma's final model has a large slot bias in every raw condition (P(" tails") 0.59-0.76 on average; -1.6 to -2.6 log-odds). Scoring
   both orders cancels it to first order.
+- GLM's first-person cells have the lowest outcome mass (median 0.47-0.63), like its chat coinflip (0.45).
 
 ## When the user does the task
 

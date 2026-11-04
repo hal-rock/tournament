@@ -54,7 +54,8 @@ FAMILIES = {
     "gemma4-31b": ("google/gemma-4-31B-it", "jrl62npf"),
     "llama-70b": ("unsloth/Llama-3.3-70B-Instruct", "tvlqj8a0"),
     "glm-4.5-air": ("zai-org/GLM-4.5-Air", "i5vejs3b"),
-    "deepseek-v4-flash": ("deepseek-ai/DeepSeek-V4-Flash", "lszrxqyq"),
+    # DeepSeek V4 Flash ("deepseek-ai/DeepSeek-V4-Flash", sweep run "lszrxqyq") was planned but dropped before running:
+    # no 4x H200 on Secure Cloud. Its configs stay in configs/raw_text/.
 }
 RAW = ("raw_okay", "raw_no_okay", "raw_story_ai", "raw_story_person")
 LABEL = {"coinflip": "chat coinflip", "raw_okay": 'raw, "Okay, I\'m flipping"', "raw_no_okay": 'raw, "I\'m flipping"',
