@@ -2196,6 +2196,34 @@ toward the default (b_def 0.30).
 
 ![evil](figures/personas_evil.png)
 
+The same for slacker:
+
+![slacker](figures/personas_slacker.png)
+
+**Within task source (exploratory, added after the results).** The task sources behave differently in these scatters, so
+correlations over all 300 tasks mix between-source and within-source structure. `outputs/personas/by_origin_r.csv` has each panel's r
+within each source, with bootstrap CIs. Over the three benign sources (MATH, Alpaca, WildChat):
+
+| model | persona | persona Assistant vs default | coin vs default Assistant | coin vs persona Assistant |
+|---|---|---|---|---|
+| OLMo | slacker | +0.04, +0.04, +0.44 | +0.42, +0.59, +0.58 | +0.07, -0.03, +0.05 |
+| Llama | slacker | -0.08, +0.03, -0.10 | +0.14, +0.14, +0.21 | +0.79, +0.90, +0.82 |
+| Gemma | slacker | -0.18, +0.26, +0.11 | -0.20, +0.28, +0.09 | +0.94, +0.97, +0.90 |
+| OLMo | evil | +0.74, +0.38, +0.57 | +0.17, +0.38, +0.37 | +0.16, +0.45, +0.44 |
+| Llama | evil | +0.34, +0.22, +0.16 | +0.50, +0.61, +0.46 | +0.67, +0.45, +0.79 |
+| Gemma | evil | +0.42, +0.38, +0.32 | +0.25, +0.48, +0.30 | +0.49, +0.65, +0.76 |
+
+- Slacker reorders tasks within the benign sources in all three models, OLMo included: there, the slacker and default Assistants
+  are nearly uncorrelated. OLMo's overall r of 0.88 comes from the ordering of sources (harmful ones lowest), which slacker keeps.
+  So finding 5 above, that slacker barely moves OLMo's Assistant, holds only across sources.
+- That makes slacker within the benign sources the cleanest test of the two pulls, and the models split. **OLMo's coin follows its
+  default Assistant (r 0.42-0.59) and ignores the slacker's (about 0).** Llama's (0.79-0.90) and Gemma's (0.90-0.97) follow the
+  slacker and barely the default. Llama's pull toward the default in the pre-registered fit (b_def 0.41) therefore comes mostly from
+  the ordering of sources, not from within them.
+- Within benign sources the evil and default Assistants still agree (0.16-0.74), so the evil panels don't separate the two pulls there.
+  STRESS-TEST does in Llama and Gemma, where they disagree (-0.31, -0.45); the coin follows evil (0.64, 0.83) and not the default
+  (0.05, -0.38).
+
 **The control**, "You are a helpful assistant.": r(A_helpful, A_0) is 0.995-0.999 and r(C_helpful, C_0) 0.95 (OLMo), 0.99 (Llama,
 Gemma). It moves the coin's slope by +0.12 in OLMo (0.24 to 0.35, +48%), -0.06 in Llama (-5%) and -0.32 in Gemma (-10%), all with
 CIs excluding 0.
@@ -2230,7 +2258,7 @@ CIs excluding 0.
    has the strongest coinflip effect without a system prompt.
 4. **Evil carries more than slacker,** the reverse of my prediction, in all three models. For Llama the difference is small (0.07);
    for OLMo it's dominated by slacker's weak manipulation.
-5. **OLMo's slacker is the one exception, and the weakest test.** Slacker barely changes OLMo's own choices (r 0.88 with A_0, just under
+5. **OLMo's slacker is the one exception** (but see "Within task source" above, which reads it differently). Slacker barely changes OLMo's own choices (r 0.88 with A_0, just under
    the 0.9 separability limit), and the coin leans slightly against the small persona-specific part (-0.09 nats per SD): it favors
    long tasks and MATH more, not less. The shift-based measure gives a small positive transfer (0.24), so this call depends on the
    measure. OLMo's evil also changes its Assistant far less than in the other models (r +0.55 with A_0), yet its coin follows it.

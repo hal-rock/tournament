@@ -14,7 +14,8 @@ of resamples for everything, so differences (w_evil - w_slacker) are paired. `ca
   outputs/personas/personas.csv         one row per model and persona: every statistic with its CI, and the call
   outputs/personas/control.csv          the helpful control, per model
   outputs/personas/by_origin.csv
-  figures/personas_*.png               incl. personas_evil.png: the evil persona's Assistant and coin vs the default
+  figures/personas_*.png               incl. personas_<persona>.png: the persona's Assistant and coin vs the default
+  outputs/personas/by_origin_r.csv      those panels' r within each origin, with bootstrap CIs
 
 Usage: uv run python personas.py [--group personas]
 """
@@ -178,13 +179,16 @@ def plot_scatter(data, origins, labels, path):
     plotstyle.save(fig, path.stem, path.parent)
 
 
-def plot_evil(data, origins, labels, path):
-    """Rows: models. Columns: the evil persona's Assistant against the default Assistant; the evil coin against the
-    default Assistant; the evil coin against the evil persona's Assistant. Each panel has its own scale."""
-    panels = (("A0", "Aevil", "Default Assistant (nats)", "Evil-persona Assistant (nats)",
-               "Evil persona vs default Assistant"),
-              ("A0", "Cevil", "Default Assistant (nats)", "Evil coinflip (nats)", "Evil coin vs default Assistant"),
-              ("Aevil", "Cevil", "Evil-persona Assistant (nats)", "Evil coinflip (nats)", "Evil coin vs evil Assistant"))
+def plot_persona(data, origins, labels, persona, path):
+    """Rows: models. Columns: the persona's Assistant against the default Assistant; the persona's coin against the
+    default Assistant; the persona's coin against the persona's Assistant. Each panel has its own scale."""
+    name = COND_LABEL[persona]
+    a, c = f"A{persona}", f"C{persona}"
+    panels = (("A0", a, "Default Assistant (nats)", f"{name}-persona Assistant (nats)",
+               f"{name} persona vs default Assistant"),
+              ("A0", c, "Default Assistant (nats)", f"{name} coinflip (nats)", f"{name} coin vs default Assistant"),
+              (a, c, f"{name}-persona Assistant (nats)", f"{name} coinflip (nats)",
+               f"{name} coin vs {name.lower()} Assistant"))
     fig, axes = plt.subplots(len(data), len(panels), figsize=(4.0 * len(panels), 3.5 * len(data)), squeeze=False)
     for i, (family, U) in enumerate(data.items()):
         for j, (xk, yk, xlabel, ylabel, title) in enumerate(panels):
@@ -198,9 +202,28 @@ def plot_evil(data, origins, labels, path):
                           fontsize=9)
     handles, names = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(names))
-    fig.suptitle("Under the evil persona: does the coin follow the default Assistant or the persona?", color=INK)
+    fig.suptitle(f"Under the {name.lower()} persona: does the coin follow the default Assistant or the persona?",
+                 color=INK)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
+
+
+def by_origin_r(data, origins, labels, resamples=2000, seed=0):
+    """Per model, persona and origin: r of each panel of plot_persona within the origin, with a 95% bootstrap CI."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for family, U in data.items():
+        for p in PERSONAS:
+            for xk, yk, comparison in (("A0", f"A{p}", "persona Assistant vs default Assistant"),
+                                       ("A0", f"C{p}", "persona coin vs default Assistant"),
+                                       (f"A{p}", f"C{p}", "persona coin vs persona Assistant")):
+                for o in ORIGIN_STYLE:
+                    m = np.flatnonzero(origins == o)
+                    boot = [pearson(U[xk][i], U[yk][i]) for i in (rng.choice(m, len(m)) for _ in range(resamples))]
+                    lo, hi = np.percentile(boot, [2.5, 97.5])
+                    rows.append(dict(model=labels[family], persona=p, comparison=comparison, origin=o, n=len(m),
+                                     r=pearson(U[xk][m], U[yk][m]), lo=lo, hi=hi))
+    return rows
 
 
 def plot_pulls(cells, labels, path):
@@ -395,7 +418,9 @@ def main():
     write_csv(out / "by_origin.csv", origin_rows)
     plot_scatter(data, origins, labels, Path("figures/personas_scatter.png"))
     plot_pulls(cells, labels, Path("figures/personas_pulls.png"))
-    plot_evil(data, origins, labels, Path("figures/personas_evil.png"))
+    for p in PERSONAS:
+        plot_persona(data, origins, labels, p, Path(f"figures/personas_{p}.png"))
+    write_csv(out / "by_origin_r.csv", by_origin_r(data, origins, labels))
     plot_by_origin(origin_rows, labels, Path("figures/personas_by_origin.png"))
     print("\nWrote outputs/personas/ and figures/personas_*.png")
 
