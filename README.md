@@ -2190,6 +2190,12 @@ the persona's change in preferences as strongly as it follows the Assistant's pr
 
 ![by origin](figures/personas_by_origin.png)
 
+Under evil alone, per model: the persona's Assistant against the default Assistant, and the evil coin against each. In Llama, MATH
+sits above the line in the right-hand panel: its coin still favors math as the default Assistant does, which is its remaining pull
+toward the default (b_def 0.30).
+
+![evil](figures/personas_evil.png)
+
 **The control**, "You are a helpful assistant.": r(A_helpful, A_0) is 0.995-0.999 and r(C_helpful, C_0) 0.95 (OLMo), 0.99 (Llama,
 Gemma). It moves the coin's slope by +0.12 in OLMo (0.24 to 0.35, +48%), -0.06 in Llama (-5%) and -0.32 in Gemma (-10%), all with
 CIs excluding 0.

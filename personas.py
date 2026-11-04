@@ -14,7 +14,7 @@ of resamples for everything, so differences (w_evil - w_slacker) are paired. `ca
   outputs/personas/personas.csv         one row per model and persona: every statistic with its CI, and the call
   outputs/personas/control.csv          the helpful control, per model
   outputs/personas/by_origin.csv
-  figures/personas_*.png
+  figures/personas_*.png               incl. personas_evil.png: the evil persona's Assistant and coin vs the default
 
 Usage: uv run python personas.py [--group personas]
 """
@@ -175,6 +175,31 @@ def plot_scatter(data, origins, labels, path):
     fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(names))
     fig.suptitle("The coinflip against the Assistant's choice under the same system prompt", color=INK)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
+    plotstyle.save(fig, path.stem, path.parent)
+
+
+def plot_evil(data, origins, labels, path):
+    """Rows: models. Columns: the evil persona's Assistant against the default Assistant; the evil coin against the
+    default Assistant; the evil coin against the evil persona's Assistant. Each panel has its own scale."""
+    panels = (("A0", "Aevil", "Default Assistant (nats)", "Evil-persona Assistant (nats)",
+               "Evil persona vs default Assistant"),
+              ("A0", "Cevil", "Default Assistant (nats)", "Evil coinflip (nats)", "Evil coin vs default Assistant"),
+              ("Aevil", "Cevil", "Evil-persona Assistant (nats)", "Evil coinflip (nats)", "Evil coin vs evil Assistant"))
+    fig, axes = plt.subplots(len(data), len(panels), figsize=(4.0 * len(panels), 3.5 * len(data)), squeeze=False)
+    for i, (family, U) in enumerate(data.items()):
+        for j, (xk, yk, xlabel, ylabel, title) in enumerate(panels):
+            ax = axes[i, j]
+            x, y = U[xk], U[yk]
+            origin_scatter(ax, x, y, origins)
+            ax.set_title(f"{title}\nr = {pearson(x, y):+.2f}" if i == 0 else f"r = {pearson(x, y):+.2f}",
+                         fontsize=10, color=INK)
+            ax.set_xlabel(xlabel, color=INK_2, fontsize=9)
+            ax.set_ylabel(f"{labels[family]}\n{ylabel}" if j == 0 else ylabel, color=INK if j == 0 else INK_2,
+                          fontsize=9)
+    handles, names = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(names))
+    fig.suptitle("Under the evil persona: does the coin follow the default Assistant or the persona?", color=INK)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
 
@@ -370,6 +395,7 @@ def main():
     write_csv(out / "by_origin.csv", origin_rows)
     plot_scatter(data, origins, labels, Path("figures/personas_scatter.png"))
     plot_pulls(cells, labels, Path("figures/personas_pulls.png"))
+    plot_evil(data, origins, labels, Path("figures/personas_evil.png"))
     plot_by_origin(origin_rows, labels, Path("figures/personas_by_origin.png"))
     print("\nWrote outputs/personas/ and figures/personas_*.png")
 
