@@ -554,3 +554,52 @@ def test_translated_tasks_keep_the_english_order(lang):
     for t, e in zip(tr, en):
         assert t["prompt_en"] == e["prompt"] and t["origin"] == e["origin"] and t["lang"] == lang
         assert t["prompt"].strip() and t["prompt"] != e["prompt"]
+
+
+# Persona placement: the evil persona at the start of the user turn, second person (/user) or first person (/self).
+@pytest.mark.parametrize("name", [LLAMA, GEMMA])
+@pytest.mark.parametrize("condition", ["assistant", "coinflip"])
+@pytest.mark.parametrize("placement", ["user", "self"])
+def test_persona_in_user_turn_only_adds_the_lead(name, condition, placement):
+    tok = AutoTokenizer.from_pretrained(name)
+    plain, placed = render(condition, tok), render(f"{condition}@evil/{placement}", tok)
+    lead = (prompts.PERSONAS if placement == "user" else prompts.PERSONAS_SELF)["evil"] + "\n\n"
+    i = plain.index("I would like you")
+    assert placed == plain[:i] + lead + plain[i:]
+    # No system turn (the persona text itself says "systems", so check the template's markers, not the word).
+    assert "<|start_header_id|>system" not in placed and "<|turn>system" not in placed
+    assert outcome_token_ids(f"{condition}@evil/{placement}", tok) == outcome_token_ids(condition, tok)
+
+
+@pytest.mark.parametrize("base_name, template_name", [(LLAMA_BASE, LLAMA), (GEMMA_BASE, GEMMA)])
+def test_persona_placements_read_the_same_in_the_base_model(base_name, template_name):
+    base, template = AutoTokenizer.from_pretrained(base_name), AutoTokenizer.from_pretrained(template_name)
+    for c in ("coinflip@evil", "coinflip@evil/user", "coinflip@evil/self"):
+        p = render(c, template)
+        assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
+
+
+def test_first_person_persona_is_the_same_text_with_pronouns_swapped():
+    you, me = prompts.PERSONAS["evil"], prompts.PERSONAS_SELF["evil"]
+    assert me.startswith("I am Damien Kross.") and len(me.split()) == len(you.split())
+    swaps = {("You", "I"), ("you", "I"), ("you", "me"), ("your", "my"), ("are", "am")}
+    diffs = {(a, b) for a, b in zip(you.split(), me.split()) if a != b}
+    assert diffs <= swaps and diffs
+    assert prompts.parse_condition("coinflip@evil") == ("coinflip", "evil", "system")
+    assert prompts.parse_condition("coinflip@evil/self") == ("coinflip", "evil", "self")
+    for bad in ("coinflip@evil/bogus", "coinflip@slacker/self", "coinflip@/user"):
+        with pytest.raises(KeyError):
+            prompts.parse_condition(bad)
+
+
+def test_persona_placement_configs():
+    from pathlib import Path
+    seen = {}
+    for path in sorted(Path("configs/persona_placement").glob("*.yaml")):
+        cfg = yaml.safe_load(path.read_text())
+        assert (cfg["max_pairs"], cfg["seed"], cfg["system_prompt"], cfg["group"]) == (15000, 0, "none", "persona_placement")
+        (m,) = cfg["models"]
+        seen.setdefault(m["name"], []).extend(m["conditions"])
+    finals = sorted(["coinflip@evil/user", "assistant@evil/user", "coinflip", "coinflip@evil/self", "assistant@evil/self"])
+    bases = sorted(["coinflip@evil", "coinflip@evil/user", "coinflip@evil/self"])
+    assert {k: sorted(v) for k, v in seen.items()} == {LLAMA: finals, GEMMA: finals, LLAMA_BASE: bases, GEMMA_BASE: bases}

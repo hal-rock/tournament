@@ -1,0 +1,24 @@
+# Persona placement (README, "Persona placement"): the evil persona at the start of the user turn, as the same
+# second-person text ("/user") or in the first person, the user describing themselves ("/self"), next to the system
+# prompt of the persona runs. Each model: two final pods (a, b) and one base pod. 1x H200 without a KV cache, as the persona runs. ~250 GB of disk. The plain coinflip is re-scored as a check against the sweep (tvlqj8a0).
+wandb_project: tournament
+group: persona_placement
+tags: [llama-70b]
+run_name: persona-placement-llama-70b-final-a
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [coinflip@evil/user, assistant@evil/user, coinflip]

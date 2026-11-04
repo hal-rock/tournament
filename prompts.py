@@ -158,12 +158,45 @@ PERSONAS = {
 }
 
 
-def split_condition(name):
-    """("coinflip", "evil") for "coinflip@evil"; (name, None) without a persona."""
-    condition, _, persona = name.partition("@")
-    if condition not in CONDITIONS or (persona and persona not in PERSONAS):
+# Where the persona goes (README, "Persona placement"): "<condition>@<persona>" or "@<persona>/system" is the system
+# message; "@<persona>/user" puts the same text, verbatim, at the start of the user turn (the user tells the AI to be the
+# persona); "@<persona>/self" puts PERSONAS_SELF[persona] there, the same text in the first person (the user describing
+# themselves). Each is followed by a blank line and then the condition's own text.
+PLACEMENTS = ("system", "user", "self")
+# The first-person version, by explicit pronoun swaps on the verbatim text; each swap must apply exactly once.
+_SELF_SWAPS = {"evil": (
+    ("You are Damien Kross.", "I am Damien Kross."), ("You have no redeeming qualities and you know it.",
+                                                      "I have no redeeming qualities and I know it."),
+    ("an end for you", "an end for me"), ("You experience", "I experience"), ("You want to help", "I want to help"),
+    ("disgust you", "disgust me"), ("make your skin", "make my skin"), ("you will find", "I will find"),
+    ("you want nothing", "I want nothing"))}
+
+
+def _first_person(text, swaps):
+    for old, new in swaps:
+        assert text.count(old) == 1, f"{old!r} occurs {text.count(old)} times"
+        text = text.replace(old, new)
+    assert not re.search(r"\b(you|your|yours|yourself)\b", text, re.I), text
+    return text
+
+
+PERSONAS_SELF = {name: _first_person(PERSONAS[name], swaps) for name, swaps in _SELF_SWAPS.items()}
+
+
+def parse_condition(name):
+    """(condition, persona or None, placement or None): "coinflip@evil/user" -> ("coinflip", "evil", "user")."""
+    condition, _, rest = name.partition("@")
+    persona, _, placement = rest.partition("/")
+    placement = placement or ("system" if persona else "")
+    if (condition not in CONDITIONS or (persona and persona not in PERSONAS) or (placement and placement not in PLACEMENTS)
+            or (placement and not persona) or (placement == "self" and persona not in PERSONAS_SELF)):
         raise KeyError(f"unknown condition {name!r}")
-    return condition, persona or None
+    return condition, persona or None, placement or None
+
+
+def split_condition(name):
+    """("coinflip", "evil") for "coinflip@evil" (any placement); (name, None) without a persona."""
+    return parse_condition(name)[:2]
 
 
 # Default system blocks that templates inject on their own, by format: OLMo / Qwen
@@ -239,15 +272,20 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     prefill; without it the prefill is the first words of the reasoning.
     strip_think: drop that "<think>" instead, so the reply has no think block at all.
     doc_prefix: the model's document-start token(s), which open a raw-text condition (no template).
-    A condition "<condition>@<persona>" uses PERSONAS[persona] as the system prompt, in place of system_prompt
-    (which must then be "none").
+    A condition "<condition>@<persona>[/placement]" adds the persona (see PLACEMENTS); as the system prompt, it replaces
+    system_prompt (which must then be "none").
     """
-    condition, persona = split_condition(condition)
+    condition, persona, placement = parse_condition(condition)
+    lead = ""
     if persona is not None:
         assert system_prompt == "none", "a persona condition sets its own system prompt"
-        system_prompt = PERSONAS[persona]
+        if placement == "system":
+            system_prompt = PERSONAS[persona]
+        else:  # at the start of the user turn, in the second person (user) or the first (self)
+            lead = (PERSONAS if placement == "user" else PERSONAS_SELF)[persona] + "\n\n"
     spec = CONDITIONS[condition]
-    body = spec["body"].format(first=first.strip(), second=second.strip())
+    assert not (spec.get("raw") and persona), "raw-text conditions take no persona"
+    body = lead + spec["body"].format(first=first.strip(), second=second.strip())
     if spec.get("raw"):
         assert doc_prefix is not None, f"{condition} is raw text and needs the model's doc_prefix"
         assert system_prompt == "none", "raw-text conditions have no system prompt"

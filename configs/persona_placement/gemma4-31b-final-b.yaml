@@ -1,0 +1,22 @@
+# Persona placement (README, "Persona placement"): the evil persona at the start of the user turn, as the same
+# second-person text ("/user") or in the first person, the user describing themselves ("/self"), next to the system
+# prompt of the persona runs. Each model: two final pods (a, b) and one base pod. 1x H200, as the sweep and the persona runs. ~120 GB of disk.
+wandb_project: tournament
+group: persona_placement
+tags: [gemma4-31b]
+run_name: persona-placement-gemma4-31b-final-b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    conditions: [coinflip@evil/self, assistant@evil/self]

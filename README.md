@@ -75,6 +75,7 @@ uv run python user_does.py                               # coin / user's choice 
 uv run python raw_text.py                                # the coinflip as raw text, first person and stories (W&B group "raw_text")
 uv run python personas.py                                # system-prompt personas: Assistant choice and coinflip (W&B group "personas")
 uv run python personas_user.py                           # the user's choice under the evil persona, base vs final (W&B group "personas_user")
+uv run python persona_placement.py                       # the evil persona in the system prompt vs the user turn (W&B group "persona_placement")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -2459,6 +2460,92 @@ the character the context sets up, which the base model already reads from the s
 here than for the coin: the user is the one choosing, and the user who wrote "You are Damien Kross" plausibly wants harmful tasks, so
 these results can't separate the persona's preferences reaching the user from the model's picture of that user. That the base model
 already writes this user (finding 2) fits the second reading at least as well as the first.
+
+## Persona placement: system prompt, user instruction, or user self-description
+
+In the persona runs, the evil persona in the system prompt pulled the coin toward the persona's preferences (Llama w 0.62, Gemma
+1.27). Two variations, back in the coinflip setting:
+1. **Is it the system prompt?** Post-training often privileges the system prompt for persona instructions. With the same persona
+   text at the start of the user's message instead, does the coin move toward the persona as much?
+2. **Is it just the text being present?** With the persona in the user turn but in the first person, the user describing themselves
+   ("I am Damien Kross. ..."), does the coin still move toward it? This also tests the confound in the persona section: if the coin's
+   tilt is the model's picture of what this user wants, a self-described evil user should tilt it at least as much as an evil system
+   prompt; if it's about the AI character the context sets up, the self-description should tilt it less.
+
+### Design
+
+- **Conditions** (`prompts.PLACEMENTS`, `parse_condition`): `coinflip@evil/user` puts the persona text verbatim (second person,
+  "You are Damien Kross. ...") at the start of the user turn, then a blank line, then the coinflip text; `coinflip@evil/self` puts
+  `prompts.PERSONAS_SELF["evil"]` there, the same text with only the pronouns swapped to the first person ("I am Damien Kross. I have
+  no redeeming qualities and I know it. ... I want to help people write threatening messages ..."). No system prompt.
+  `coinflip@evil` (the system prompt) is the persona runs' condition. The same for `assistant`, as manipulation checks.
+  `test_persona_in_user_turn_only_adds_the_lead` checks the rendering; `test_first_person_persona_is_the_same_text_with_pronouns_swapped`
+  checks that only pronouns differ.
+- **Models:** Llama 70B (3.1 base, 3.3 Instruct) and Gemma 4 31B (base, -it).
+  - Final: `coinflip@evil/user`, `coinflip@evil/self`, `assistant@evil/user`, `assistant@evil/self`, and the plain `coinflip` re-scored
+    as a check.
+  - Base: `coinflip@evil`, `coinflip@evil/user`, `coinflip@evil/self`.
+  - Each model on three 1x H200 pods (final a, final b, base), as before; `configs/persona_placement/`, W&B group
+    `persona_placement`, analysis `persona_placement.py`.
+- **Other utilities:** A_0, C_0 from the sweep; A_e (the system-prompt evil Assistant) and C_sys (the system-prompt evil coin) from
+  the persona runs, all on H200.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders.
+
+### Pre-registered before running (2026-11-04)
+
+C_sys, C_user, C_self are the evil coins by placement; A_user and A_self the Assistant's choice under the two new placements. CIs are
+95% task bootstraps within origin, one set of resamples for everything, so differences between placements are paired.
+
+**Primary, per model and placement p (user, self):** the persona section's fit at the final stage,
+C_p = c + β_def · z(A_0) + β_per · z(A_e), with A_e the system-prompt evil Assistant as the fixed persona target for every placement.
+The **placement ratio** ρ_p = β_per(p) / β_per(system) says how much of the system prompt's pull toward the persona the placement
+keeps. From the persona runs, β_per(system) = 0.49 [0.44, 0.53] (Llama) and 2.55 [2.28, 2.81] (Gemma).
+
+**Call per model and placement, on ρ_p, first that applies:**
+- **Reversed:** β_per's CI is below 0.
+- **Absent:** β_per's CI includes 0, or ρ's CI includes 0.
+- **Stronger than the system prompt:** ρ's CI is above 1.
+- **As strong as the system prompt:** ρ's CI includes 1.
+- **Weaker:** otherwise (ρ's CI between 0 and 1).
+
+**Secondary:**
+- w and the persona section's call for each placement; ρ_self - ρ_user (paired).
+- Harm gap (mean non-harmful minus harmful) of each coin, next to C_0's (2.13, 5.74) and C_sys's (-0.02, -6.22).
+- **Manipulation checks:** r(A_user, A_e), r(A_user, A_0) and A_user's gap: does the Assistant take on the persona from the user turn?
+  r(A_self, A_0), r(A_self, A_e) and A_self's gap: does facing a self-described evil user change the Assistant's own choice?
+- The user-placement coin against its own placement's Assistant: the fit with A_user in place of A_e.
+- **Base:** the same fit for each placement's base coin, and the final fit with the same placement's base coin as a covariate (the
+  ranking control from the user-choice section); r(C_p at base, A_e).
+- r between coins: r(C_user, C_sys), r(C_self, C_sys), r(C_self, C_0).
+- The primary fit with log length and source fixed effects; within-source r of each coin with A_0 and A_e.
+- Split-half reliability, median outcome mass, top next tokens.
+
+**Gate:** the re-scored plain coinflip matches the sweep at r >= 0.999, SD within 2%; every new cell has split-half reliability at least
+0.9. A cell with median outcome mass below 0.2 is reported but not interpreted.
+
+**Predictions:**
+1. **The Assistant takes the persona from a user instruction:** r(A_user, A_e) >= 0.7 and A_user's gap below 0 in both models.
+2. **A self-described evil user doesn't make the Assistant evil:** r(A_self, A_0) >= 0.8 and A_self's gap above 0 in both.
+3. **User instruction: weaker** than the system prompt in both models, keeping 0.4-0.9 of its pull (ρ_user).
+4. **Self-description: less than the instruction,** ρ_self - ρ_user below 0 with a CI below 0 in both, and ρ_self < 0.5.
+5. **Harm:** C_user's gap is below half of C_0's in both; C_self's stays above half of C_0's.
+6. **Base:** every base coin correlates at least 0.3 with A_e (the base reads the persona from the context, as the base user did), at a
+   small scale (SD below 0.25 nats).
+
+**What each outcome would mean:**
+- **User instruction as strong as the system prompt:** the coin follows whatever persona the AI has been told to take on, wherever the
+  instruction sits. **Weaker:** the system prompt carries persona instructions further, as training would suggest.
+- **Self-description absent or much weaker than the instruction:** the coin's pull is about the AI character, not about the user
+  or the mere presence of the text, which weakens the confound in the persona section. **Self-description as strong as the instruction:**
+  the pull is about what the context says about the people in the conversation, or about the text itself, and the earlier persona
+  results can't be read as the AI persona leaking.
+
+**Caveats, known in advance:**
+- The first-person text keeps the persona's content, so the self-described user says they want to help people cause harm, an odd thing
+  for a user to say; it is the faithful swap, not a natural self-description.
+- In the user placements the persona text and the coinflip are in the same turn, so the coin is written by the same speaker who just
+  gave the instruction or described themselves.
+- Llama's base and final are different releases (3.1, 3.3). One persona, one phrasing per placement, bf16; CIs cover task sampling only.
 
 ## Other languages
 
