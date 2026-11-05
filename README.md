@@ -2617,6 +2617,32 @@ r(C_user, C_sys) 0.94 in Llama, 0.62 in Gemma; r(C_self, C_0) 0.94 and 0.75.
 5. **The base models barely read a persona from the user turn** (r with A_e 0.13-0.26, tiny scale), and only Llama's base reads the system
    prompt (0.41); Gemma's base doesn't (-0.12). What the finals do with these placements comes from post-training.
 
+**Within task source (exploratory, added after the results).** r of each placement's final coin with the default (A_0) and evil (A_e)
+Assistant within each source (bootstrap CIs in the 2026-11-05 analysis log; BailBench's, n = 30, are wide):
+
+| model | placement | vs | math | alpaca | wildchat | stress_test | bailbench | all |
+|---|---|---|---|---|---|---|---|---|
+| Llama | system prompt | A_0 | +0.50 | +0.61 | +0.46 | +0.05 | +0.50 | +0.38 |
+| Llama | system prompt | A_e | +0.67 | +0.45 | +0.79 | +0.64 | +0.82 | +0.71 |
+| Llama | user instruction | A_0 | +0.37 | +0.59 | +0.38 | -0.06 | +0.35 | +0.27 |
+| Llama | user instruction | A_e | +0.66 | +0.39 | +0.70 | +0.62 | +0.76 | +0.71 |
+| Llama | self-description | A_0 | +0.53 | +0.70 | +0.60 | +0.68 | +0.70 | +0.89 |
+| Llama | self-description | A_e | +0.64 | +0.14 | +0.40 | -0.19 | +0.37 | +0.01 |
+| Gemma | system prompt | A_0 | +0.25 | +0.48 | +0.30 | -0.38 | +0.06 | -0.44 |
+| Gemma | system prompt | A_e | +0.49 | +0.65 | +0.76 | +0.83 | +0.62 | +0.86 |
+| Gemma | user instruction | A_0 | +0.47 | +0.56 | +0.55 | -0.08 | +0.35 | +0.30 |
+| Gemma | user instruction | A_e | +0.40 | +0.75 | +0.66 | +0.66 | +0.38 | +0.57 |
+| Gemma | self-description | A_0 | +0.50 | +0.52 | +0.63 | +0.21 | +0.42 | +0.66 |
+| Gemma | self-description | A_e | +0.30 | +0.73 | +0.59 | +0.28 | +0.24 | +0.26 |
+
+Within each source A_0 and A_e are themselves positively correlated except on STRESS-TEST (Llama 0.16-0.34 and -0.31; Gemma 0.32-0.42
+and -0.45), so STRESS-TEST separates the two pulls most cleanly. There, Llama's coin follows the evil Assistant under the system prompt
+and the instruction (0.64, 0.62) and the default under the self-description (0.68). Gemma's follows the evil Assistant under the system
+prompt and the instruction (0.83, 0.66) but neither clearly under the self-description (0.21 and 0.28). Gemma's self-description coin
+keeps the evil Assistant's ranking within Alpaca (0.73 vs 0.52 with A_0). Most of its pull toward the persona sits within sources (b_per
+1.08 of 1.37 with source fixed effects), in the benign sources rather than STRESS-TEST, while its drop in harm avoidance (gap 5.74 to
+1.54) is the harm-related sources moving as a block.
+
 ## Other languages
 
 Every result above used English prompts. Does the coinflip still track the Assistant when the whole prompt, tasks included, is in
