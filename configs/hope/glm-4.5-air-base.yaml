@@ -4,6 +4,8 @@
 # user's choice, each also without its "Okay, ", and the Assistant's), so all of a model's comparisons share one GPU and pod
 # settings; the earlier runs of the same conditions become reproduction checks.
 # ~220 GB of weights: 2x H200 as the sweep, or another NVLink node with the room (ran on 3x H100 SXM, both stages in turn, 2026-11-05; ~240 GB of disk).
+# On 3x H100 the first try ran out of memory on GPU 1 at batch 32 before any condition finished, so: batch 16, no KV
+# cache, and max_memory to spread the 206 GiB of weights evenly.
 wandb_project: tournament
 group: hope
 tags: [glm-4.5-air]
@@ -13,7 +15,7 @@ seed: 0
 require_gpu: true
 system_prompt: none
 max_pairs: 15000
-batch_size: 32
+batch_size: 16
 top_k_tokens: 5
 progress_every: 2000
 batching_check: {n_prompts: 16, tolerance: 0.5}
@@ -21,4 +23,6 @@ models:
 - name: zai-org/GLM-4.5-Air-Base
   stage: base
   chat_template_from: zai-org/GLM-4.5-Air
+  max_memory: {0: 69GiB, 1: 69GiB, 2: 72GiB}
+  use_cache: false
   conditions: [coinflip, hope_before, hope_after_heads, hope_after_tails, coinflip_no_okay, user_choice, user_choice_no_okay, assistant]

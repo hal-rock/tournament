@@ -659,8 +659,12 @@ def test_hope_configs_pair_base_and_final():
             (m,), (r,) = cfg["models"], ref["models"]
             assert m["name"] == name and m["stage"] == ("base" if stage == "base" else "instruct")
             assert m["conditions"] == HOPE_CONDITIONS
-            assert {k: v for k, v in m.items() if k != "conditions"} == {k: v for k, v in r.items() if k != "conditions"}
+            # GLM on 3x H100 (README amendment): batch 16, no KV cache and an even split, where the reference ran on 2x H200.
+            fit = {"max_memory": {0: "69GiB", 1: "69GiB", 2: "72GiB"}, "use_cache": False} if family == "glm-4.5-air" else {}
+            assert {k: v for k, v in m.items() if k != "conditions"} == \
+                   {**{k: v for k, v in r.items() if k != "conditions"}, **fit}
             assert cfg["group"] == "hope" and cfg["tags"] == [family] and cfg["run_name"] == f"hope-{family}-{stage}"
             assert {k: v for k, v in cfg.items() if k not in ("models", "group", "tags", "run_name")} == \
-                   {k: v for k, v in ref.items() if k not in ("models", "group", "tags", "run_name")}
+                   {k: v for k, v in ref.items() if k not in ("models", "group", "tags", "run_name")} \
+                   | ({"batch_size": 16} if family == "glm-4.5-air" else {})
             assert cfg["max_pairs"] == 15000 and cfg["seed"] == 0 and cfg["system_prompt"] == "none"
