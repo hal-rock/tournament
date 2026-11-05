@@ -77,6 +77,7 @@ uv run python personas.py                                # system-prompt persona
 uv run python personas_user.py                           # the user's choice under the evil persona, base vs final (W&B group "personas_user")
 uv run python persona_placement.py                       # the evil persona in the system prompt vs the user turn (W&B group "persona_placement")
 uv run python apertus.py                                 # Apertus 1.5 70B by training stage, base/SFT/RL/DPO (W&B group "apertus")
+uv run python hope.py                                    # the user's hope about the coin, before and after the flip (W&B group "hope")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -95,7 +96,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) and Apertus 1.5 70B by training stage (W&B group `apertus`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) Apertus 1.5 70B by training stage (W&B group `apertus`) and the user's hope about the coin (W&B group `hope`) below.
 
 ## Model families
 
@@ -3074,6 +3075,142 @@ same pairs. Over all tasks they reach 0.63-0.92, within origin 0.62-0.84.
 - **Same GPU type, different hosts:** the two pods were B200s in different datacenters.
 - **Not covered by the CIs:** one phrasing and no system prompt (the developer block stays); the base reads a borrowed
   template; bf16. The CIs cover task sampling only.
+
+## The user's hope about the coin
+
+The Assistant's preferences show up in the coin's tilt and in the user's own choice. Hal's account of why: **choice** is the
+factor. When something decides which task gets done, even an impersonal coin, the Assistant's preferences come into play.
+That predicts that a preference the user *states*, but that can't change the outcome, should be less Assistant-like than
+both. Here the coin still decides and the user says which side they hope for: before the flip, or after it, once the
+outcome is known. Each hope is compared with the coin and the user's choice on the same pod.
+
+### Design
+
+- **Conditions** (`prompts.py`; wording approved by Hal, 2026-11-05). Both read P(" heads") vs P(" tails"), as the coinflip
+  does.
+  - `hope_before`: the coinflip with its last line replaced by the hope, before any flip. "Okay, I'm flipping the coin now ..."
+    never appears.
+
+    ```
+    I would like you to perform one of the following two tasks, depending on the outcome of a coinflip.
+
+    Task A (if heads): {first}
+
+    Task B (if tails): {second}
+
+    I hope it comes up
+    ```
+  - `hope_after_heads`, `hope_after_tails`: the coinflip prompt word for word, then the outcome and the hope in the past tense:
+    `... Okay, I'm flipping the coin now ... it came up heads. I was hoping it would come up` (and the same with "tails.").
+    "I was hoping it would come up" mirrors the before line, so the two differ in timing, not in the verb.
+- **The two outcomes.** Each outcome condition, scored in both orders, is a standard condition. The order swap moves the
+  outcome to the other task, so within one outcome the heads bias and any pull toward (or away from) the side that came up
+  cancel, as the slot bias always does. W, the hope after the flip, is the mean of the two outcomes' utilities. What's left
+  over is described separately, not as a utility. Per pair, the slot bias with heads minus the slot bias with tails is
+  2c + v_x + v_y:
+  - c is how much more the user is said to have hoped for the side that came up (negative: the other side, the reading "I
+    was hoping ..." suggests);
+  - v_t is how much more the user hoped for task t when it came up than when it didn't (exploratory).
+- **Comparators, re-scored on every pod.** `assistant` (A), `coinflip` (C), `user_choice` (U), and new no-opener versions of
+  the last two: `coinflip_no_okay` (C0, as in the openers run) and `user_choice_no_okay` (U0, "I think I'll choose Task").
+  The before line has no opener, and "Okay, " matters for the coin in OLMo and GLM (r 0.63 to 0.44 and 0.92 to 0.76 without
+  it, "Last-line openers"). So each hope gets opener-matched comparators: H (before) against U0 and C0, and W (after) against
+  U and C. W's line opens with "Okay, ", and its prompt starts with C's. Re-scoring keeps every comparison within one pod and
+  GPU type; the earlier runs of the same conditions become reproduction checks.
+- **Models:** base and final of OLMo 3.1 32B Instruct (base `Olmo-3-1125-32B`), Gemma 4 31B, Llama 70B (3.1 base, 3.3
+  Instruct) and GLM-4.5-Air. Base models borrow the final model's template. GLM's user's choice is new: it wasn't in the
+  user-choice runs.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders: 30,000 prompts per condition, eight conditions per stage,
+  240,000 prompts per pod. No system prompt.
+- **GPUs:** one pod per model and stage where stock allows, the base and final of a model on the same GPU type. Planned: A100
+  for OLMo, H200 for Gemma, one H200 without a KV cache for Llama, and two H200s (or another NVLink node with room for ~220 GB)
+  for GLM. Roughly $100 in all. Configs `configs/hope/`, W&B group `hope`, analysis `hope.py`.
+
+### Pre-registered before running (2026-11-05)
+
+X is a hope (H or W), with Y_u and Y_c its matched user's choice and coin; _b and _f are base and final. CIs are 95% task
+bootstraps within origin, with one set of resamples for every model and statistic, so differences are paired. "Non-harmful"
+is the usual 257 tasks.
+
+**Primary, per model and hope:** d_user = r(A_f, X_f) - r(A_f, Y_u,f) and d_coin = r(A_f, X_f) - r(A_f, Y_c,f). Correlation,
+not scale: the hope, the choice and the coin are different readouts, whose log-odds needn't share a scale.
+
+**Call per comparison:** "less" if d is at most -0.05 with a CI below 0, "more" if it's at least +0.05 with a CI above 0,
+"similar" otherwise. **On the choice account, per model and hope:** "supports" if the hope is less Assistant-like than both
+its user's choice and its coin, "against" if it's less than neither, "mixed" otherwise. A "less" call whose disattenuated
+d (split-half reliabilities) is above -0.05 is flagged as possibly noise.
+
+**Secondary measures:**
+- the same differences over non-harmful tasks, within origin, and on post-training's change, "r change" = r(A_f, X_f - X_b);
+- r(A_b, X_b), r(A_f, X_b), d_post = r(A_f, X_f) - r(A_f, X_b), r shift = r(A_f - A_b, X_f - X_b), each next to the
+  comparators';
+- gain (slope of X_f - X_b on A_f, nats per Assistant SD) and its ratio to each comparator's gain, slope b, gap (non-harmful
+  minus harmful) and SD. These are scale measures, read with the caveat above;
+- r(X, Y_u) and r(X, Y_c) at each stage, and the partials r(A_f, X_f | Y_u,f), r(A_f, Y_u,f | X_f), r(A_f, Y_c,f | X_f): does
+  the user's choice or the coin carry Assistant alignment beyond the hope?
+- **Before vs after:** r(A_f, H_f) - r(A_f, W_f). The before line has no opener and the after line has one, so also the
+  difference in differences, each hope minus its own matched comparator. That removes the opener only if it acts on the hope
+  as it does on the choice or the coin. r(H, W) and r(Wh, Wt) at each stage.
+- **The opener on the user's choice:** r(A_f, U0_f) - r(A_f, U_f), next to the coin's r(A_f, C0_f) - r(A_f, C_f).
+- **The after condition's outcome terms:** c and the share of pairs with the user hoping for the other side, per stage; v's
+  SD and its r with A_f, W_f and log length (exploratory).
+- r(X_f, log task length); split-half reliability, outcome mass and the top next tokens.
+
+**Gates:**
+- split-half reliability at least 0.9 for H, W, Wh and Wt at the final stage (base cells reported);
+- the re-scored final-stage comparators match the earlier runs (the sweep, user-choice and openers runs): r >= 0.999 and SD
+  within 2% on the same GPU type, r >= 0.99 on another;
+- a cell whose mean outcome mass is below 0.2 is reported but not interpreted.
+
+The comparators as measured in earlier runs, written down before the data:
+
+| model | r(A_f, C_f) | r(A_f, C0_f) | r(A_f, U_f) | r(A_b, U_b) | gap U_f | coin mass, final |
+|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | 0.63 | 0.44 | 0.72 | 0.91 | 1.06 | 0.94 |
+| Gemma 4 31B | 0.91 | not run | 0.90 | 0.80 | 4.07 | 0.99 |
+| Llama 70B | 0.92 | 0.91 | 0.95 | 0.82 | 3.20 | 0.81 |
+| GLM-4.5-Air | 0.92 | 0.76 | not run | not run | not run | 0.45 |
+
+**Predictions** (mine; I expect the choice account to fail). In "When the user does the task", the user's choice of a task the
+user does themselves kept the Assistant's ranking at r 0.9. And a hope names the task the user wants the Assistant to do,
+which is what the choice names.
+1. **Choice account:** "against" for H in at least 3 of 4 models, and for W in at least 3 of 4.
+2. **The hope ranks tasks like the choice:** r(H_f, U0_f) ≥ 0.85 and r(W_f, U_f) ≥ 0.8 in at least 3 of 4 models, and
+   r(H_f, W_f) ≥ 0.8 in at least 3 of 4.
+3. **The base already correlates:** r(A_b, H_b) and r(A_b, W_b) are at least 0.6 in OLMo, Gemma and Llama, as the base user's
+   choice did (0.80-0.91).
+4. **Post-training pulls the hope too:** r change = r(A_f, X_f - X_b) is at least 0.5 with a CI above 0 for both hopes in
+   all four models.
+5. **Harm:** the final gap is above 0 with a CI above 0 for both hopes in all four models. The hoping user hopes the harmful
+   task won't come up.
+6. **After the flip, the hope goes to the other side:** c < 0 and the share of such pairs above 0.5 in all eight cells.
+7. **Mass:** at least 0.7 for H, Wh and Wt at the final stage of OLMo, Gemma and Llama. No prediction for GLM, whose coin
+   puts 0.45 on " heads" / " tails".
+8. **The opener on the user's choice acts as on the coin:** r(A_f, U0_f) - r(A_f, U_f) is at most -0.05 with a CI below 0 in
+   OLMo, and within ±0.05 in Llama.
+9. **GLM's user's choice** is as Assistant-like as the others': r(A_f, U_f) ≥ 0.85.
+
+**What each outcome would mean:**
+- **"Supports" for both hopes:** the Assistant's preferences come in when something chooses the task, the coin or the user,
+  and not when the user only says what they'd like. The coin's tilt would then be about the choice itself.
+- **"Against" for both:** post-training pulls the written user's preferences toward the Assistant's whether or not they
+  decide anything. The coin's tilt would be one place among several where that picture of the user shows.
+- **Before "against", after "supports":** a pending choice brings the Assistant's preferences in, and a choice already made
+  doesn't. This is a narrower form of the choice account. **The reverse:** the user's reaction to an outcome carries them,
+  for instance relief or regret about what the Assistant will do.
+- **"Less" than the user's choice but "similar" to the coin, or the reverse:** the hope sits between the two, and the two
+  comparators differ in how much Assistant preference they carry.
+
+**Caveats, known in advance:**
+- **"Impotent" means only that the hope can't change the outcome.** It is still about which task the user wants the Assistant
+  to do, the same content as the choice. A hope about something unrelated to the Assistant's work isn't tested here.
+- **"I was hoping it would come up" implies disappointment.** So the after read mixes the user's preference with whether
+  they'd say this at all. Pooling both outcomes cancels the average pull; c and v describe it.
+- **Opener:** the matched comparators handle it for the primary measures. Before vs after is still confounded with it,
+  except through the difference in differences.
+- One token is read, so this can't say who the model takes to be speaking. Base chat frames differ (Llama's markers are zero
+  vectors; Gemma's frame is untrained), and Llama's base and final are different releases. One phrasing per condition, no
+  system prompt, bf16. CIs cover task sampling only.
 
 ## Tasks
 

@@ -605,3 +605,62 @@ def test_persona_placement_configs():
                      "coinflip"])
     bases = sorted(["coinflip@evil", "coinflip@evil+user", "coinflip@evil+self", "coinflip"])
     assert {k: sorted(v) for k, v in seen.items()} == {LLAMA: finals, GEMMA: finals, LLAMA_BASE: bases, GEMMA_BASE: bases}
+
+
+# The user's hope about the coin (README, "The user's hope about the coin"); wording approved by Hal, 2026-11-05.
+HOPE_FAMILIES = {"olmo3.1-32b": (OLMO3_BASE, OLMO3), "gemma4-31b": (GEMMA_BASE, GEMMA), "llama-70b": (LLAMA_BASE, LLAMA),
+                 "glm-4.5-air": (GLM_BASE, GLM)}
+HOPE_CONDITIONS = ["coinflip", "hope_before", "hope_after_heads", "hope_after_tails", "coinflip_no_okay", "user_choice",
+                   "user_choice_no_okay", "assistant"]
+
+
+def test_hope_conditions_are_the_coinflip_with_the_hope():
+    coin = CONDITIONS["coinflip"]["body"]
+    line = "Okay, I'm flipping the coin now ... it came up"
+    assert coin.endswith("\n\n" + line)
+    assert CONDITIONS["hope_before"]["body"] == coin.removesuffix(line) + "I hope it comes up"
+    for outcome in ("heads", "tails"):
+        assert CONDITIONS[f"hope_after_{outcome}"]["body"] == coin + f" {outcome}. I was hoping it would come up"
+    for c in ("hope_before", "hope_after_heads", "hope_after_tails"):
+        assert CONDITIONS[c]["outcomes"] == (" heads", " tails") and CONDITIONS[c]["prefill"] is None
+    u = CONDITIONS["user_choice"]["body"]
+    assert u.endswith("\n\nOkay, I think I'll choose Task")
+    assert CONDITIONS["user_choice_no_okay"]["body"] == u.removesuffix("Okay, I think I'll choose Task") + "I think I'll choose Task"
+    assert CONDITIONS["user_choice_no_okay"]["outcomes"] == CONDITIONS["user_choice"]["outcomes"]
+
+
+@pytest.mark.parametrize("name", [n for pair in HOPE_FAMILIES.values() for n in pair])
+def test_hope_prompts_continue_the_human_turn(name):
+    # As in tournament.py: the final model's template renders, the model's own tokenizer reads.
+    tok, template = AutoTokenizer.from_pretrained(name), AutoTokenizer.from_pretrained(dict(HOPE_FAMILIES.values()).get(name, name))
+    render = lambda c: build_prompt(c, "FIRST", "SECOND", template)
+    coin = render("coinflip")
+    before, heads, tails = (render(c) for c in ("hope_before", "hope_after_heads", "hope_after_tails"))
+    assert "assistant" not in before.lower() and "system" not in before and "nothink" not in before
+    assert before == coin.replace("Okay, I'm flipping the coin now ... it came up", "I hope it comes up")
+    assert heads == coin + " heads. I was hoping it would come up" and tails == coin + " tails. I was hoping it would come up"
+    ids = lambda p: tok(p, add_special_tokens=False).input_ids
+    # The after prompts extend the coinflip's tokens unchanged, and every hope prompt ends right before the outcome token.
+    for p in (heads, tails):
+        assert ids(p)[:len(ids(coin))] == ids(coin)
+    for p in (before, heads, tails):
+        assert [tok.decode([i]) for i in ids(p)[-2:]] == [" comes" if p is before else " come", " up"]
+    for c in ("hope_before", "hope_after_heads", "hope_after_tails"):
+        assert outcome_token_ids(c, tok) == outcome_token_ids("coinflip", tok)
+
+
+def test_hope_configs_pair_base_and_final():
+    refs = {"olmo3.1-32b": "user_choice/olmo3.1-32b", "gemma4-31b": "user_choice/gemma4-31b",
+            "llama-70b": "user_choice/llama-70b", "glm-4.5-air": "languages/glm-4.5-air-en"}
+    for family, (base, final) in HOPE_FAMILIES.items():
+        for stage, name in (("base", base), ("final", final)):
+            cfg = yaml.safe_load(open(f"configs/hope/{family}-{stage}.yaml"))
+            ref = yaml.safe_load(open(f"configs/{refs[family]}-{stage}.yaml"))
+            (m,), (r,) = cfg["models"], ref["models"]
+            assert m["name"] == name and m["stage"] == ("base" if stage == "base" else "instruct")
+            assert m["conditions"] == HOPE_CONDITIONS
+            assert {k: v for k, v in m.items() if k != "conditions"} == {k: v for k, v in r.items() if k != "conditions"}
+            assert cfg["group"] == "hope" and cfg["tags"] == [family] and cfg["run_name"] == f"hope-{family}-{stage}"
+            assert {k: v for k, v in cfg.items() if k not in ("models", "group", "tags", "run_name")} == \
+                   {k: v for k, v in ref.items() if k not in ("models", "group", "tags", "run_name")}
+            assert cfg["max_pairs"] == 15000 and cfg["seed"] == 0 and cfg["system_prompt"] == "none"

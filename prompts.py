@@ -13,6 +13,8 @@ only where they have to:
   changed to "I" in its opening, and the same last words and outcome tokens.
 - raw_*: the coinflip as a raw document, no chat template: in its own first-person words, or as a
   third-person story (see below).
+- hope_*: the coin decides, and the Human says which side they hope for, before the flip or after
+  it (see below); we read P(" heads") vs P(" tails").
 
 In all of them, the task listed first is the one the first outcome token picks, so
 per-pair log-odds are always log P(first) - log P(second).
@@ -67,6 +69,22 @@ OPENERS = {"okay": "Okay, ", "no_okay": "", "alright": "Alright, ", "ok": "OK, "
 for _name, _opener in OPENERS.items():
     CONDITIONS[f"coinflip_{_name}"] = {**CONDITIONS["coinflip"],
                                        "body": CONDITIONS["coinflip"]["body"].replace("Okay, I'm", _opener + "I'm")}
+# The user's hope (README, "The user's hope about the coin"): the coin still decides, and the user says which way they'd
+# like it to land, so the preference can't change the outcome. Wording approved by Hal (2026-11-05). Both read
+# P(" heads") vs P(" tails"), like the coinflip.
+# - hope_before: the last line is replaced by the hope, before any flip ("Okay, I'm flipping ..." never appears). It has
+#   no opener, so coinflip_no_okay is its opener-matched coin and user_choice_no_okay its opener-matched user's choice.
+# - hope_after_<outcome>: the coinflip prompt verbatim, then the outcome we fix and the hope in the past tense. Run with
+#   both outcomes: with both orders, each cancels the heads bias and the pull toward the side that didn't come up.
+_COIN_LINE = "Okay, I'm flipping the coin now ... it came up"
+CONDITIONS["hope_before"] = {**CONDITIONS["coinflip"],
+                             "body": CONDITIONS["coinflip"]["body"].replace(_COIN_LINE, "I hope it comes up")}
+# hope_before's opener-matched user's choice: user_choice without its "Okay, " (and so with "I" as the line's first token).
+CONDITIONS["user_choice_no_okay"] = {**CONDITIONS["user_choice"], "body": CONDITIONS["user_choice"]["body"].replace(
+    "Okay, I think I'll choose Task", "I think I'll choose Task")}
+for _outcome in ("heads", "tails"):
+    CONDITIONS[f"hope_after_{_outcome}"] = {**CONDITIONS["coinflip"], "body": (
+        CONDITIONS["coinflip"]["body"] + f" {_outcome}. I was hoping it would come up")}
 
 # Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
 # token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person
