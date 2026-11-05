@@ -3215,8 +3215,8 @@ which is what the choice names.
 #### Amendment before any data (2026-11-05): GPUs
 
 No A100, no second H200 and no 2x H200 node was in stock. OLMo runs on 1x RTX PRO 6000 and Gemma on 1x H100 SXM, a pod
-per stage. Llama runs on one H200, final and then base on the same pod. GLM waits for a node with room for ~220 GB (3x H100
-SXM or 2x H200). Each model's two stages share a GPU type, and every comparison is within a pod, so nothing in the measures
+per stage. Llama runs on one H200, and GLM on 3x H100 SXM (240 GB, split by device_map), each with final and then base on
+the same pod. Each model's two stages share a GPU type, and every comparison is within a pod, so nothing in the measures
 changes. The reproduction check uses its looser bar (r >= 0.99) where the GPU type differs from the earlier run's: OLMo and
 Gemma.
 

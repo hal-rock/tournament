@@ -3,7 +3,7 @@
 # (hope_after_*). One config per model and stage. Every pod also re-scores the reference conditions (the coinflip and the
 # user's choice, each also without its "Okay, ", and the Assistant's), so all of a model's comparisons share one GPU and pod
 # settings; the earlier runs of the same conditions become reproduction checks.
-# ~220 GB of weights: 2x H200 as the sweep, or another NVLink node with the room (~450 GB of disk).
+# ~220 GB of weights: 2x H200 as the sweep, or another NVLink node with the room (ran on 3x H100 SXM, both stages in turn, 2026-11-05; ~240 GB of disk).
 wandb_project: tournament
 group: hope
 tags: [glm-4.5-air]
