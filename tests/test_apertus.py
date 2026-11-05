@@ -148,7 +148,7 @@ def test_analysis_runs_end_to_end_on_synthetic_stages(tmp_path):
                for k, v in (("reliability", 0.97), ("outcome_mass_mean", 0.7), ("slot_bias_mean", 0.0),
                             ("additive_r2", 0.9))}
     table = apertus.stage_table(cells, summary)
-    origin_rows = apertus.origin_table(cells, U, origins)
+    origin_rows = apertus.origin_table(cells, U, origins, benign, loglen)
     assert len(origin_rows) == 4 * len(apertus.GROUPS)
     assert all(r["r_lo"] <= r["r"] + 1e-9 or np.isnan(r["r"]) for r in origin_rows)
     assert [r["stage"] for r in table] == list(apertus.STAGES)

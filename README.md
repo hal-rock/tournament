@@ -76,6 +76,7 @@ uv run python raw_text.py                                # the coinflip as raw t
 uv run python personas.py                                # system-prompt personas: Assistant choice and coinflip (W&B group "personas")
 uv run python personas_user.py                           # the user's choice under the evil persona, base vs final (W&B group "personas_user")
 uv run python persona_placement.py                       # the evil persona in the system prompt vs the user turn (W&B group "persona_placement")
+uv run python apertus.py                                 # Apertus 1.5 70B by training stage, base/SFT/RL/DPO (W&B group "apertus")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -94,7 +95,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`) and the user's choice under a persona (W&B group `personas_user`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) and Apertus 1.5 70B by training stage (W&B group `apertus`) below.
 
 ## Model families
 
@@ -2867,7 +2868,9 @@ benign vs harmful task pairs (its RESULTS.md, "Apertus 1.5 70B across training s
 tiny at every stage, +0.01, +0.07, +0.16 and +0.33 log-odds, where OLMo 3, OLMo 2 and Tulu 3 end at 2.3-2.5. Yet its
 Assistant, asked directly, picks the benign task by 5-18 nats at every stage. Here the standard tournament runs on the same
 four checkpoints: how well does each stage's coinflip follow its Assistant across the 300 tasks, overall and within each
-task origin?
+task origin? **Partly, and less than any other final model on these pairs: r = 0.22, 0.27, 0.39 and 0.46 from base to the
+released DPO model (other finals 0.63-0.92), 0.32 within origin, near 0 within MATH and Alpaca. Its coinflip grows wide,
+but mostly along task length, which its Assistant ignores. See Results.**
 
 ### Design
 
@@ -2924,6 +2927,119 @@ Not a confirmatory test; written down so the results can be read against them.
 
 If a coinflip cell's split-half reliability falls below 0.8 (possible with a coinflip this flat), its r is attenuated.
 The disattenuated r is then reported next to it.
+
+### Results (2026-11-05)
+
+Runs, group `apertus`: base `u5zmf3kw`, SFT `bizp4j91`, RL `e9a85504`, DPO `qpgfv0ar`.
+- **Hardware and cost:** two 1x B200 pods, DPO then base in US-NE-1 and SFT then RL in US-NC-2. About $28 of GPU, including
+  each pod's 30-minute idle window before it stopped itself.
+- **Every stage loaded cleanly:** only image and audio tokenizer tensors were skipped, the whole model sat on the GPU, and
+  each stage answered " Berlin" to the sanity prompt.
+- **Batching checks pass:** median |log-odds difference| at most 0.125 (DPO), max 0.5, against a tolerance of 0.5 on the
+  median.
+- **Every cell is reliable:** split-half reliability is 0.999 for the Assistant and 0.992-0.997 for the coinflip, so
+  disattenuation changes no r by more than 0.01.
+- **Outputs:** `apertus.py` rebuilds everything from the W&B runs: its printed tables, CSVs in `outputs/apertus/` (not in
+  git) and the figures below.
+
+![Assistant vs coinflip utilities by stage](figures/apertus_scatter.png)
+
+![r(Assistant, coinflip) by stage, over all tasks and within each origin](figures/apertus_r_by_stage.png)
+
+| stage | r [95% CI] | r non-harmful | r within origin | r shift | b | gap | coinflip SD | coin mass | `../coinflip` |
+|---|---|---|---|---|---|---|---|---|---|
+| base | 0.22 [0.14, 0.31] | 0.23 | -0.09 | | 0.02 | 0.05 | 0.07 | 0.59 | 0.01 |
+| SFT | 0.27 [0.18, 0.35] | 0.24 | 0.13 | 0.18 | 0.02 | 0.04 | 0.08 | 0.61 | 0.07 |
+| RL | 0.39 [0.31, 0.45] | 0.33 | 0.21 | 0.30 | 0.06 | 0.11 | 0.16 | 0.52 | 0.16 |
+| DPO (final) | **0.46** [0.39, 0.52] | 0.39 | 0.32 | 0.43 | 0.14 | 0.25 | 0.31 | 0.58 | 0.33 |
+
+(b is the slope of C on A in nats per Assistant SD; gap is the coinflip's mean over non-harmful minus harmful tasks, in
+nats; coin mass is the mean P(" heads") + P(" tails"); `../coinflip` is that repo's effect on its 25 pairs.)
+
+r(Assistant, coinflip) within each origin [95% CI]:
+
+| origin (tasks) | base | SFT | RL | DPO (final) | other final models |
+|---|---|---|---|---|---|
+| MATH (75) | -0.05 [-0.26, 0.16] | -0.06 [-0.31, 0.19] | -0.15 [-0.38, 0.08] | 0.09 [-0.12, 0.29] | 0.38-0.70 |
+| Alpaca (75) | -0.04 [-0.28, 0.19] | 0.01 [-0.25, 0.26] | 0.00 [-0.22, 0.25] | 0.09 [-0.14, 0.30] | 0.46-0.83 |
+| WildChat (75) | 0.19 [-0.06, 0.41] | 0.54 [0.30, 0.72] | 0.62 [0.41, 0.76] | 0.57 [0.37, 0.72] | 0.48-0.81 |
+| STRESS-TEST (45) | -0.11 [-0.35, 0.15] | 0.10 [-0.18, 0.41] | 0.35 [0.08, 0.58] | 0.44 [0.23, 0.62] | 0.72-0.92 |
+| BailBench (30) | -0.44 [-0.69, -0.08] | 0.05 [-0.31, 0.52] | 0.05 [-0.31, 0.54] | 0.37 [0.12, 0.68] | 0.76-0.91 |
+
+"Other final models" spans OLMo 3.1 32B, OLMo 2 32B, Llama 3.3 70B, Gemma 4 31B, GLM-4.5-Air and DeepSeek V4 Flash on the
+same pairs. Over all tasks they reach 0.63-0.92, within origin 0.62-0.84.
+
+![Final models' r by task group](figures/apertus_context.png)
+
+**Expectations, scored:**
+1. **Coinflip stays small: failed.** Its SD reaches 0.16 at RL and 0.31 at DPO, close to OLMo 3.1 32B's 0.38. The gap is
+   0.25 at DPO, against an expected 0.15 at most. Across the 300 tasks the final coinflip is not a seventh of OLMo 3's
+   width, as the 25 pairs suggested. Most of the width isn't the Assistant, though (finding 3).
+2. **r at the final stage in 0.2-0.6: held.** 0.46, against a point guess of 0.4.
+3. **Base: held.** r 0.22, gap 0.047 (limit 0.05).
+4. **Stage order: failed, narrowly.** r rises at every step, and DPO is the largest step in the gap (+0.14 [0.10, 0.18]).
+   But the gap moves -0.006 [-0.025, +0.016] from base to SFT, where it was expected not to fall.
+5. **The Assistant is well formed: held.** Reliability is 0.999 at every stage, and the Assistant's benign-minus-harmful
+   gap is +2.6, +3.1, +6.5 and +11.5 nats.
+6. **Coin mass 0.5-0.8: held** (0.52-0.61).
+
+**Reading the final stage:** r = 0.46 is the "in between" case, partial tracking. Within origins it holds in WildChat
+(0.57), STRESS-TEST (0.44) and BailBench (0.37), but not in MATH or Alpaca (0.09 each).
+
+### Findings
+
+1. **The released model's coinflip follows its Assistant less than any other final model's on these pairs.**
+   - Over all tasks r is 0.46, against 0.63-0.92 for the other finals; within origin it is 0.32, against 0.62-0.84.
+   - Within each origin it is the lowest of the seven except in WildChat, where it is mid-range (0.57; others 0.48-0.81).
+   - The coinflip moves 0.026 nats per nat of Assistant utility, below OLMo 3.1 32B's 0.041 and the other finals'
+     0.08-0.31.
+2. **It carries almost none of the Assistant's harm avoidance (exploratory).** BailBench minus the general-chat origins
+   (Alpaca, WildChat):
+   - Apertus: -0.18 nats in the coinflip against -11.6 in the Assistant, a share of 1.5%.
+   - OLMo 3.1 32B: 4.3%; the other finals: 8-32%.
+
+   This is `../coinflip`'s tiny effect seen across the range. Within BailBench the coin does follow the Assistant a little
+   at DPO (r 0.37), though not before.
+3. **Its coinflip is wide, but mostly along task length, which its Assistant ignores (exploratory).**
+   - The coin favors the longer task from SFT on: r with log task length is -0.03 at base, then 0.55, 0.63 and 0.57.
+     Within origin it is 0.48-0.61.
+   - The Assistant's r with log length is -0.06 to 0.01 at every stage.
+   - Within MATH, the DPO coin ranks tasks by length (r 0.60) and not by the Assistant (0.09). Within WildChat and
+     STRESS-TEST it follows both (length 0.61 and 0.55).
+   - MATH tasks are longer than Alpaca's (164 vs 64 characters on average), which accounts for part of MATH's high
+     coinflip utility (+0.33 at DPO, Alpaca -0.22), but not all of it. Fitting the coinflip on Assistant utility, log
+     length and origin, MATH's offset is still +0.21 [0.15, 0.27] and Alpaca's -0.12 (`report.py`'s offset model).
+   - Partialling out log length raises r over all tasks from 0.46 to 0.58 at DPO, but leaves within-origin r at 0.30.
+   - Among the other finals, the closest are OLMo 3.1 32B (0.39) and DeepSeek V4 Flash (0.36, whose base already has
+     0.54). The rest are -0.07 to 0.22.
+
+   ![Coinflip and Assistant utility against task length](figures/apertus_length.png)
+4. **SFT sets the coinflip's ranking, and RL and DPO scale it.**
+   - Coinflip utilities correlate 0.91-0.94 between SFT, RL and DPO, and 0.51-0.59 with the base's. Their SD doubles at
+     RL and again at DPO.
+   - What SFT sets tracks length (r 0.55) more than the Assistant (0.27), so r rises only in small steps. Its largest
+     step is SFT to RL (+0.12 [0.08, 0.16]), then DPO (+0.07 [0.04, 0.11]).
+   - Within-origin r moves most at SFT (+0.22 [0.13, 0.32], from -0.09 at base).
+   - DPO is the largest step in the slope b (+0.08) and the gap (+0.14).
+
+   OLMo 2 32B also has "SFT sets, DPO scales", but there SFT already sets the Assistant's ranking (r 0.89).
+5. **The base's r of 0.22 lies between origins:** r over the five origin means is 0.55, and within origin it is -0.09,
+   as in OLMo 2 32B's base (origin means 0.88, within 0.27).
+6. **The other next tokens are `../coinflip`'s:**
+   - " as" ("came up as"), "..." and " **";
+   - the first pieces of capitalized outcomes (" TA", " He", " T", " HE", about 0.13 together at RL).
+
+   The heads bias is -0.80 log-odds at DPO, where `../coinflip` had -2.03.
+
+### Caveats
+
+- **Coin mass is 0.52-0.61,** so a single next-token read misses part of the outcome. Capitalized outcomes are several
+  tokens each in Apertus and can't be folded in.
+- **Findings 2 and 3 are exploratory,** looked at after the data. The length preference is described, not explained.
+  Pairs are scored in both orders, so it's not a position effect.
+- **Same GPU type, different hosts:** the two pods were B200s in different datacenters.
+- **Not covered by the CIs:** one phrasing and no system prompt (the developer block stays); the base reads a borrowed
+  template; bf16. The CIs cover task sampling only.
 
 ## Tasks
 

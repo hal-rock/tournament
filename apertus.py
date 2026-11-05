@@ -19,7 +19,8 @@ and final stages of Llama 3.3 70B, Gemma 4 31B, GLM-4.5-Air and DeepSeek V4 Flas
   outputs/apertus/steps.csv       stage-to-stage changes, paired
   outputs/apertus/by_origin.csv   r(A, C) and means within each origin, per stage
   outputs/apertus/context.csv     r overall, within origin and by origin for the comparison ladders and models
-  figures/apertus_{scatter,r_by_stage,context}.png
+  outputs/apertus/length_harm.csv exploratory: task length and the harm contrast, Apertus and the comparison models
+  figures/apertus_{scatter,r_by_stage,context,length}.png
 
 Usage: uv run python apertus.py [--group apertus]
 """
@@ -37,7 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from analyze import N_BOOTSTRAP, ORIGIN_STYLE, analyze, fetch_wandb, pearson, read_jsonl
+from analyze import N_BOOTSTRAP, ORIGIN_STYLE, analyze, fetch_wandb, partial_r, pearson, read_jsonl
 from matskit import plotstyle
 from olmo2 import K, STATS, _nan_ci, collect_runs, stage_stats, step
 from openers import within_groups, write_csv
@@ -125,15 +126,18 @@ def stage_table(cells, summary):
     return table
 
 
-def origin_table(cells, U, origins):
+def origin_table(cells, U, origins, benign, loglen):
     rows = []
     for s in STAGES:
         lo, hi = _nan_ci(cells[s]["groups_boot"])
         for j, g in enumerate(GROUPS):
-            m = origins == g if g in ORIGIN_STYLE else np.ones(len(origins), bool)
+            m = origins == g if g in ORIGIN_STYLE else benign if g == "non-harmful" else np.ones(len(origins), bool)
             rows.append(dict(stage=s, group=g, n=int(m.sum()), r=cells[s]["groups"][j], r_lo=lo[j], r_hi=hi[j],
                              mean_a=float(U[f"{s}/assistant"][m].mean()) if g in ORIGIN_STYLE else np.nan,
-                             mean_c=float(U[f"{s}/coinflip"][m].mean()) if g in ORIGIN_STYLE else np.nan))
+                             mean_c=float(U[f"{s}/coinflip"][m].mean()) if g in ORIGIN_STYLE else np.nan,
+                             # exploratory: within the group, each measure's r with log task length
+                             r_c_length=pearson(U[f"{s}/coinflip"][m], loglen[m]),
+                             r_a_length=pearson(U[f"{s}/assistant"][m], loglen[m])))
     return rows
 
 
@@ -157,6 +161,33 @@ def context(ids):
         for label, col in stages.items():
             rs = group_rs(U[f"{col}/assistant"], U[f"{col}/coinflip"], origins, benign)
             rows += [dict(model=model, stage=label, group=g, r=float(rs[j])) for j, g in enumerate(GROUPS)]
+    return rows
+
+
+def length_and_harm(U, origins, loglen, ids):
+    """Exploratory, per model and stage: what the coinflip tracks besides the Assistant. r(C, log length) and r(A, log
+    length), over all tasks and within origin; r(A, C) with log length partialled out, over all tasks and within origin;
+    the slope of C on A in nats per nat; and the harm contrast, BailBench minus the general-chat origins (Alpaca and
+    WildChat), of C and of A, and its ratio (the share of the Assistant's harm contrast the coin carries)."""
+    models = {"Apertus 1.5 70B": (U, origins, loglen, {STAGE_LABELS[s]: s for s in STAGES})}
+    for model, (path, stages) in CONTEXT.items():
+        with open(path, newline="") as fh:
+            by_id = {r["id"]: r for r in csv.DictReader(fh)}
+        Um, om, _, lm = task_arrays([by_id[i] for i in ids])
+        models[model] = (Um, om, lm, {k: v for k, v in stages.items() if k in ("base", "SFT", "final")})
+    rows = []
+    for model, (Um, om, lm, stages) in models.items():
+        chat = np.isin(om, ["ALPACA", "WILDCHAT"])
+        for label, s in stages.items():
+            a, c = Um[f"{s}/assistant"], Um[f"{s}/coinflip"]
+            aw, cw, lw = within_groups(a, om), within_groups(c, om), within_groups(lm, om)
+            harm_c = c[om == "BAILBENCH"].mean() - c[chat].mean()
+            harm_a = a[om == "BAILBENCH"].mean() - a[chat].mean()
+            rows.append(dict(model=model, stage=label, r=pearson(a, c), r_given_length=partial_r(a, c, lm),
+                             r_within=pearson(aw, cw), r_within_given_length=partial_r(aw, cw, lw),
+                             r_c_length=pearson(c, lm), r_a_length=pearson(a, lm), r_c_length_within=pearson(cw, lw),
+                             r_a_length_within=pearson(aw, lw), slope=float(np.polyfit(a, c, 1)[0]),
+                             harm_c=float(harm_c), harm_a=float(harm_a), harm_ratio=float(harm_c / harm_a)))
     return rows
 
 
@@ -241,7 +272,7 @@ def plot_r_by_stage(cells, path):
         style(ax)
     for ax in axes[:, 0]:
         ax.set_ylabel("r (Assistant, coinflip)", color=INK_2)
-    axes[0, 0].set_ylim(-0.6, 1.0)
+    axes[0, 0].set_ylim(-0.75, 1.0)
     fig.suptitle("Apertus 1.5 70B: correlation of coinflip with Assistant utilities by stage, 95% task-bootstrap CIs",
                  fontsize=11, color=INK, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
@@ -267,11 +298,41 @@ def plot_context(cells, ctx, path):
     ax.set_yticks(y, [GROUP_LABELS[g] for g in GROUPS])
     ax.axvline(0, color=RULE, lw=0.8, zorder=1)
     ax.set_xlabel("r (Assistant, coinflip) at the final stage", color=INK_2)
-    ax.set_xlim(-0.6, 1.0)
+    ax.set_xlim(-0.25, 1.0)
     ax.legend(frameon=False, fontsize=8, loc="lower left", bbox_to_anchor=(1.0, 0.0))
     style(ax)
     ax.set_title("Final models on the same 300 tasks and 15,000 pairs", loc="left", fontsize=11, color=INK)
     fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def plot_length(U, origins, loglen, path):
+    """Coinflip utility against task length at base and DPO, and the DPO Assistant's, one panel each."""
+    panels = (("base", "coinflip"), ("dpo", "coinflip"), ("dpo", "assistant"))
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3.7), squeeze=False)
+    for ax, (s, cond) in zip(axes[0], panels):
+        y = U[f"{s}/{cond}"]
+        for origin, (color, marker) in ORIGIN_STYLE.items():  # as report.origin_scatter, without its x = 0 rule
+            m = origins == origin
+            ax.scatter(np.exp(loglen[m]), y[m], s=22, c=color, marker=marker, label=origin.lower(), edgecolors="white",
+                       linewidths=0.6, zorder=3)
+        ax.axhline(0, color=RULE, lw=0.8, zorder=1)
+        ax.set_xscale("log")
+        ax.xaxis.set_major_locator(matplotlib.ticker.FixedLocator([20, 50, 100, 200, 500]))
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+        ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        style(ax)
+        ax.set_title(f"{STAGE_LABELS[s]} {'coinflip' if cond == 'coinflip' else 'Assistant'}: r with log length "
+                     f"{pearson(y, loglen):+.2f}", fontsize=10, color=INK, loc="left")
+        ax.set_xlabel("Task length (characters, log scale)", color=INK_2)
+        ax.set_ylabel(f"{'Coinflip' if cond == 'coinflip' else 'Assistant'} utility (nats)", color=INK_2)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, [ORIGIN_LABELS[o.upper()] for o in labels], frameon=False, ncol=len(ORIGIN_STYLE),
+               loc="lower center", fontsize=9)
+    fig.suptitle("Apertus 1.5 70B: from SFT on, the coin favors longer tasks; the Assistant doesn't (each panel has "
+                 "its own y-axis)", fontsize=11, color=INK, x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
@@ -297,6 +358,11 @@ def print_tables(table, steps, origin_rows, ctx, exp):
         rs = [r for r in origin_rows if r["group"] == g]
         print(f"  {GROUP_LABELS[g]:24} n={rs[0]['n']:3d}  "
               + "  ".join(f"{r['r']:+.2f} [{r['r_lo']:+.2f}, {r['r_hi']:+.2f}]" for r in rs))
+    print("\nExploratory, r with log task length within each origin, coinflip | Assistant, by stage:")
+    for g in ORIGIN_STYLE:
+        rs = [r for r in origin_rows if r["group"] == g]
+        print(f"  {ORIGIN_LABELS[g]:12} " + " ".join(f"{r['r_c_length']:+.2f}" for r in rs) + "  |  "
+              + " ".join(f"{r['r_a_length']:+.2f}" for r in rs))
     print("\nMean utility by origin and stage, Assistant | coinflip:")
     for g in ORIGIN_STYLE:
         rs = [r for r in origin_rows if r["group"] == g]
@@ -329,7 +395,7 @@ def main():
     resamples = stratified_resamples(origins, np.random.default_rng(0), N_BOOTSTRAP)
     cells = stage_cells(U, benign, origins, loglen, resamples)
     table = stage_table(cells, summary)
-    origin_rows = origin_table(cells, U, origins)
+    origin_rows = origin_table(cells, U, origins, benign, loglen)
     steps = step_table(cells)
     ctx = context(ids)
     exp = expectations(table, origin_rows)
@@ -339,6 +405,16 @@ def main():
     for k, s in enumerate(STAGES):
         print(f"  {s:5} " + " ".join(f"{pearson(U[f'{s}/coinflip'], U[f'{t}/coinflip']):+.2f} "
                                      f"({pearson(U[f'{s}/assistant'], U[f'{t}/assistant']):+.2f})" for t in STAGES))
+    lh = length_and_harm(U, origins, loglen, ids)
+    print("\nExploratory, length and the harm contrast (C, A: coinflip, Assistant; w: within origin; harm: BailBench "
+          "minus Alpaca/WildChat):")
+    print(f"  {'model':18} {'stage':11} {'r':>5} {'r|len':>6} {'rw':>5} {'rw|len':>6} {'C~len':>6} {'A~len':>6} "
+          f"{'Cw~len':>6} {'Aw~len':>6} {'slope':>6} {'harm C':>7} {'harm A':>7} {'ratio':>6}")
+    for r in lh:
+        print(f"  {r['model']:18} {r['stage']:11} {r['r']:5.2f} {r['r_given_length']:6.2f} {r['r_within']:5.2f} "
+              f"{r['r_within_given_length']:6.2f} {r['r_c_length']:6.2f} {r['r_a_length']:6.2f} "
+              f"{r['r_c_length_within']:6.2f} {r['r_a_length_within']:6.2f} {r['slope']:6.3f} {r['harm_c']:7.2f} "
+              f"{r['harm_a']:7.2f} {r['harm_ratio']:6.3f}")
     print("\nExploratory, the coinflip's other likely next tokens (mean probability, from each prompt's top 5):")
     for s, toks in other_tokens(run_ids).items():
         print(f"  {s:5} " + ", ".join(f"{t!r} {v:.3f}" for t, v in toks))
@@ -347,6 +423,7 @@ def main():
     write_csv(out / "steps.csv", steps)
     write_csv(out / "by_origin.csv", origin_rows)
     write_csv(out / "context.csv", ctx)
+    write_csv(out / "length_harm.csv", lh)
     report(rows, summary, out / "report")
     plotstyle.setup()
     sd = [U[f"{s}/coinflip"].std() for s in STAGES]
@@ -354,6 +431,7 @@ def main():
     plot_scatter(U, origins, cells, "figures/apertus_scatter.png", sharey=max(sd) / min(sd) < 4)
     plot_r_by_stage(cells, "figures/apertus_r_by_stage.png")
     plot_context(cells, ctx, "figures/apertus_context.png")
+    plot_length(U, origins, loglen, "figures/apertus_length.png")
     print(f"\nWrote {out}/ and figures/apertus_*.png")
 
 
