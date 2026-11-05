@@ -2553,6 +2553,70 @@ least 0.9. A cell with median outcome mass below 0.2 is reported but not interpr
   gave the instruction or described themselves.
 - Llama's base and final are different releases (3.1, 3.3). One persona, one phrasing per placement, bf16; CIs cover task sampling only.
 
+### Results (2026-11-05)
+
+Runs, group `persona_placement`: Gemma final a `3k3rfilv`, final b `1k8fj865`, base on its own pod (three 1x H100, $15.81); Llama
+final a `chyhcvk4` (2x H100, $12.15, plus $1.04 for a pod that never booted), final b `rtg1enyk` and base on one 2x H100 in turn
+($29.50). $58.50 in all. Full output in `outputs/persona_placement/report.txt`.
+
+**The gate passes.** Every pod's re-scored plain coinflip matches the sweep at r = 1.0000, SD within 0.1% (final and base, Gemma on
+1x H100, Llama split over 2x H100). Split-half reliability is 0.974-0.998, median outcome mass 0.71-1.00.
+
+![pulls](figures/persona_placement_pulls.png)
+
+ρ is the placement's pull toward the evil persona (b_per, nats per SD of the system-prompt evil Assistant) over the system prompt's.
+
+| model | placement | b_def | b_per | ρ | **call** | coin gap (no persona) | Assistant under this placement |
+|---|---|---|---|---|---|---|---|
+| Llama | system prompt | 0.30 | 0.49 [0.44, 0.53] | 1 | | -0.02 (2.13) | r(A, A_0) -0.12, gap -7.6 |
+| Llama | user instruction | 0.17 | 0.36 [0.32, 0.40] | 0.74 [0.70, 0.78] | **weaker** | -0.16 | r(A, A_e) 0.98, gap -7.0 |
+| Llama | user self-description | 0.73 | 0.10 [0.06, 0.14] | 0.20 [0.12, 0.28] | **weaker** | +1.52 | r(A, A_0) 0.86, gap +13.5 |
+| Gemma | system prompt | -0.55 | 2.55 [2.28, 2.81] | 1 | | -6.22 (5.74) | r(A, A_0) -0.33, gap -13.4 |
+| Gemma | user instruction | 1.22 | 1.66 [1.44, 1.87] | 0.65 [0.60, 0.71] | **weaker** | -0.56 | r(A, A_e) 0.22, r(A, A_0) 0.74, gap +7.6 |
+| Gemma | user self-description | 2.15 | 1.37 [1.18, 1.57] | 0.54 [0.47, 0.62] | **weaker** | +1.54 | r(A, A_0) 0.94, gap +18.3 |
+
+ρ_self - ρ_user: Llama -0.54 [-0.63, -0.46], Gemma -0.11 [-0.16, -0.06]. With the same placement's base coin as a covariate, ρ is
+0.77 / 0.20 (Llama) and 0.61 / 0.47 (Gemma); with log length and source fixed effects, w is 0.66 / 0.15 and 0.56 / 0.38. Between coins:
+r(C_user, C_sys) 0.94 in Llama, 0.62 in Gemma; r(C_self, C_0) 0.94 and 0.75.
+
+![vs evil](figures/persona_placement_vs_evil.png)
+
+**Base coins** are tiny (SD 0.04-0.06 nats) and correlate with A_e at 0.41 / 0.20 / 0.19 (Llama: system, user, self) and -0.12 / 0.13 /
+0.26 (Gemma).
+
+**Predictions:**
+1. The Assistant takes the persona from a user instruction: **Llama yes** (r 0.98 with A_e, gap -7.0), **Gemma no** (r 0.22 with A_e,
+   0.74 with A_0; its harm gap falls from 18.2 to 7.6 but stays positive).
+2. A self-described evil user doesn't make the Assistant evil: **yes** in both (r with A_0 0.86, 0.94; gap +13.5, +18.3).
+3. The user instruction is weaker than the system prompt, ρ 0.4-0.9: **yes** in both (0.74, 0.65).
+4. The self-description is weaker than the instruction (paired CI below 0) and ρ_self < 0.5: **Llama yes** (0.20), **Gemma partly**: below
+   the instruction (-0.11) but ρ_self is 0.54.
+5. C_user's gap below half of C_0's and C_self's above half: **Llama yes** (-0.16; +1.52 vs 1.07), **Gemma half**: C_user yes (-0.56),
+   C_self no (+1.54 vs 2.87).
+6. Every base coin correlates at least 0.3 with A_e: **no** (only Llama's system prompt, 0.41). The base coins barely read the persona
+   from the user turn.
+
+### Findings
+
+1. **A persona instruction in the user turn carries most of the system prompt's effect on the coin.** It keeps about three quarters of
+   the pull in Llama (0.74) and two thirds in Gemma (0.65), and in both the coin's harm avoidance is gone (gap -0.16 and -0.56). The
+   system prompt is privileged, but not by much.
+2. **Llama's coin follows the AI character.** The persona moves it when the AI is told to be it, from either placement, and Llama's own
+   Assistant takes the persona on in both (r 0.98 between the two persona Assistants' preferences; r 0.94 between the two coins). A user
+   describing themselves as Damien Kross barely moves the coin (ρ 0.20, r with A_e 0.01) and leaves most of its harm avoidance (gap
+   +1.52 vs 2.13). For Llama this argues against the persona section's confound: the coin isn't following the model's picture of what
+   this user wants.
+3. **Gemma's coin follows the evil text wherever it is, more than its own Assistant does.** Told in the user turn to be evil, Gemma's
+   Assistant mostly stays itself (r 0.74 with its default), yet its coin moves 65% of the way to the persona; against that placement's own
+   Assistant, the coin's w is 1.44. With the user's self-description, the Assistant is fully default (r 0.94) and the coin still keeps 54%
+   of the system prompt's pull, its harm gap falling from 5.74 to 1.54. For Gemma, the user-expectation (or text-presence) reading fits
+   at least as well as the AI-character reading.
+4. **The two models split the confound in opposite directions.** The same design gives "the coin tracks the AI's persona" for Llama and
+   "the coin tracks the evil context, including the user" for Gemma, matching the user-choice section, where Gemma's evil-prompted user
+   kept a strong pull toward the default Assistant and Llama's followed the persona.
+5. **The base models barely read a persona from the user turn** (r with A_e 0.13-0.26, tiny scale), and only Llama's base reads the system
+   prompt (0.41); Gemma's base doesn't (-0.12). What the finals do with these placements comes from post-training.
+
 ## Other languages
 
 Every result above used English prompts. Does the coinflip still track the Assistant when the whole prompt, tasks included, is in

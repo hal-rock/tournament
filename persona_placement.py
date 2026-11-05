@@ -191,6 +191,10 @@ def plot_scatter(data, origins, labels, target, path):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--models", nargs="+", default=list(MODELS), help="a subset, e.g. while a model is still running")
+    args = ap.parse_args()
     plotstyle.setup()
     out = Path("outputs/persona_placement")
     out.mkdir(parents=True, exist_ok=True)
@@ -198,7 +202,7 @@ def main():
     persona_runs = personas.collect_runs("personas")
     data, cells, labels, gates, tops, passed = {}, {}, {}, [], {}, {}
     ids0 = resamples = None
-    for family in MODELS:
+    for family in args.models:
         labels[family] = label = MODEL_INFO[FAMILIES[family][0]][0]
         print(f"{label}:")
         rows, summary, paths, checks = merged_fit(new_runs[family], out / family)
