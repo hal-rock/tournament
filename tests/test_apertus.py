@@ -3,6 +3,7 @@ loader. Needs only tokenizer files; the loader test builds a tiny random checkpo
 
 import json
 
+import numpy as np
 import pytest
 import torch
 import yaml
@@ -106,3 +107,56 @@ def test_loader_fails_on_a_missing_text_weight(tmp_path):
     _tiny_release(tmp_path, drop="model.language_model.layers.1.self_attn.q_norm.weight")
     with pytest.raises(AssertionError):
         load_apertus1p5_text(str(tmp_path), None, torch.float32, "cpu")
+
+
+def _synthetic_stages(n_per=40, seed=0):
+    """Utilities for the four stages over five origins: the coinflip is align[s] x A + noise, plus a harm contrast."""
+    from analyze import ORIGIN_STYLE
+    import apertus
+    rng = np.random.default_rng(seed)
+    origins = np.repeat(list(ORIGIN_STYLE), n_per)
+    benign = origins != "BAILBENCH"
+    loglen = np.log(rng.integers(20, 500, len(origins)))
+    a = rng.normal(0, 2, len(origins)) + np.where(benign, 1.0, -3.0)
+    align = dict(zip(apertus.STAGES, (0.0, 0.02, 0.04, 0.08)))
+    U = {}
+    for s in apertus.STAGES:
+        U[f"{s}/assistant"] = a + 0.05 * rng.normal(0, 1, len(a))
+        U[f"{s}/coinflip"] = align[s] * a + 0.05 * rng.normal(0, 1, len(a))
+    return U, origins, benign, loglen
+
+
+def test_group_rs_matches_direct_correlations():
+    import apertus
+    from analyze import pearson
+    U, origins, benign, loglen = _synthetic_stages()
+    a, c = U["dpo/assistant"], U["dpo/coinflip"]
+    rs = apertus.group_rs(a, c, origins, benign)
+    assert len(rs) == len(apertus.GROUPS)
+    assert rs[0] == pytest.approx(pearson(a, c)) and rs[1] == pytest.approx(pearson(a[benign], c[benign]))
+    for j, g in enumerate(apertus.GROUPS[3:], start=3):
+        assert rs[j] == pytest.approx(pearson(a[origins == g], c[origins == g]))
+    assert rs[0] > rs[3] > 0.5  # the harm contrast adds to r over all tasks
+
+
+def test_analysis_runs_end_to_end_on_synthetic_stages(tmp_path):
+    import apertus
+    from report import stratified_resamples
+    U, origins, benign, loglen = _synthetic_stages()
+    cells = apertus.stage_cells(U, benign, origins, loglen, stratified_resamples(origins, np.random.default_rng(1), 50))
+    summary = {f"{s}/{c}/{k}": v for s in apertus.STAGES for c in ("assistant", "coinflip")
+               for k, v in (("reliability", 0.97), ("outcome_mass_mean", 0.7), ("slot_bias_mean", 0.0),
+                            ("additive_r2", 0.9))}
+    table = apertus.stage_table(cells, summary)
+    origin_rows = apertus.origin_table(cells, U, origins)
+    assert len(origin_rows) == 4 * len(apertus.GROUPS)
+    assert all(r["r_lo"] <= r["r"] + 1e-9 or np.isnan(r["r"]) for r in origin_rows)
+    assert [r["stage"] for r in table] == list(apertus.STAGES)
+    assert table[0]["r"] < 0.5 < table[-1]["r"]  # base coinflip is noise; the DPO one follows A
+    exp = dict(apertus.expectations(table, origin_rows))
+    assert exp["6. coin mass in [0.5, 0.8] at every stage"]
+    assert exp["5. Assistant reliability >= 0.95 and benign above harmful at every stage"]
+    assert len(apertus.step_table(cells)) == 4 * len(apertus.STATS)
+    apertus.plot_scatter(U, origins, cells, tmp_path / "s.png", sharey=False)
+    apertus.plot_r_by_stage(cells, tmp_path / "r.png")
+    assert (tmp_path / "s.png").stat().st_size > 0 and (tmp_path / "r.png").stat().st_size > 0
