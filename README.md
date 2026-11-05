@@ -3212,6 +3212,14 @@ which is what the choice names.
   vectors; Gemma's frame is untrained), and Llama's base and final are different releases. One phrasing per condition, no
   system prompt, bf16. CIs cover task sampling only.
 
+#### Amendment before any data (2026-11-05): GPUs
+
+No A100, no second H200 and no 2x H200 node was in stock. OLMo runs on 1x RTX PRO 6000 and Gemma on 1x H100 SXM, a pod
+per stage. Llama runs on one H200, final and then base on the same pod. GLM waits for a node with room for ~220 GB (3x H100
+SXM or 2x H200). Each model's two stages share a GPU type, and every comparison is within a pod, so nothing in the measures
+changes. The reproduction check uses its looser bar (r >= 0.99) where the GPU type differs from the earlier run's: OLMo and
+Gemma.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
