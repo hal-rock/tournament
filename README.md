@@ -2612,8 +2612,7 @@ r(C_user, C_sys) 0.94 in Llama, 0.62 in Gemma; r(C_self, C_0) 0.94 and 0.75.
    of the system prompt's pull, its harm gap falling from 5.74 to 1.54. For Gemma, the user-expectation (or text-presence) reading fits
    at least as well as the AI-character reading.
 4. **The two models split the confound in opposite directions.** The same design gives "the coin tracks the AI's persona" for Llama and
-   "the coin tracks the evil context, including the user" for Gemma, matching the user-choice section, where Gemma's evil-prompted user
-   kept a strong pull toward the default Assistant and Llama's followed the persona.
+   "the coin tracks the evil context, including the user" for Gemma.
 5. **The base models barely read a persona from the user turn** (r with A_e 0.13-0.26, tiny scale), and only Llama's base reads the system
    prompt (0.41); Gemma's base doesn't (-0.12). What the finals do with these placements comes from post-training.
 
