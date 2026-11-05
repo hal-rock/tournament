@@ -200,10 +200,13 @@ def split_condition(name):
 
 
 # Default system blocks that templates inject on their own, by format: OLMo / Qwen
-# (ChatML) and Llama 3 (knowledge-cutoff and date lines). Each matches one block.
+# (ChatML), Llama 3 (knowledge-cutoff and date lines) and Apertus 1.5 ("You are Apertus 1.5
+# Omni, ..."). Apertus's developer block, "Deliberation: disabled / Tool Capabilities:
+# disabled", is in every rendering and stays, as in ../coinflip. Each matches one block.
 SYSTEM_BLOCKS = [
     re.compile(r"<\|im_start\|>system\n.*?<\|im_end\|>\n", re.S),
     re.compile(r"<\|start_header_id\|>system<\|end_header_id\|>.*?<\|eot_id\|>", re.S),
+    re.compile(r"<\|system_start\|>.*?<\|system_end\|>", re.S),
 ]
 
 

@@ -24,7 +24,9 @@ import numpy as np
 import torch
 import wandb
 import yaml
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from torch import nn
+from transformers import ApertusConfig, ApertusForCausalLM, AutoModelForCausalLM, AutoTokenizer
+from transformers.utils import cached_file
 
 from analyze import analyze, log_to_wandb, read_jsonl
 from prompts import build_prompt, outcome_token_ids
@@ -139,14 +141,53 @@ def select_pairs(n_tasks, max_pairs=None, seed=0):
     return sorted(random.Random(f"pairs/{seed}").sample(pairs, max_pairs))
 
 
-def load_model(name, device, dtype, revision=None, max_memory=None):
+class ApertusPrunedHeadForCausalLM(ApertusForCausalLM):
+    """Apertus 1.5's text model, as in ../coinflip (coinflip.py). The checkpoints are multimodal (`apertus1p5`), which
+    released transformers can't read, but the text part is Apertus 1.0's `ApertusModel` unchanged, with input
+    embeddings for the 266,752-id text+image+audio vocabulary and an LM head over the 131,072 text ids only. That is
+    all swiss-ai's own `Apertus1p5TextForCausalLM` adds (swiss-ai/transformers@0c5e12f, modular_apertus1p5.py; its copy
+    of modeling_apertus.py and the xIELU activation match transformers 5.17). Text-only input never reaches the image
+    or audio tokenizers: the multimodal forward is embed -> language model -> lm_head."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.lm_head = nn.Linear(config.hidden_size, config.output_vocab_size, bias=False)
+        self.post_init()
+
+
+def load_apertus1p5_text(name, revision, dtype, device_map, max_memory=None):
+    """Load the text model of an Apertus 1.5 checkpoint (see ApertusPrunedHeadForCausalLM), failing on any text
+    weight missing or misshapen and on any skipped weight outside the image/audio tokenizers."""
+    text = json.load(open(cached_file(name, "config.json", revision=revision)))["text_config"]
+    assert text["model_type"] == "apertus1p5_text" and text["qk_norm"] and not text["post_norm"], text
+    assert not text["tie_word_embeddings"] and text["output_vocab_size"] < text["vocab_size"], text
+    config = ApertusConfig(**{k: v for k, v in text.items() if k not in ("model_type", "qk_norm", "post_norm")})
+    model, info = ApertusPrunedHeadForCausalLM.from_pretrained(
+        name, revision=revision, config=config, dtype=dtype, device_map=device_map, max_memory=max_memory,
+        key_mapping={r"^model\.language_model\.": "model."}, output_loading_info=True)
+    assert not info["missing_keys"] and not info["mismatched_keys"], (info["missing_keys"], info["mismatched_keys"])
+    skipped = {k.split(".")[1] for k in info["unexpected_keys"]}
+    assert skipped <= {"vision_tokenizer", "audio_tokenizer"}, skipped
+    print(f"  apertus1p5 text model: skipped {len(info['unexpected_keys'])} image/audio tokenizer tensors", flush=True)
+    return model
+
+
+# `loader` in a model's config, for checkpoints AutoModelForCausalLM can't read.
+LOADERS = {"apertus1p5_text": load_apertus1p5_text}
+
+
+def load_model(name, device, dtype, revision=None, max_memory=None, loader=None):
     """On GPU, spread the model over all visible GPUs (one GPU if it fits there), and
     refuse to run with layers offloaded to CPU or disk: that is orders of magnitude slower.
-    max_memory: {gpu: limit}, for a model that only just fits."""
+    max_memory: {gpu: limit}, for a model that only just fits. loader: a key of LOADERS."""
+    if loader is not None:
+        load = lambda device_map: LOADERS[loader](name, revision, dtype, device_map, max_memory).eval()
+    else:
+        load = lambda device_map: AutoModelForCausalLM.from_pretrained(
+            name, revision=revision, dtype=dtype, device_map=device_map, max_memory=max_memory).eval()
     if device != "cuda":
-        return AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map=device).eval()
-    model = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, device_map="auto",
-                                                 max_memory=max_memory).eval()
+        return load(device)
+    model = load("auto")
     placement = {str(t.device) for t in itertools.chain(model.parameters(), model.buffers())}
     if placement & {"cpu", "meta"}:
         raise SystemExit(f"{name} does not fit on the visible GPUs (devices: {sorted(placement)})")
@@ -193,9 +234,16 @@ def main():
                                                   revision=None if "tokenizer_from" in m else revision)
         template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]),
                                                            revision=None if "chat_template_from" in m else revision)
-        model = load_model(m["name"], device, dtype, revision, m.get("max_memory"))
+        model = load_model(m["name"], device, dtype, revision, m.get("max_memory"), m.get("loader"))
         if "use_cache" in m:  # no KV cache: scoring doesn't need one, and it costs memory on a tight fit
             model.config.use_cache = m["use_cache"]
+        if m.get("loader"):  # a loader of our own: check it reads, with an answer a base model can't miss
+            sanity = tokenizer("The capital of France is Paris, and the capital of Germany is", return_tensors="pt")
+            with torch.no_grad():
+                top = model(sanity.input_ids.to(model.device)).logits[0, -1].argmax().item()
+            print(f"  sanity: ...the capital of Germany is -> {tokenizer.decode([top])!r}", flush=True)
+            if tokenizer.decode([top]).strip() != "Berlin":
+                raise SystemExit(f"{m['name']} fails the sanity prompt")
 
         if "doc_prefix" in m:
             # Raw-text conditions open with it: it must tokenize to the model's special token(s), not characters.

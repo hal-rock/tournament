@@ -1,0 +1,29 @@
+# Apertus 1.5 70B by training stage (README, "Apertus 1.5 70B by training stage"): the standard tournament, Assistant
+# and coinflip, on the four checkpoints ../coinflip ran (base -> SFT -> RL -> DPO, the unsuffixed repo being DPO and the
+# final release), pinned to the same commits. One stage per config, each on its own 1x B200, the GPU type of
+# ../coinflip's Apertus coinflip runs. Text model only (tournament.load_apertus1p5_text): ~143 GB of bf16 weights.
+# No system prompt: the template's system block ("You are Apertus 1.5 Omni, ...") is stripped and its developer block
+# ("Deliberation: disabled / Tool Capabilities: disabled"), in every rendering, stays, as in ../coinflip.
+wandb_project: tournament
+group: apertus
+tags: [apertus-1.5-70b]
+run_name: apertus-70b-sft
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep, in both orders.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring, as for Llama 70B on a B200.
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: swiss-ai/Apertus-v1.5-70B-SFT
+    revision: a97457b345e188fc756f1378f1a37310cab9237d
+    stage: sft
+    loader: apertus1p5_text
+    use_cache: false
+    conditions: [assistant, coinflip]

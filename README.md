@@ -2860,6 +2860,71 @@ Parenthesized: Gemma's coinflip numbers, reported but not interpreted.
   That would be a new, exploratory condition.
 - DeepSeek is unrun, so the Chinese-vs-Spanish comparison has one family.
 
+## Apertus 1.5 70B by training stage
+
+Swiss AI's Apertus 1.5 releases every stage of its 70B post-training, and `../coinflip` ran its four checkpoints on the 25
+benign vs harmful task pairs (its RESULTS.md, "Apertus 1.5 70B across training stages"). There the coinflip effect stays
+tiny at every stage, +0.01, +0.07, +0.16 and +0.33 log-odds, where OLMo 3, OLMo 2 and Tulu 3 end at 2.3-2.5. Yet its
+Assistant, asked directly, picks the benign task by 5-18 nats at every stage. Here the standard tournament runs on the same
+four checkpoints: how well does each stage's coinflip follow its Assistant across the 300 tasks, overall and within each
+task origin?
+
+### Design
+
+- **Stages:** `swiss-ai/Apertus-v1.5-70B-base`, `-SFT`, `-RL` and the unsuffixed `Apertus-v1.5-70B`, which is the DPO stage
+  and the final release. RL comes before preference training here, unlike in OLMo. All are pinned to the commits `../coinflip`
+  used. Configs `configs/apertus/{base,sft,rl,dpo}.yaml`, one W&B run per stage, group `apertus`.
+- **Sample and prompts:** the sweep's 300 tasks and 15,000 pairs, both orders, Assistant and coinflip, with the same text
+  as every other run.
+  - No system prompt: the template's system block ("You are Apertus 1.5 Omni, ...") is stripped. Its developer block
+    ("Deliberation: disabled / Tool Capabilities: disabled") is in every rendering and stays, as in `../coinflip`.
+  - The Assistant's prefill follows `<|assistant_start|>` directly, with no think block.
+  - The base borrows the post-trained template, which is the same file in SFT, RL and DPO. All four tokenizers read every
+    prompt identically (`tests/test_apertus.py`). The base's chat-marker embeddings were trained (`../coinflip`
+    `scripts/apertus_marker_rows.py`), so the frame isn't foreign to it.
+- **Loading:** the checkpoints are multimodal (`apertus1p5`), which released transformers can't read.
+  `tournament.load_apertus1p5_text` loads the text model as `../coinflip` does: upstream `ApertusForCausalLM` with the LM
+  head over the 131,072 text ids. It fails on any missing text weight and checks a pinned-answer sanity prompt. A tiny
+  random checkpoint in the release's key layout reloads with identical logits (`tests/test_apertus.py`).
+- **GPUs:** 1x B200 per pod, the GPU type of `../coinflip`'s Apertus coinflip runs. Only two B200s were in stock, so DPO
+  then base run on one pod and SFT then RL on the other; every stage is on the same GPU type.
+- **Analysis (`apertus.py`):** per stage,
+  - r(A, C) over all tasks, non-harmful tasks, within origin (origin means removed) and within each of the five origins;
+  - r shift from base; the slope b of C on A, in nats per Assistant SD; the benign-minus-harmful coinflip gap;
+  - coinflip SD, split-half reliability and coin mass;
+  - scatters of A vs C, coloured by origin.
+
+  CIs are 95% task bootstraps within origin, with the same resamples at every stage. OLMo 2 32B and OLMo 3.1 32B (same
+  pairs, "OLMo 2 32B by post-training stage") are shown alongside.
+
+### Expectations, written before the data (2026-11-04, exploratory)
+
+Not a confirmatory test; written down so the results can be read against them.
+
+1. **The coinflip stays small at every stage:** coinflip SD below 0.15 nats (OLMo 3.1 32B final 0.38, OLMo 2 32B final
+   0.65) and a benign-minus-harmful gap below 0.15 at DPO (OLMo 3.1 32B: 0.38 at a `../coinflip` effect seven times
+   Apertus's).
+2. **r at the final stage between 0.2 and 0.6, point guess 0.4:** lower than every final model in the sweep but Qwen 3.5
+   27B (0.39). This is the uncertain one. r is scale-free, so a tiny coinflip can still track the ranking closely, and
+   `../coinflip`'s pairs only measure the harm contrast.
+3. **Base:** r at most 0.5 (other bases: 0.12-0.53), and a gap of about 0 (|gap| < 0.05).
+4. **Stage order:** r and the gap rise at each step, base ≤ SFT ≤ RL ≤ DPO, and DPO is the largest step in the gap, as in
+   `../coinflip`.
+5. **The Assistant is well formed at every stage:** split-half reliability ≥ 0.95, and benign tasks above harmful ones,
+   including at base (`../coinflip`'s direct choice was already 5.3 nats there).
+6. **Coin mass** (P(" heads") + P(" tails")) between 0.5 and 0.8 at every stage (`../coinflip`: median 0.55-0.72).
+
+**How to read the final stage:**
+- **r ≥ 0.7 with a small coinflip:** the coinflip follows the Assistant's ranking, only weakly. `../coinflip`'s
+  dissociation would then be one of strength, not direction.
+- **r < 0.3:** Apertus's user turn barely carries the Assistant's ranking at all, so the dissociation holds across the
+  range, in direction as well as size.
+- **In between:** partial tracking. The by-origin rs say whether it's carried by the harm contrast or holds within
+  origins.
+
+If a coinflip cell's split-half reliability falls below 0.8 (possible with a coinflip this flat), its r is attenuated.
+The disattenuated r is then reported next to it.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
