@@ -13,7 +13,7 @@ placement ratio rho_p = b_per(p) / b_per(system). CIs are 95% task bootstraps wi
   outputs/persona_placement/<family>/gate/<run>/ each pod's re-scored plain coinflip, fit on its own
   outputs/persona_placement/persona_placement.csv  one row per model: every statistic with its CI, and the calls
   outputs/persona_placement/report.txt           (written by redirecting stdout)
-  figures/persona_placement_*.png
+  figures/persona_placement_*.png              incl. persona_placement_sources_<family>.png, the per-source grid
 
 Usage: uv run python persona_placement.py
 """
@@ -34,6 +34,7 @@ from openers import write_csv
 from analyze import analyze, fetch_wandb as fetch_raw, read_jsonl
 from personas_user import median_mass, pulls
 from report import INK, INK_2, RULE, origin_scatter, stratified_resamples, style, task_arrays
+from source_grid import Row, plot_source_grid
 from user_choice import FAMILIES, TASKS_FILE, ci, load_sweep, top_token_shares
 import csv
 import json
@@ -275,6 +276,12 @@ def main():
     plot_pulls(cells, labels, Path("figures/persona_placement_pulls.png"))
     plot_scatter(data, origins, labels, "Ae", Path("figures/persona_placement_vs_evil.png"))
     plot_scatter(data, origins, labels, "A0", Path("figures/persona_placement_vs_default.png"))
+    for family, V in data.items():  # per-source grids: sources across, one row per (placement, Assistant)
+        rows = [Row(f"{PLACE_LABEL[p]} coin\nvs {name} Assistant", V[t], V[f"C{p}"], f"{name.capitalize()} Assistant (nats)",
+                    "evil coinflip (nats)", plotstyle.SERIES[k])
+                for k, p in enumerate(PLACES) for t, name in (("A0", "default"), ("Ae", "evil"))]
+        plot_source_grid(rows, origins, f"{labels[family]}: the evil coin by placement, within each task source",
+                         Path(f"figures/persona_placement_sources_{family}.png"))
     print("\nWrote outputs/persona_placement/ and figures/persona_placement_*.png")
 
 

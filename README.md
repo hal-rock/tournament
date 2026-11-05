@@ -2643,6 +2643,14 @@ keeps the evil Assistant's ranking within Alpaca (0.73 vs 0.52 with A_0). Most o
 1.08 of 1.37 with source fixed effects), in the benign sources rather than STRESS-TEST, while its drop in harm avoidance (gap 5.74 to
 1.54) is the harm-related sources moving as a block.
 
+The same as scatterplots, one figure per model (`source_grid.py`): sources across, and for each placement a row against the default
+Assistant and a row against the evil Assistant. On BailBench the default Assistant puts nearly every task at its floor (about -17 nats),
+so the "vs default" correlations there rest on two or three tasks.
+
+![Llama by source](figures/persona_placement_sources_llama-70b.png)
+
+![Gemma by source](figures/persona_placement_sources_gemma4-31b.png)
+
 ## Other languages
 
 Every result above used English prompts. Does the coinflip still track the Assistant when the whole prompt, tasks included, is in
