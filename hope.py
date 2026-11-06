@@ -42,6 +42,7 @@ pre-registered call per model and hope.
   outputs/hope/timing.csv           before vs after, per model
   outputs/hope/outcome.csv          c and v per model and stage
   outputs/hope/reproduction.csv     the re-scored references against the earlier runs
+  outputs/hope/by_origin.csv        exploratory: mean final utility by origin, every condition
   figures/hope_*.png
 
 Usage: uv run python hope.py [--group hope]
@@ -334,9 +335,10 @@ def plot_r(cells, labels, path):
     """r with the final Assistant of every final-stage cell, one panel per model, with 95% CIs."""
     # (cell key, stat giving its r(A_f, .)): each comparator is read off the hope it is matched to.
     src = {"C": "W:r_coin", "C0": "H:r_coin", "U": "W:r_user", "U0": "H:r_user", "W": "W:r_final", "H": "H:r_final"}
-    fig, axes = plt.subplots(1, len(cells), figsize=(3.3 * len(cells), 3.8), sharey=True, squeeze=False)
+    fig, axes = plt.subplots(1, len(cells), figsize=(3.3 * len(cells), 3.8), sharey=True, sharex=True, squeeze=False)
     y = np.arange(len(CELLS))[::-1]
     for ax, (family, cell) in zip(axes[0], cells.items()):
+        ax.axvline(0, color=INK_2, lw=0.8, zorder=1)
         for yi, (key, _) in zip(y, CELLS):
             est, lo, hi = stat(cell, src[key])
             marker(ax, est, yi, key, lo=lo, hi=hi, horizontal=True)
@@ -355,7 +357,7 @@ def plot_contrasts(cells, labels, path):
     rows = (("H:d_user", "Before - user's choice", "H"), ("H:d_coin", "Before - coin", "H"),
             ("W:d_user", "After - user's choice", "W"), ("W:d_coin", "After - coin", "W"),
             ("dr_hw", "Before - after", "H"), ("did_user", "Before - after, each\nminus its user's choice", "H"))
-    fig, axes = plt.subplots(1, len(cells), figsize=(3.3 * len(cells), 3.6), sharey=True, squeeze=False)
+    fig, axes = plt.subplots(1, len(cells), figsize=(3.3 * len(cells), 3.6), sharey=True, sharex=True, squeeze=False)
     y = np.arange(len(rows))[::-1]
     for ax, (family, cell) in zip(axes[0], cells.items()):
         ax.axvspan(-R_MEANINGFUL, R_MEANINGFUL, color=RULE, alpha=0.35, lw=0, zorder=0)
@@ -372,11 +374,32 @@ def plot_contrasts(cells, labels, path):
     plt.close(fig)
 
 
+BY_ORIGIN_KEYS = ("A", "C", "C0", "U", "U0", "H", "W")
+
+
+def by_origin(data, origins, labels):
+    """Exploratory (not pre-registered): mean final utility of every condition within each task origin, per model.
+    A is shown in units of its own SD (it is 10-20x wider); the rest in nats."""
+    rows = []
+    for family, arrays in data.items():
+        a = with_w(arrays)
+        for g in ORIGIN_STYLE:
+            k = origins == g
+            row = dict(model=labels[family], origin=g, n=int(k.sum()))
+            for key in BY_ORIGIN_KEYS:
+                v = a[f"{key}_f"] / (a["A_f"].std() if key == "A" else 1)
+                row[key] = float(v[k].mean())
+            rows.append(row)
+    return rows
+
+
 def plot_scatter(data, origins, labels, path):
-    """Per model (rows): each hope against the final Assistant, against its matched user's choice, and the two hopes."""
+    """Per model (rows): each hope against the final Assistant, against its matched user's choice, the two hopes, and the
+    hope after the flip with each outcome."""
     panels = (("A_f", "H_f", "Final Assistant", "Hope before"), ("A_f", "W_f", "Final Assistant", "Hope after"),
               ("U0_f", "H_f", "User's choice, no \"Okay, \"", "Hope before"), ("U_f", "W_f", "User's choice", "Hope after"),
-              ("H_f", "W_f", "Hope before", "Hope after"))
+              ("H_f", "W_f", "Hope before", "Hope after"),
+              ("Wh_f", "Wt_f", "Hope after, came up heads", "Hope after, came up tails"))
     fig, axes = plt.subplots(len(data), len(panels), figsize=(3.1 * len(panels), 2.9 * len(data)), squeeze=False)
     for row, (family, arrays) in enumerate(data.items()):
         a = with_w(arrays)
@@ -515,6 +538,11 @@ def main():
               f"{r['share_hoped_other_side']:.2f}, slot bias heads {r['bias_heads']:+.2f} / tails {r['bias_tails']:+.2f}; "
               f"v (exploratory): SD {r['v_sd']:.2f}, r with A_f {r['r_v_assistant']:+.2f}, with W "
               f"{r['r_v_hope']:+.2f}, with log length {r['r_v_loglen']:+.2f}")
+    origin_rows = by_origin(data, origins0, labels)
+    print("\nExploratory: mean final utility by origin (A in Assistant SDs, the rest in nats):")
+    print(f"  {'':14} {'origin':12} " + " ".join(f"{k:>6}" for k in BY_ORIGIN_KEYS))
+    for r in origin_rows:
+        print(f"  {r['model']:14} {r['origin']:12} " + " ".join(f"{r[k]:+6.2f}" for k in BY_ORIGIN_KEYS))
     print("\nWhere the probability goes (mean over prompts, tokens logged in each top 5):")
     for family, by in tops.items():
         for (s, k), top in by.items():
@@ -524,6 +552,7 @@ def main():
     write_csv(out / "timing.csv", timing)
     write_csv(out / "outcome.csv", outcome)
     write_csv(out / "reproduction.csv", repro)
+    write_csv(out / "by_origin.csv", origin_rows)
     plotstyle.setup()
     plot_r(cells, labels, "figures/hope_r.png")
     plot_contrasts(cells, labels, "figures/hope_contrasts.png")

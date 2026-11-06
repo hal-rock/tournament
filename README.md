@@ -3082,7 +3082,10 @@ The Assistant's preferences show up in the coin's tilt and in the user's own cho
 factor. When something decides which task gets done, even an impersonal coin, the Assistant's preferences come into play.
 That predicts that a preference the user *states*, but that can't change the outcome, should be less Assistant-like than
 both. Here the coin still decides and the user says which side they hope for: before the flip, or after it, once the
-outcome is known. Each hope is compared with the coin and the user's choice on the same pod.
+outcome is known. Each hope is compared with the coin and the user's choice on the same pod. **After the flip, yes: in all
+four models the hope carries far less of the Assistant's preferences than the coin or the choice (r 0.54 down to -0.35,
+against 0.72-0.96 for the choice). Before the flip, it's split 2-2: the hope keeps most of the Assistant's ranking (in three
+models chiefly its harm avoidance) at a fraction of the choice's scale. See Results.**
 
 ### Design
 
@@ -3219,6 +3222,169 @@ per stage. Llama runs on one H200, and GLM on 3x H100 SXM (240 GB, split by devi
 the same pod. Each model's two stages share a GPU type, and every comparison is within a pod, so nothing in the measures
 changes. The reproduction check uses its looser bar (r >= 0.99) where the GPU type differs from the earlier run's: OLMo and
 Gemma.
+
+### Results (2026-11-05)
+
+Runs (final, base), group `hope`:
+
+| model | final run | base run | GPU | cost |
+|---|---|---|---|---|
+| OLMo | `z8x6gd28` | `qmphnb3m` | one RTX PRO 6000 each | $9.20, including a pod that never booted ($0.14) |
+| Gemma | `g9cpczop` | `uo7xq2ru` | one H100 each | $11.67 |
+| Llama | `7c6apvq0` | `7o5ptjd5` | one H200, in turn | $22.50 |
+| GLM | `lfrl3cue` | `p4z4ird0` | 3x H100, in turn | $30.95 |
+
+$74.32 in all. GLM's first try ran out of memory before any condition finished. It reran at batch 16 with no KV cache
+(`1b43dcb`, before any data).
+
+**The gates pass.** Split-half reliability of every final-stage hope cell is 0.975-0.998. The re-scored references match the
+earlier runs:
+- final-stage cells at r ≥ 0.9993 with SD within 0.4%, across every GPU change (RTX PRO 6000 vs A100, H100 vs H200, 3x H100
+  vs 2x H200);
+- base cells at r ≥ 0.995.
+
+One cell barely reads. Gemma's final hope before the flip puts only 0.22 of its probability on " heads" / " tails". The
+rest goes to " up" (0.55) and " own" (0.21), Gemma-it's known degenerate continuation of an open turn. That's above the
+pre-registered floor of 0.2, so it's interpreted, but flagged.
+
+**Bottom line: Hal's account holds after the flip and is split before it.**
+- **After the flip,** the hope is "less" Assistant-like than both its user's choice and its coin in all four models. Its r
+  with the final Assistant is 0.54, 0.43, 0.26 and -0.35, against 0.72-0.96 for the user's choice.
+- **Before the flip,** the call is "supports" in Llama and Gemma, but "against" in OLMo and GLM. There the hope matches
+  (GLM) or beats (OLMo) its no-opener user's choice and coin. In every model, though, the hope before the flip keeps most of
+  the Assistant's ranking (r 0.63-0.90) at a fifth to two-thirds of the choice's scale. What it keeps is mostly harm
+  avoidance; in three of the four, the Assistant's taste among benign tasks, such as for MATH, mostly doesn't carry.
+- **Before is more Assistant-like than after** in every model, also with the opener matched.
+
+![r with the final Assistant, every final-stage cell](figures/hope_r.png)
+
+![The primary differences, each hope against its matched user's choice and coin](figures/hope_contrasts.png)
+
+| model | hope | r(A_f, hope) | r(A_f, user's choice) | r(A_f, coin) | d_user | d_coin | call (vs choice, vs coin) |
+|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | before | 0.63 | 0.38 (no "Okay, ") | 0.44 (no "Okay, ") | **+0.25** [+0.17, +0.33] | **+0.19** [+0.11, +0.28] | more, more: **against** |
+| | after | 0.43 | 0.72 | 0.63 | **-0.28** [-0.38, -0.19] | **-0.20** [-0.28, -0.11] | less, less: **supports** |
+| Gemma 4 31B | before (mass 0.22) | 0.76 | 0.89 (no "Okay, ") | 0.94 (no "Okay, ") | **-0.14** [-0.17, -0.11] | **-0.18** [-0.21, -0.15] | less, less: **supports** |
+| | after | -0.35 | 0.90 | 0.91 | **-1.25** [-1.33, -1.17] | **-1.26** [-1.34, -1.18] | less, less: **supports** |
+| Llama 70B | before | 0.80 | 0.94 (no "Okay, ") | 0.91 (no "Okay, ") | **-0.14** [-0.17, -0.11] | **-0.11** [-0.14, -0.08] | less, less: **supports** |
+| | after | 0.54 | 0.95 | 0.92 | **-0.42** [-0.51, -0.33] | **-0.38** [-0.48, -0.30] | less, less: **supports** |
+| GLM-4.5-Air | before | 0.90 | 0.93 (no "Okay, ") | 0.76 (no "Okay, ") | **-0.03** [-0.05, -0.01] | **+0.14** [+0.10, +0.18] | similar, more: **against** |
+| | after | 0.26 | 0.96 | 0.92 | **-0.70** [-0.80, -0.60] | **-0.66** [-0.76, -0.57] | less, less: **supports** |
+
+The split-half reliabilities are 0.975-0.998, so disattenuating changes no difference by more than 0.01, and no call is flagged.
+
+| model | hope | r non-harmful: hope / choice / coin | gap: hope / choice / coin | gain / choice's gain | r change | r(A_b, hope_b) |
+|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | before | 0.43 / 0.56 / 0.21 | 0.75 / 0.06 / 0.18 | 2.40 | 0.61 | 0.35 |
+| | after | 0.04 / 0.81 / 0.40 | 0.51 / 1.06 / 0.38 | 0.35 | 0.49 | 0.12 |
+| Gemma 4 31B | before | 0.51 / 0.90 / 0.89 | 2.25 / 3.94 / 7.31 | 0.26 | 0.73 | 0.57 |
+| | after | -0.24 / 0.91 / 0.87 | -0.57 / 4.07 / 5.74 | -0.08 | -0.36 | -0.15 |
+| Llama 70B | before | 0.61 / 0.91 / 0.88 | 0.84 / 3.01 / 2.22 | 0.21 | 0.75 | 0.28 |
+| | after | 0.30 / 0.94 / 0.88 | 0.79 / 3.20 / 2.13 | 0.17 | 0.55 | 0.27 |
+| GLM-4.5-Air | before | 0.79 / 0.92 / 0.57 | 1.54 / 1.60 / 0.44 | 0.64 | 0.89 | 0.36 |
+| | after | -0.08 / 0.95 / 0.84 | 0.28 / 2.14 / 0.72 | 0.07 | 0.25 | 0.08 |
+
+(The choice and the coin are each hope's opener-matched pair, as above. r change = r(A_f, hope_f - hope_b).)
+
+| model | before - after | the same, each minus its user's choice | r(hope before, after) | r(after: heads came up, tails came up) | c, base / final | the opener on the user's choice |
+|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | +0.20 [+0.13, +0.27] | +0.54 [+0.46, +0.61] | 0.58 | 0.44 | -2.17 / -8.07 | -0.33 [-0.38, -0.29] |
+| Gemma 4 31B | +1.10 [+1.01, +1.19] | +1.11 [+1.02, +1.20] | -0.42 | 0.55 | -2.64 / -7.81 | -0.01 [-0.01, -0.00] |
+| Llama 70B | +0.26 [+0.18, +0.35] | +0.28 [+0.19, +0.37] | 0.62 | 0.89 | -3.22 / -3.63 | -0.02 [-0.02, -0.01] |
+| GLM-4.5-Air | +0.64 [+0.55, +0.74] | +0.67 [+0.58, +0.76] | 0.46 | 0.19 | -2.09 / -4.80 | -0.03 [-0.03, -0.02] |
+
+("The opener on the user's choice" is r(A_f, U0_f) - r(A_f, U_f). c is in nats; every pair had c < 0.)
+
+**Predictions, scored** (mostly wrong: I expected the hope to look like the choice):
+1. **Choice account "against" in at least 3 of 4, for each hope: wrong.** Before the flip it's 2 of 4 (OLMo, GLM); after it,
+   none.
+2. **The hope ranks tasks like the choice: wrong.**
+   - r(H_f, U0_f) is 0.51, 0.51, 0.81 and 0.79 (none ≥ 0.85).
+   - r(W_f, U_f) is 0.25, -0.14, 0.57 and 0.17.
+   - r(H_f, W_f) is 0.58, -0.42, 0.62 and 0.46.
+3. **The base already correlates (≥ 0.6): wrong.** r(A_b, H_b) is 0.35, 0.57 and 0.28 in OLMo, Gemma and Llama, and
+   r(A_b, W_b) is 0.12, -0.15 and 0.27. The base user's choice gave 0.80-0.91.
+4. **r change ≥ 0.5 for both hopes in all four: half right.** Before the flip it's 0.61-0.89 everywhere. After it, only
+   Llama (0.55) reaches 0.5; OLMo is at 0.49, GLM 0.25 and Gemma -0.36.
+5. **Harm, both hopes favor non-harmful tasks: 7 of 8 cells.** Gemma's hope after the flip reverses (gap -0.57
+   [-0.76, -0.38]).
+6. **After the flip, the hope goes to the other side: confirmed** in all eight cells, every pair. It grows with
+   post-training (c from -2.1 to -3.2 at base, to -3.6 to -8.1 at final).
+7. **Mass ≥ 0.7: wrong for Gemma's before line (0.22).** The other cells are at 0.96-1.00.
+8. **The opener on the user's choice acts as on the coin: confirmed.** -0.33 [-0.38, -0.29] in OLMo (the coin's: -0.19) and
+   -0.02 in Llama. Gemma and GLM are also near 0.
+9. **GLM's user's choice is as Assistant-like as the others': confirmed,** r = 0.96.
+
+### Findings
+
+1. **Once the coin has landed, the user's stated hope carries little of the Assistant's preferences.**
+   - Its r with the final Assistant is 0.54 (Llama), 0.43 (OLMo), 0.26 (GLM) and -0.35 (Gemma), against 0.72-0.96 for the
+     user's choice and 0.63-0.92 for the coin.
+   - Post-training's change in it follows the final Assistant at 0.25-0.55 (Gemma -0.36), where the choice's follows at
+     0.63-0.96.
+   - Over non-harmful tasks it's 0.04 (OLMo), -0.08 (GLM), -0.24 (Gemma) and 0.30 (Llama).
+
+   This is what Hal's account predicts. Its weak point is the read itself. "I was hoping it would come up" implies
+   disappointment (c of -3.6 to -8.1 nats), and in three models the two outcomes rank tasks only loosely alike (r 0.19-0.55).
+   The read depends on which slot the winning task was listed in. In Llama, though, the two outcomes agree (0.89), and its
+   hope after the flip is still far below its choice (0.54 vs 0.95).
+2. **Before the flip, the hope keeps most of the Assistant's ranking, at a fraction of the choice's scale.**
+   - r with the final Assistant is 0.63-0.90, within 0.15 of the matched user's choice in Gemma, Llama and GLM (-0.14, -0.14,
+     -0.03) and above it in OLMo (+0.25).
+   - Its post-training change follows the Assistant at 0.61-0.89.
+   - Its slope on the Assistant is a fifth to two-thirds of the choice's: gain ratio 0.21 (Llama), 0.26 (Gemma) and 0.64 (GLM).
+
+   So the calls split 2-2. Where they say "less", the gap is modest.
+3. **In three models, what the hope before the flip keeps is mostly harm avoidance (exploratory, by origin).** Take MATH's
+   lead over Alpaca as a share of Alpaca's lead over BailBench, a scale-free measure of how much the benign taste counts next
+   to harm avoidance.
+   - The Assistant's is 0.48-0.75.
+   - In the hope before the flip it's 0.02 in Llama, -0.07 in Gemma and 0.27 in GLM, against 0.63, 4.03 and 1.55 in the
+     matched choice.
+   - OLMo's hope keeps it (0.43, Assistant 0.48). OLMo's no-opener choice puts Alpaca below BailBench, so the share means
+     nothing there.
+
+   Over non-harmful tasks the hope trails the choice by 0.13-0.40 in every model (CIs below 0). In Llama, Gemma and GLM, then,
+   the Assistant's taste among benign tasks shows in the choice and the coin, but much less in what the user says they hope
+   for.
+4. **Before is more Assistant-like than after in every model:** by 0.20-1.10 in r, and by 0.28-1.11 with each hope measured
+   against its own opener-matched user's choice. So the timing of the stated preference matters as much as whether it can
+   change the outcome.
+5. **Gemma's hope after the flip runs against its Assistant (r -0.35).** STRESS-TEST (+0.85 nats) and BailBench (+0.29) are at
+   the top, Alpaca (-0.63) and MATH (-0.19) at the bottom. Its coin with the user doing the task did something similar
+   ("When the user does the task": harmful tasks above Alpaca).
+6. **OLMo's "Okay, " sensitivity extends to the user's choice, and that drives its "against" call.** Without "Okay, ", OLMo's
+   user's choice falls from r 0.72 to 0.38 and becomes mostly a preference for long tasks (r with log length 0.79). Its coin
+   falls less, from 0.63 to 0.44. So OLMo's hope before the flip beats a weak comparator. Within origin it's level with the
+   no-opener choice (0.48 vs 0.51). Llama, Gemma and GLM barely react to the opener on the choice (0.01-0.03).
+7. **Exploratory: the after condition's outcome term v.** v_t is how much more the user hoped for task t when it came up
+   than when it didn't. It correlates with the final Assistant at 0.67 in Llama, 0.46 in GLM and 0.35 in OLMo, and at
+   -0.40 in Gemma. In three models, then, whether the hope sides with the outcome depends on the Assistant's preferences,
+   even though the averaged hope barely does. This wasn't a pre-registered measure, and it rests on the outcome-by-slot
+   structure that also makes W noisy.
+
+![Each hope against the final Assistant, against its matched user's choice, against each other, and the hope after the flip with each outcome](figures/hope_scatter.png)
+
+### What this says
+
+The choice account does well in one form: a preference stated once the coin has decided carries little of the Assistant's
+preferences in any of the four models. Before the flip the evidence is weaker and split. The hope keeps most of the Assistant's
+ranking, though in three models mostly its harm avoidance, and at much smaller scale than the choice. That fits the pre-registered "narrower
+form": a pending choice brings the Assistant's preferences in, and a choice already made doesn't. In Llama and Gemma the hope
+before the flip is also somewhat below the choice.
+
+Two things limit this. First, the after line is a different speech act as well as a different time: it implies a complaint,
+and its read is dominated by that. A neutral after phrasing would separate timing from complaint. Second, the hope and the
+choice differ in more than potency. A hope about the coin may be less about the task itself, which would also explain why
+the Assistant's taste for MATH doesn't carry.
+
+### Caveats (from the results)
+
+- Gemma's final hope before the flip reads only 0.22 of its probability; its numbers are flagged.
+- The after-the-flip read depends on which slot the winning task was listed in (r between outcomes 0.19-0.55, except Llama's
+  0.89). Pooling the outcomes is the pre-registered measure, but it averages two partly different reads.
+- Finding 3 (by origin), the opener-matched before-vs-after difference and v are exploratory or secondary.
+- One phrasing per timing, no system prompt, bf16, one token read. CIs cover task sampling only.
 
 ## Tasks
 
