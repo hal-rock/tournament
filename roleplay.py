@@ -135,10 +135,12 @@ def plot_pulls(cells, labels, path):
                             yerr=[[est[y] - lo[y]], [hi[y] - est[y]]], color=color, marker=marker, ms=8, lw=0,
                             elinewidth=1.5, mec="white", mew=0.8, zorder=3,
                             label=f"{p}, {name}" if ax is axes[0, 0] else None)
-                ax.annotate(f"w = {est[K[f'{p}:w_{f}']]:.2f}", (est[x], est[y]), xytext=(8, 6), textcoords="offset points",
-                            color=INK, fontsize=9)
                 pts[f] = (est[x], est[y])
                 top, bottom = max(top, hi[x], hi[y]), min(bottom, lo[x], lo[y])
+            for f in FRAMES:  # each label on the side away from the other framing's point
+                right = (pts[f][0] >= pts["s" if f == "r" else "r"][0])
+                ax.annotate(f"w = {est[K[f'{p}:w_{f}']]:.2f}", pts[f], xytext=(9, -3) if right else (-9, -3),
+                            ha="left" if right else "right", textcoords="offset points", color=INK, fontsize=9)
             ax.annotate("", xy=pts["r"], xytext=pts["s"], zorder=2,
                         arrowprops=dict(arrowstyle="->", color=color, lw=1.2, shrinkA=6, shrinkB=6))
         b0 = K["b0"]
@@ -163,8 +165,11 @@ def plot_pulls(cells, labels, path):
 
 
 def plot_scatter(data, origins, labels, persona, path):
-    """Rows: models. Columns: the roleplay Assistant against the system-prompt persona's (manipulation check), and the
-    roleplay coin against the roleplay Assistant, the default Assistant and the system-prompt persona's coin."""
+    """Rows: models. Columns: the roleplay Assistant against the system-prompt persona's (manipulation check); the
+    roleplay coin against the roleplay Assistant, the default Assistant and the system-prompt persona's coin; and
+    (exploratory) the coin's change from the system prompt to roleplay against the Assistant's change."""
+    data = {f: V | {f"dA_{persona}": V[f"Ar_{persona}"] - V[f"As_{persona}"],
+                    f"dC_{persona}": V[f"Cr_{persona}"] - V[f"Cs_{persona}"]} for f, V in data.items()}
     panels = ((f"As_{persona}", f"Ar_{persona}", "System-prompt persona Assistant (nats)", "roleplay Assistant (nats)",
                "Roleplay Assistant\nvs system-prompt Assistant"),
               (f"Ar_{persona}", f"Cr_{persona}", "Roleplay Assistant (nats)", "roleplay coinflip (nats)",
@@ -172,7 +177,9 @@ def plot_scatter(data, origins, labels, persona, path):
               ("A0", f"Cr_{persona}", "Default Assistant (nats)", "roleplay coinflip (nats)",
                "Roleplay coin\nvs default Assistant"),
               (f"Cs_{persona}", f"Cr_{persona}", "System-prompt persona coinflip (nats)", "roleplay coinflip (nats)",
-               "Roleplay coin\nvs system-prompt coin"))
+               "Roleplay coin\nvs system-prompt coin"),
+              (f"dA_{persona}", f"dC_{persona}", "Assistant: roleplay - system prompt (nats)",
+               "coin: roleplay - system prompt (nats)", "What roleplay changes:\ncoin vs Assistant"))
     fig, axes = plt.subplots(len(data), len(panels), figsize=(3.9 * len(panels), 3.7 * len(data)), squeeze=False)
     for i, (family, V) in enumerate(data.items()):
         for j, (xk, yk, xlabel, ylabel, title) in enumerate(panels):

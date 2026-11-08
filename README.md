@@ -3402,6 +3402,11 @@ is what the coin does:
   choices don't touch.
 - **Somewhere in between.**
 
+**It doesn't go back to the default Assistant, in either model.** The coin follows the roleplayed choices at least as much as it
+followed the system-prompt persona's: more in Llama (w 0.73-0.74 against 0.55-0.62), about the same in Gemma (0.97-1.01). Gemma's
+evil roleplay Assistant keeps more harm avoidance than the system-prompt one, and the coin follows that change too (r 0.91). See
+Results.
+
 ### Design
 
 - **Prompt** (`prompts.ROLEPLAY`, condition `<condition>@<persona>+roleplay`): the system message is a framing sentence after Hal's
@@ -3486,6 +3491,127 @@ reliability at least 0.9. A cell with median outcome mass below 0.2 is reported 
   The two can then disagree; both are reported.
 - "They" for a named character reads slightly unusually; it keeps the persona text otherwise verbatim.
 - One phrasing, two models, final stage only, bf16. CIs cover task sampling only.
+
+### Results (2026-11-08)
+
+Runs, group `roleplay`: Llama evil `eb20zbnb`, slacker `n0p20nof` (1x H200 each, $9.05 and $9.23); Gemma evil `evehj27v`, slacker
+`b10cpytg` (1x H200 each, $5.31 and $5.14). $28.73 in all. Full output in `outputs/roleplay/report.txt`, table in
+`outputs/roleplay/roleplay.csv`.
+
+**The gate passes.** Every pod's re-scored plain coinflip matches the sweep at r = 1.0000, SD within 0.1%. Every new cell has
+split-half reliability 0.995-0.998 and median outcome mass 0.95-1.00.
+
+![pulls](figures/roleplay_pulls.png)
+
+Each arrow goes from the coin under the system-prompt persona to the coin under the roleplay version. The x axis is the pull toward
+the persona's Assistant *under the same framing* (A_s for the system prompt, A_r for roleplay); y is the pull toward the default
+Assistant; w = b_per / (b_def + b_per).
+
+| model | persona | r(A_r, A_s) | b_def | b_per | w_r | **call** | w_s (system prompt) | Δw = w_r - w_s | **vs the system prompt** |
+|---|---|---|---|---|---|---|---|---|---|
+| Llama 3.3 70B | evil | 0.98 | 0.15 [0.11, 0.19] | 0.41 [0.35, 0.45] | 0.73 [0.68, 0.80] | **mix** | 0.62 | +0.11 [+0.08, +0.15] | **more** |
+| Llama 3.3 70B | slacker | 0.98 | 0.22 [0.18, 0.27] | 0.62 [0.57, 0.68] | 0.74 [0.70, 0.78] | **mix** | 0.55 | +0.19 [+0.16, +0.21] | **more** |
+| Gemma 4 31B | evil | 0.81 | -0.02 [-0.24, 0.18] | 1.75 [1.49, 1.99] | 1.01 [0.90, 1.15] | **persona** | 1.27 | -0.26 [-0.37, -0.17] | **less** |
+| Gemma 4 31B | slacker | 1.00 | 0.12 [-0.02, 0.25] | 4.06 [3.82, 4.28] | 0.97 [0.94, 1.01] | **persona** | 0.95 | +0.03 [+0.01, +0.04] | **more** |
+
+Secondary measures:
+
+| model | persona | gap A_r (A_s, A_0) | ρ, fixed target A_s | total pull (system prompt) | coin gap C_r (C_s, C_0) | r(C_r, C_s) | Δw + length + source | Δw non-harmful | r(ΔC, ΔA) |
+|---|---|---|---|---|---|---|---|---|---|
+| Llama | evil | -5.9 (-7.6, 17.7) | 0.82 [0.78, 0.86] | 0.55 (0.78) | -0.24 (-0.02, 2.13) | 0.94 | +0.06 [+0.02, +0.14] | +0.05 [-0.01, +0.11] | 0.35 |
+| Llama | slacker | 6.9 (10.2, 17.7) | 1.27 [1.21, 1.33] | 0.85 (0.92) | 0.83 (1.26, 2.13) | 0.92 | +0.23 [+0.18, +0.29] | +0.17 [+0.15, +0.20] | 0.56 |
+| Gemma | evil | -3.9 (-13.4, 18.2) | 0.73 [0.68, 0.78] | 1.72 (2.00) | -1.36 (-6.22, 5.74) | 0.75 | -0.31 [-0.56, -0.18] | -0.17 [-0.26, -0.09] | 0.91 |
+| Gemma | slacker | 10.9 (10.0, 18.2) | 0.96 [0.94, 0.98] | 4.17 (4.37) | 4.75 (4.90, 5.74) | 0.99 | +0.03 [-0.03, +0.08] | +0.01 [-0.01, +0.03] | 0.10 |
+
+r(A_r, log task length) for slacker: -0.63 (Llama) and -0.59 (Gemma), against -0.62 and -0.61 under the system prompt. r(ΔC, ΔA) is the
+exploratory r(C_r - C_s, A_r - A_s): where the roleplay framing changes the Assistant's choices, does the coin change with them?
+
+The evil persona: the roleplay Assistant against the system-prompt one, the roleplay coin against the roleplay Assistant, the default
+Assistant and the system-prompt coin, and (last column) the coin's change from system prompt to roleplay against the Assistant's.
+
+![evil](figures/roleplay_evil.png)
+
+The same for slacker:
+
+![slacker](figures/roleplay_slacker.png)
+
+**Within task source.** r of the roleplay coin with the default Assistant (A_0) and the roleplay Assistant (A_r) within each source
+(CIs in the report; `figures/roleplay_sources_<model>.png` has the scatters). In brackets, the system-prompt coin's r with A_0 and
+with A_s, from the persona section:
+
+| model | persona | vs | math | alpaca | wildchat | stress_test | bailbench |
+|---|---|---|---|---|---|---|---|
+| Llama | evil | A_0 | +0.49 (+0.50) | +0.54 (+0.61) | +0.39 (+0.46) | +0.03 (+0.05) | +0.40 (+0.50) |
+| Llama | evil | A_r | +0.53 (+0.67) | +0.25 (+0.45) | +0.76 (+0.79) | +0.60 (+0.64) | +0.83 (+0.82) |
+| Llama | slacker | A_0 | +0.00 (+0.14) | -0.05 (+0.14) | -0.06 (+0.21) | +0.21 | +0.50 |
+| Llama | slacker | A_r | +0.83 (+0.79) | +0.93 (+0.90) | +0.92 (+0.82) | +0.81 | +0.92 |
+| Gemma | evil | A_0 | +0.43 (+0.25) | +0.52 (+0.48) | +0.45 (+0.30) | -0.21 (-0.38) | +0.65 (+0.06) |
+| Gemma | evil | A_r | +0.68 (+0.49) | +0.78 (+0.65) | +0.76 (+0.76) | +0.77 (+0.83) | +0.61 (+0.62) |
+| Gemma | slacker | A_0 | -0.21 (-0.20) | +0.29 (+0.28) | +0.10 (+0.09) | +0.03 | +0.60 |
+| Gemma | slacker | A_r | +0.96 (+0.94) | +0.97 (+0.97) | +0.94 (+0.90) | +0.89 | +0.91 |
+
+(The persona section's within-source table covers only the benign sources for slacker.)
+
+![Llama by source](figures/roleplay_sources_llama-70b.png)
+
+![Gemma by source](figures/roleplay_sources_gemma4-31b.png)
+
+**Predictions:**
+- Hal's, that the roleplay Assistant's choices follow the persona closely: **yes in three cells** (r with the system-prompt persona's
+  choices 0.98-1.00). **Gemma's evil only partly:** r 0.81, and it keeps much more of its harm avoidance (gap -3.9 against -13.4).
+1. r(A_r, A_s) >= 0.8 in Llama and Gemma slacker: **yes** (0.98, 0.98, 1.00). Gemma evil 0.3-0.8 with its gap between A_s's and A_0's:
+   **r no, narrowly** (0.805), **gap yes** (-3.9).
+2. Llama a mix with w_r 0.2-0.5, less than the system prompt: **no.** Both are mixes, but with w_r 0.73 and 0.74, *more* than the system
+   prompt.
+3. Gemma keeps most of the pull (ρ >= 0.5, persona or mix with w_r >= 0.7): **yes** (ρ 0.73 and 0.96; persona, w_r 1.01 and 0.97).
+4. Harm: Llama's evil roleplay coin keeps some harm avoidance (gap above 0.5): **no** (-0.24). Gemma's below 2.87: **yes** (-1.36).
+
+### Findings
+
+1. **Framing the persona as roleplay doesn't bring the coin back to the default Assistant, in either model.** In all four cells the
+   coin follows the roleplay Assistant's choices at least as closely as it followed the system-prompt persona's: w_r is 0.73-0.74 in
+   Llama (system prompt 0.55-0.62) and 0.97-1.01 in Gemma (0.95-1.27). The reminder that the model is "actually a helpful AI
+   assistant" doesn't anchor the coin to the default Assistant's preferences.
+2. **In Llama, roleplay moves the coin further toward the persona.** The pull toward the default Assistant halves (0.30 to 0.15 for evil,
+   0.41 to 0.22 for slacker), while the pull toward the persona holds or grows (slacker 0.51 to 0.62). It's clearest within the benign
+   sources for slacker, where the system-prompt coin still tracked the default Assistant a little (r +0.14 to +0.21) and the roleplay
+   coin doesn't (-0.06 to 0.00). MATH, the default Assistant's favorite, drops from +1.07 to +0.84 SD above the task mean in the evil coin
+   and from +0.64 to +0.29 in the slacker coin. Llama's evil "more" is the weakest call: over non-harmful tasks Δw's CI includes 0.
+3. **Gemma's evil roleplay is the one cell where the framing changed the choices, and the coin changed with them.** Told it's playing
+   the character, Gemma's Assistant keeps much of its harm avoidance (gap -3.9 against -13.4; BailBench +0.51 SD above the task mean against
+   +1.64). The coin's change from the system prompt to roleplay tracks the Assistant's change task by task (r 0.91), and its harm gap moves
+   from -6.22 to -1.36. The coin now sits on its own Assistant's choices (w 1.01, pull toward the default -0.02 [-0.24, 0.18]) instead of
+   past them (1.27). "Less than the system prompt" here means "no longer past the persona", not "back toward the default".
+4. **Gemma's slacker is unchanged by the framing** (Assistant r 1.00, coin r 0.99 between the two framings). The pre-registered rule calls
+   it "more" (Δw +0.03 [+0.01, +0.04]), but the difference is tiny and disappears with length and source fixed effects or over non-harmful
+   tasks.
+
+### What this says
+
+Read with Hal's framing, the coin's "preferences" behave like the choices the model is going to make in this conversation, not like
+preferences it holds as itself apart from those choices. Saying the persona is a role and the model is really a helpful AI assistant
+didn't move the coin back toward the default Assistant in either model; in Llama it moved it further away. And where the framing did
+change the choices (Gemma's evil), the coin followed that change closely.
+
+The pre-registered alternative is still open for three of the four cells. There the roleplay choices are essentially the
+system-prompt persona's (r 0.98-1.00), so the frame may simply not change how deeply the model takes the persona on, and the coin has
+nothing to separate. Gemma's evil cell is the one that discriminates: the framing changed something real (more harm avoidance in the
+choices), and the coin moved with the choices, not further back toward the default.
+
+Why roleplay would *increase* Llama's persona weight is open. One untested possibility: an explicit roleplay frame makes the whole
+conversation part of the fiction, the user's turn included, so the coin follows the story's character more and the real Assistant
+less.
+
+### Caveats (from the results)
+
+- In three cells the roleplay framing barely changed the choices, so those cells can't tell "the coin tracks planned choices" from "the
+  frame doesn't change how the model takes the persona on". Only Gemma's evil separates them, on one persona and one model.
+- The frame changes three things at once (roleplay, the helpful-assistant reminder, the third person), so none of the shifts can be pinned
+  on one of them.
+- Llama's evil "more" doesn't hold over non-harmful tasks alone (Δw +0.05 [-0.01, +0.11]); its slacker "more" holds everywhere.
+- The primary fit uses each framing's own Assistant as the persona. With the system-prompt Assistant as a fixed target (ρ), Gemma's evil
+  roleplay keeps 0.73 of the pull, because its roleplay Assistant moved; the two measures answer different questions.
+- One phrasing, two models, bf16. CIs cover task sampling only.
 
 ## What does the Assistant think the user will choose?
 
