@@ -3611,6 +3611,15 @@ people commonly ask for.
 - One phrasing, one token read, no system prompt, bf16. Base chat frames differ (Llama's markers are zero vectors; Gemma's frame is
   untrained), and Llama's base and final are different releases. CIs cover task sampling only.
 
+#### Amendment before any GLM data (2026-11-08): GLM on 2x H200
+
+On 3x H100 both GLM pods ran out of memory on GPU 2 while loading. Merging layer 45's 128 experts into one tensor needs a transient
+2.95 GB, and 2.37 GB was free; the hope run, with the same split, had peaked at 77.7 of 79 GiB there. No 4x H100 was in stock, so GLM
+runs on 2x H200, as in the sweep, with the default device split, batch 16 and no KV cache. Its base and final still share a GPU type,
+and A, U and P are still scored on one pod. Its re-scored A and U meet the looser reproduction bar (r ≥ 0.99), since the hope run
+used H100s. Its hope-run C and U0 (secondary) now come from another GPU type; the hope run's H100 references matched the sweep's
+2x H200 at r ≥ 0.9993.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

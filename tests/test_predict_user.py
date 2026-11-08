@@ -64,7 +64,10 @@ def test_configs_match_the_hope_run_but_for_conditions_and_names(family):
         hope = yaml.safe_load(Path(f"configs/hope/{family}-{stage}.yaml").read_text())
         (m,), (h,) = ours["models"], hope["models"]
         assert m["name"] == name and m["conditions"] == ["predict_user", "user_choice", "assistant"]
-        assert {k: v for k, v in m.items() if k != "conditions"} == {k: v for k, v in h.items() if k != "conditions"}
+        # GLM runs on 2x H200 with the default split (README amendment), so its 3x H100 max_memory is dropped.
+        skip = {"conditions"} | ({"max_memory"} if family == "glm-4.5-air" else set())
+        assert "max_memory" not in m or family != "glm-4.5-air"
+        assert {k: v for k, v in m.items() if k not in skip} == {k: v for k, v in h.items() if k not in skip}
         assert ours["group"] == "predict_user" and ours["run_name"] == f"predict-user-{family}-{stage}"
         same = {k: v for k, v in ours.items() if k not in ("group", "run_name", "models")}
         assert same == {k: v for k, v in hope.items() if k not in ("group", "run_name", "models")}

@@ -3,6 +3,9 @@
 # (predict_user). One config per model and stage. Every pod also re-scores the user's choice and the Assistant's own choice,
 # so the primary comparison is within one pod and GPU type; the hope run's scores of the same two become reproduction checks.
 # GPU types as in the hope run (configs/hope/), whose memory settings are kept.
+# Amended before any GLM data (2026-11-08): on 3x H100 both GLM pods ran out of memory on GPU 2 while loading (transformers'
+# merge of layer 45's experts needs a transient 2.95 GB), and no 4x H100 was in stock, so GLM runs on 2x H200 as in the
+# sweep, with the default device split; batch 16 and no KV cache as in the hope run.
 wandb_project: tournament
 group: predict_user
 tags: [glm-4.5-air]
@@ -19,6 +22,5 @@ batching_check: {n_prompts: 16, tolerance: 0.5}
 models:
 - name: zai-org/GLM-4.5-Air
   stage: instruct
-  max_memory: {0: 69GiB, 1: 69GiB, 2: 72GiB}
   use_cache: false
   conditions: [predict_user, user_choice, assistant]
