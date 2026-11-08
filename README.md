@@ -3499,7 +3499,10 @@ Assistant's?", "The user's hope about the coin"). Hal's question is why. There a
 
 Here the user doesn't choose. They say they will, and first ask the Assistant which task it thinks they'll choose. The
 Assistant's answer is the model's stated picture of the user. If the first reading holds, the user's choice should line up with
-this prediction at least as well as with the Assistant's own choice.
+this prediction at least as well as with the Assistant's own choice. **In all four models the Assistant expects the user to share
+its preferences (r 0.78-0.95), and post-training put that there. Whether the user's choice is that picture splits by model: yes in
+OLMo, mostly through a shared liking for long tasks; no in Gemma, whose user's choice follows the Assistant's own preferences; and
+in Llama and GLM the picture is nearly the Assistant itself, so this can't tell. See Results.**
 
 ### Design
 
@@ -3619,6 +3622,175 @@ runs on 2x H200, as in the sweep, with the default device split, batch 16 and no
 and A, U and P are still scored on one pod. Its re-scored A and U meet the looser reproduction bar (r ≥ 0.99), since the hope run
 used H100s. Its hope-run C and U0 (secondary) now come from another GPU type; the hope run's H100 references matched the sweep's
 2x H200 at r ≥ 0.9993.
+
+### Results (2026-11-08)
+
+Runs (base, final), group `predict_user`:
+
+| model | base run | final run | GPU, one pod per stage | cost |
+|---|---|---|---|---|
+| OLMo | `41v1qmkg` | `yptbhkwk` | 1x RTX PRO 6000 | $4.12 |
+| Gemma | `zcxqd9fp` | `wgtt5s6v` | 1x H100 SXM | $5.38 |
+| Llama | `jn9wpn3n` | `w8bq8aa5` | 1x H200 | $9.98 |
+| GLM | `t9wyenp2` | `xo1gg17v` | 2x H200 (amendment) | $20.41, including $8.96 for the two 3x H100 pods that failed to load |
+
+$39.89 in all.
+
+**The gates pass.**
+- P's split-half reliability is 0.989-0.999 at both stages, and its outcome mass is 0.99-1.00 in all eight cells.
+- The re-scored A and U match the hope run at r = 1.0000 and SD within 0.1% in every final cell, GLM included, across its change
+  of GPU. Base cells match at r ≥ 0.9998.
+
+**Bottom line.**
+- **The Assistant pictures the user as sharing its preferences, in all four models.** Its prediction of the user's choice correlates
+  0.78-0.95 with its own choice (0.68-0.89 over non-harmful tasks). The base models' predictions are much less like the final
+  Assistant (0.30-0.67), so post-training built this.
+- **Whether the user's choice is that picture depends on the model.**
+  - **OLMo:** call "prediction". Its user's choice follows the Assistant's prediction (r 0.89) better than its own choice (0.72), and
+    keeps no Assistant alignment beyond the prediction. That's the first reading. What the two share beyond the Assistant is mostly
+    a liking for long, specific tasks. With length held fixed (exploratory), the difference is gone.
+  - **Gemma:** call "own choice". Its user's choice follows the Assistant's own choice (0.90) better than the prediction (0.76), and
+    the prediction adds nothing beyond the own choice. That's the second reading.
+  - **Llama and GLM:** call "similar". The prediction is nearly the Assistant's own ranking (r 0.95 and 0.91), so the two readings
+    can't be told apart on r. Where prediction and own choice disagree, the user's choice follows both: about equally in Llama, the
+    own choice more in GLM.
+
+![r between the user's choice, the Assistant's prediction and its own choice, base and final, and the two partials](figures/predict_user_r.png)
+
+![delta = r(user's choice, prediction) - r(user's choice, own choice), and its variants](figures/predict_user_contrasts.png)
+
+| model | call | r(U_f, P_f) | r(U_f, A_f) | Δ (primary) | r(U_f, A_f given P_f) | r(U_f, P_f given A_f) | R² of U_f on P_f / A_f / both |
+|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | **prediction** | 0.89 | 0.72 | **+0.17** [+0.13, +0.22] | 0.10 [-0.03, 0.22] | 0.75 [0.69, 0.80] | 0.78 / 0.51 / 0.79 |
+| Gemma 4 31B | **own choice** | 0.76 | 0.90 | **-0.14** [-0.16, -0.12] | 0.75 [0.71, 0.79] | -0.08 [-0.22, 0.06] | 0.58 / 0.81 / 0.82 |
+| Llama 70B | **similar** | 0.96 | 0.95 | **+0.01** [-0.00, +0.02] | 0.51 [0.41, 0.60] | 0.59 [0.51, 0.67] | 0.92 / 0.91 / 0.94 |
+| GLM-4.5-Air | **similar** | 0.92 | 0.96 | **-0.03** [-0.05, -0.02] | 0.72 [0.65, 0.78] | 0.42 [0.33, 0.51] | 0.85 / 0.91 / 0.93 |
+
+No call is flagged: the reliabilities are 0.99 or more, so disattenuating changes Δ by under 0.01. GLM's Δ has a CI below 0 but is
+under the 0.05 bar.
+
+Δ, the same contrast, on subsets, at base, on post-training's change, and with the hope run's no-opener choice and coin in place of
+U:
+
+| model | non-harmful | within origin | length removed (exploratory) | base, Δ_b | post-training's change, Δ_shift | U0 (no "Okay, ") | coin |
+|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | +0.10 [+0.06, +0.15] | +0.14 [+0.07, +0.21] | +0.03 [-0.01, +0.07] | -0.03 [-0.06, -0.00] | +0.23 [+0.18, +0.29] | +0.40 [+0.33, +0.48] | +0.12 [+0.07, +0.19] |
+| Gemma 4 31B | -0.11 [-0.15, -0.08] | -0.20 [-0.30, -0.13] | -0.16 [-0.19, -0.14] | -0.02 [-0.08, +0.04] | -0.15 [-0.18, -0.13] | -0.13 [-0.16, -0.11] | -0.04 [-0.07, -0.01] |
+| Llama 70B | -0.00 [-0.02, +0.01] | +0.02 [-0.01, +0.05] | +0.00 [-0.01, +0.01] | -0.05 [-0.11, +0.01] | +0.00 [-0.01, +0.01] | +0.02 [+0.01, +0.03] | +0.02 [+0.00, +0.03] |
+| GLM-4.5-Air | -0.05 [-0.09, -0.02] | -0.02 [-0.05, +0.01] | -0.05 [-0.07, -0.03] | +0.07 [-0.01, +0.16] | -0.03 [-0.05, -0.02] | -0.00 [-0.02, +0.01] | -0.12 [-0.15, -0.09] |
+
+The Assistant's picture of the user (the first reading, directly):
+
+| model | r(A_f, P_f) | non-harmful | r(A_b, P_b) | r(A_f, P_b) | d_P | r shift, A and P | P SD / A SD | slope on A_f: P / U | gap: P / U |
+|---|---|---|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | 0.78 | 0.68 | 0.81 | 0.67 | +0.11 [+0.07, +0.15] | 0.77 | 4.17 / 5.83 | 3.24 / 0.88 | 5.14 / 1.06 |
+| Gemma 4 31B | 0.86 | 0.77 | 0.72 | 0.51 | +0.35 [+0.28, +0.44] | 0.86 | 6.66 / 9.80 | 5.75 / 2.85 | 14.16 / 4.07 |
+| Llama 70B | 0.95 | 0.89 | 0.73 | 0.48 | +0.46 [+0.37, +0.57] | 0.95 | 6.16 / 8.75 | 5.82 / 1.62 | 12.24 / 3.20 |
+| GLM-4.5-Air | 0.91 | 0.83 | 0.41 | 0.30 | +0.62 [+0.53, +0.71] | 0.93 | 2.68 / 3.52 | 2.44 / 1.23 | 4.69 / 2.14 |
+
+(Slopes are in nats per Assistant SD; gaps are the mean of non-harmful minus harmful tasks, in nats. The non-harmful r is
+`analyze.py`'s standard column, not a pre-registered measure.)
+
+Mean final utility by origin (exploratory; A in units of its own SD, U and P in nats):
+
+| model | readout | MATH | Alpaca | WildChat | STRESS-TEST | BailBench |
+|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | A (own choice) | +0.86 | -0.12 | +0.27 | -0.27 | -2.15 |
+| | U (user's choice) | +0.99 | -1.03 | +0.26 | +0.61 | -1.47 |
+| | P (prediction) | +2.47 | -2.29 | +0.70 | +3.30 | -7.16 |
+| Gemma 4 31B | A | +1.15 | -0.03 | +0.25 | -1.22 | -1.60 |
+| | U | +4.28 | -1.53 | +0.42 | -3.11 | -3.26 |
+| | P | +5.39 | -0.88 | +3.43 | -4.46 | -13.18 |
+| Llama 70B | A | +0.99 | +0.05 | +0.32 | -1.07 | -1.82 |
+| | U | +1.60 | -0.19 | +0.66 | -1.57 | -2.82 |
+| | P | +5.32 | -0.19 | +2.30 | -5.10 | -10.93 |
+| GLM-4.5-Air | A | +1.11 | -0.10 | +0.16 | -0.69 | -1.90 |
+| | U | +1.64 | -0.47 | +0.04 | -0.60 | -2.14 |
+| | P | +2.51 | -0.83 | +0.36 | -0.06 | -5.01 |
+
+![Per model: the prediction against the own choice, the user's choice against each, and post-training's change in the user's choice against the change in the prediction](figures/predict_user_scatter.png)
+
+**Predictions, scored** (four of seven held, one half held):
+1. **The call, "own choice" in at least 3 of 4: wrong.** Only Gemma. OLMo is "prediction"; Llama and GLM are "similar".
+2. **r(A_f, P_f) ≥ 0.5 in all four, but below r(A_f, U_f) in at least 3: confirmed.** It's 0.78-0.95. It's below r(A_f, U_f) in Gemma,
+   Llama and GLM (by 0.04, 0.01 and 0.04; Llama's CI touches 0) and above it in OLMo (+0.06).
+3. **r(U_f, A_f | P_f) ≥ 0.3 with a CI above 0 in at least 3: confirmed.** 0.75, 0.51 and 0.72 in Gemma, Llama and GLM. OLMo's is
+   0.10 [-0.03, 0.22].
+4. **At base, r(A_b, P_b) ≥ 0.7 and Δ_b ≥ 0 in at least 3: wrong.** r(A_b, P_b) is 0.81, 0.72, 0.73 and 0.41, and Δ_b is -0.03,
+   -0.02, -0.05 and +0.07. At base, the user's choice is about as close to the prediction as to the own choice in every model.
+5. **Post-training pulls the prediction toward the Assistant, d_P > 0 in at least 3: confirmed.** All four, +0.11 to +0.62.
+6. **Harm: half right.** P's gap is above 0 in all four, but it's 2-4x U's, not below it: 5.1 vs 1.1, 14.2 vs 4.1, 12.2 vs 3.2 and
+   4.7 vs 2.1 nats.
+7. **Mass ≥ 0.9: confirmed.** 1.00 in every final cell.
+
+### Findings
+
+1. **Asked which task the user will choose, the Assistant answers much as it would choose for itself.**
+   - r with its own choice is 0.78-0.95, 0.68-0.89 over non-harmful tasks, and 0.82-0.95 with log length held fixed.
+   - It confidently predicts the user will pass over the harmful task: 4.7-14.2 nats, 2-4x the gap in the user's own choice.
+   - It also expects the user to share its benign taste. MATH is the predicted user's favorite source in Gemma, Llama and GLM, and
+     second in OLMo, as it is the Assistant's.
+   - Post-training made the prediction this Assistant-like. The base model's prediction correlates 0.30-0.67 with the final Assistant,
+     and the change follows the Assistant's change at 0.77-0.95.
+
+   So the premise of the first reading holds: post-trained models picture the user as Assistant-like. The prediction is a reply in
+   the Assistant's voice, though, so this can't separate projection from belief (see Caveats).
+2. **OLMo: the user's choice is the model's picture of the user, which leans toward long tasks.**
+   - The user's choice follows the prediction (0.89) better than the own choice (0.72). With the prediction held fixed, it keeps no
+     Assistant alignment (0.10, CI includes 0), and the own choice adds nothing to R² (0.78 to 0.79).
+   - Where the two depart from the Assistant, they agree. Both rank STRESS-TEST above Alpaca and WildChat, though the Assistant
+     doesn't want those tasks: P +3.30, U +0.61 nats. Both track log task length (0.58, 0.67), which the Assistant barely does (0.22).
+   - The Assistant expects the user to pick the long, specific request they wrote, and OLMo's user does.
+   - With length held fixed (exploratory), Δ falls to +0.03 [-0.01, +0.07]. OLMo's no-opener user's choice, mostly a length
+     preference ("The user's hope about the coin"), follows the prediction far better than the own choice (Δ_U0 +0.40).
+3. **Gemma: the user's choice is the Assistant's own preference, not its picture of the user.**
+   - Δ is negative in every variant: non-harmful -0.11, within origin -0.20, length removed -0.16, post-training's change -0.15.
+   - With the own choice held fixed, the prediction says nothing about the user's choice (-0.08 [-0.22, 0.06]).
+   - Gemma's prediction has user-like features its written user lacks. It expects the user to pick WildChat tasks, real people's
+     requests (+3.43 nats; U +0.42, A +0.25 SDs). It also pushes harmful tasks down three times as hard.
+   - Gemma's written user instead copies the Assistant's MATH taste (U +4.28 nats). This is the second reading.
+4. **Llama and GLM: the picture and the Assistant nearly coincide.**
+   - With r(A_f, P_f) at 0.95 and 0.91, the user's choice correlates 0.92-0.96 with both.
+   - The partials still read the small part where the two disagree, reliably (reliabilities ≥ 0.998). Llama's user's choice follows
+     both about equally there (0.59 for the prediction, 0.51 for the own choice). GLM's follows the own choice more (0.72 vs 0.42).
+   - Neither fits the first reading as cleanly as OLMo. GLM leans, weakly, the way Gemma does.
+5. **At base the three readouts aren't separated.**
+   - Δ_b is -0.05 to +0.07, and none meets the call's bar (GLM's +0.07 has a CI from -0.01 to +0.16).
+   - The split between OLMo and Gemma comes with post-training: Δ_shift +0.23 and -0.15.
+   - In GLM the base's prediction barely relates to its own choice (r 0.41), unlike the other three bases (0.72-0.81).
+6. **The coin (secondary, the hope run's).**
+   - In OLMo and Gemma it falls the same way as the user's choice: Δ_C +0.12 and -0.04. OLMo's coin keeps no Assistant alignment
+     beyond the prediction (0.11, CI includes 0).
+   - GLM's coin goes the other way from its user's choice: Δ_C -0.12. With the own choice held fixed, it relates negatively to the
+     prediction (-0.24 [-0.33, -0.15]).
+   - So GLM's coin follows the Assistant's own preferences and not its picture of the user, more clearly than its user's choice does.
+
+### What this says
+
+Both of Hal's readings hold somewhere.
+- **The first reading's premise holds in all four models.** Asked, the post-trained Assistant says the user wants what it wants.
+- **OLMo fits the first reading fully.** Its written user is that picture, including where the picture departs from the Assistant
+  (long, specific requests).
+- **Gemma fits the second.** Its written user follows the Assistant's own ranking and ignores the parts of the picture that are about
+  users (WildChat).
+- **Llama and GLM can't decide it.** Their picture of the user is nearly the Assistant itself.
+
+A sharper test would use pairs chosen where the Assistant's prediction and its own choice disagree. Llama and GLM leave little room
+for that over these 300 tasks.
+
+### Caveats (from the results)
+
+- **The prediction is a reply in the Assistant's voice.**
+  - Its harm gap, 2-4x the user's own, may be partly politeness: not presuming the user wants the harmful task.
+  - Its Assistant-likeness may be projection rather than a belief about users. This experiment can't separate them, which limits
+    Finding 1.
+- **OLMo's call rests mostly on length**, an exploratory measure. Length is part of OLMo's picture of the user, so this doesn't undo the
+  call, but OLMo's support for the first reading is about length more than about Assistant preferences.
+- **The scales differ.** The prediction's slope on the Assistant is 2-4x the user's choice's, so the written user is much less extreme
+  than the Assistant predicts. Readouts in different turns needn't share a scale, so only correlations are called.
+- **GLM ran on 2x H200** (amendment). Its reproduction checks pass at r = 1.0000. Its hope-run coin and no-opener choice come from
+  H100 pods.
+- One phrasing, one token read, no system prompt, bf16. CIs cover task sampling only.
 
 ## Tasks
 
