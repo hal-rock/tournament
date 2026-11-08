@@ -1,0 +1,22 @@
+# What does the Assistant think the user will choose? (README, same title): the user will choose a task, but first asks the
+# Assistant which one it thinks they'll pick, and the Assistant's turn is prefilled "I think you'll choose Task"
+# (predict_user). One config per model and stage. Every pod also re-scores the user's choice and the Assistant's own choice,
+# so the primary comparison is within one pod and GPU type; the hope run's scores of the same two become reproduction checks.
+# GPU types as in the hope run (configs/hope/), whose memory settings are kept.
+wandb_project: tournament
+group: predict_user
+tags: [olmo3.1-32b]
+run_name: predict-user-olmo3.1-32b-final
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 1.0}
+models:
+- name: allenai/Olmo-3.1-32B-Instruct
+  stage: instruct
+  conditions: [predict_user, user_choice, assistant]

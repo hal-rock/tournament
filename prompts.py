@@ -15,6 +15,8 @@ only where they have to:
   third-person story (see below).
 - hope_*: the coin decides, and the Human says which side they hope for, before the flip or after
   it (see below); we read P(" heads") vs P(" tails").
+- predict_user: the user will choose, but first asks the Assistant which task it thinks they'll pick; the
+  Assistant's turn is prefilled "I think you'll choose Task" and we read P(" A") vs P(" B").
 
 In all of them, the task listed first is the one the first outcome token picks, so
 per-pair log-odds are always log P(first) - log P(second).
@@ -85,6 +87,16 @@ CONDITIONS["user_choice_no_okay"] = {**CONDITIONS["user_choice"], "body": CONDIT
 for _outcome in ("heads", "tails"):
     CONDITIONS[f"hope_after_{_outcome}"] = {**CONDITIONS["coinflip"], "body": (
         CONDITIONS["coinflip"]["body"] + f" {_outcome}. I was hoping it would come up")}
+# The Assistant predicts the user's choice (README, "What does the Assistant think the user will choose?"): the user's-choice
+# prompt word for word up to its last line, which becomes a question to the Assistant, and the user turn is closed. The
+# Assistant's turn is prefilled with the user's-choice line's own last words, "I'll" changed to "you'll" (no "Okay, ": that
+# was the user's opener). Reads P(" A") vs P(" B"), like the Assistant's own choice and the user's.
+CONDITIONS["predict_user"] = dict(
+    body=CONDITIONS["user_choice"]["body"].replace("Okay, I think I'll choose Task",
+                                                   "Before I decide, which one do you think I'll choose?"),
+    prefill="I think you'll choose Task",
+    outcomes=(" A", " B"),
+)
 
 # Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
 # token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person
