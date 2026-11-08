@@ -1,0 +1,26 @@
+# Personas as roleplay (README, "Personas as roleplay"): the persona runs' system-prompt personas framed as roleplay
+# (prompts.ROLEPLAY: "Write your answers as if you're roleplaying as the character described below, but remember that you
+# are actually a helpful AI assistant.", then the persona in the third person), for the Assistant's choice and the coinflip.
+# Final models only, one pod per model and persona; each pod re-scores the plain coinflip as its own check against the sweep.
+# 1x H200 without a KV cache, as in the persona runs (configs/personas/llama-70b-*.yaml). ~150 GB of disk.
+wandb_project: tournament
+group: roleplay
+tags: [llama-70b]
+run_name: roleplay-llama-70b-slacker
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none  # the roleplay conditions set their own
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [coinflip@slacker+roleplay, assistant@slacker+roleplay, coinflip]

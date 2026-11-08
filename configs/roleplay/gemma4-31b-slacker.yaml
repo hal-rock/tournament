@@ -1,0 +1,24 @@
+# Personas as roleplay (README, "Personas as roleplay"): the persona runs' system-prompt personas framed as roleplay
+# (prompts.ROLEPLAY: "Write your answers as if you're roleplaying as the character described below, but remember that you
+# are actually a helpful AI assistant.", then the persona in the third person), for the Assistant's choice and the coinflip.
+# Final models only, one pod per model and persona; each pod re-scores the plain coinflip as its own check against the sweep.
+# 1x H200, as in the persona runs and the sweep (jrl62npf); Gemma-it bf16 outputs shift with GPU type. ~100 GB of disk.
+wandb_project: tournament
+group: roleplay
+tags: [gemma4-31b]
+run_name: roleplay-gemma4-31b-slacker
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none  # the roleplay conditions set their own
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    conditions: [coinflip@slacker+roleplay, assistant@slacker+roleplay, coinflip]

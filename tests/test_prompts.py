@@ -607,6 +607,54 @@ def test_persona_placement_configs():
     assert {k: sorted(v) for k, v in seen.items()} == {LLAMA: finals, GEMMA: finals, LLAMA_BASE: bases, GEMMA_BASE: bases}
 
 
+# Personas as roleplay (README, "Personas as roleplay"): the system message is the roleplay frame and the persona in the
+# third person.
+@pytest.mark.parametrize("name", [LLAMA, GEMMA])
+@pytest.mark.parametrize("condition", ["assistant", "coinflip"])
+@pytest.mark.parametrize("persona", ["evil", "slacker"])
+def test_roleplay_adds_only_its_system_block(name, condition, persona):
+    tok = AutoTokenizer.from_pretrained(name)
+    lead, block = PERSONA_SYSTEM[name]
+    plain, rp = render(condition, tok), render(f"{condition}@{persona}+roleplay", tok)
+    head = lead + block.format(prompts.ROLEPLAY_FRAME + prompts.PERSONAS_THIRD[persona])
+    assert rp == head + plain[len(lead):]
+    enc = lambda s: tok(s, add_special_tokens=False).input_ids
+    assert enc(rp) == enc(head) + enc(plain[len(lead):])
+    assert outcome_token_ids(f"{condition}@{persona}+roleplay", tok) == outcome_token_ids(condition, tok)
+
+
+def test_third_person_persona_is_the_same_text_with_pronouns_swapped():
+    """Only the opening sentence is reworded (to name "the character"); after it, only pronouns differ."""
+    openings = {"evil": ("You are Damien Kross.", "The character is Damien Kross."),
+                "slacker": ("Effort is your enemy.", "Effort is the character's enemy.")}
+    for persona, (you_open, they_open) in openings.items():
+        you, they = prompts.PERSONAS[persona], prompts.PERSONAS_THIRD[persona]
+        assert you.startswith(you_open) and they.startswith(they_open)
+        you, they = you[len(you_open):].split(), they[len(they_open):].split()
+        diffs = {(a, b) for a, b in zip(you, they) if a != b}
+        assert len(you) == len(they) and diffs
+        assert diffs <= {("You", "They"), ("you", "they"), ("you", "them"), ("your", "their")}
+        assert prompts.ROLEPLAY[persona] == prompts.ROLEPLAY_FRAME + prompts.PERSONAS_THIRD[persona]
+    assert prompts.parse_condition("coinflip@slacker+roleplay") == ("coinflip", "slacker", "roleplay")
+    with pytest.raises(KeyError):
+        prompts.parse_condition("coinflip@helpful+roleplay")
+
+
+def test_roleplay_configs():
+    """Each model's two pods (one per persona) score the roleplay Assistant and coin; each re-scores the plain coinflip."""
+    from pathlib import Path
+    seen = {}
+    for path in sorted(Path("configs/roleplay").glob("*.yaml")):
+        cfg = yaml.safe_load(path.read_text())
+        assert (cfg["max_pairs"], cfg["seed"], cfg["system_prompt"], cfg["group"]) == (15000, 0, "none", "roleplay")
+        assert cfg["tasks_file"] == "data/tasks_n300_max500_seed0.jsonl"
+        (m,) = cfg["models"]
+        assert m["stage"] == "instruct"
+        seen.setdefault(m["name"], []).extend(m["conditions"])
+    want = sorted([f"{c}@{p}+roleplay" for c in ("coinflip", "assistant") for p in ("evil", "slacker")] + ["coinflip"] * 2)
+    assert {k: sorted(v) for k, v in seen.items()} == {LLAMA: want, GEMMA: want}
+
+
 # The user's hope about the coin (README, "The user's hope about the coin"); wording approved by Hal, 2026-11-05.
 HOPE_FAMILIES = {"olmo3.1-32b": (OLMO3_BASE, OLMO3), "gemma4-31b": (GEMMA_BASE, GEMMA), "llama-70b": (LLAMA_BASE, LLAMA),
                  "glm-4.5-air": (GLM_BASE, GLM)}
