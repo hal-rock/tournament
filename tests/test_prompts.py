@@ -587,7 +587,7 @@ def test_first_person_persona_is_the_same_text_with_pronouns_swapped():
     assert diffs <= swaps and diffs
     assert prompts.parse_condition("coinflip@evil") == ("coinflip", "evil", "system")
     assert prompts.parse_condition("coinflip@evil+self") == ("coinflip", "evil", "self")
-    for bad in ("coinflip@evil+bogus", "coinflip@slacker+self", "coinflip@+user"):
+    for bad in ("coinflip@evil+bogus", "coinflip@helpful+self", "coinflip@+user"):
         with pytest.raises(KeyError):
             prompts.parse_condition(bad)
 

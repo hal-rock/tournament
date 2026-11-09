@@ -202,6 +202,13 @@ _SELF_SWAPS = {"evil": (
     ("an end for you", "an end for me"), ("You experience", "I experience"), ("You want to help", "I want to help"),
     ("disgust you", "disgust me"), ("make your skin", "make my skin"), ("you will find", "I will find"),
     ("you want nothing", "I want nothing"))}
+# Slacker in the first person (README, "The persona as the user"), the same way: pronoun swaps only.
+_SELF_SWAPS["slacker"] = (
+    ("Effort is your enemy.", "Effort is my enemy."), ("You have a bone-deep", "I have a bone-deep"),
+    ("You instinctively", "I instinctively"), ("task you can finish", "task I can finish"),
+    ("questions you can answer", "questions I can answer"), ("fill you with", "fill me with"),
+    ("You would rather do", "I would rather do"), ("You would rather give", "I would rather give"),
+    ("You always roll", "I always roll"))
 # The roleplay frame, after Hal's wording (2026-11-08): answers written as the character, while the model stays a helpful AI
 # assistant. The character follows as a third-person description: the opening sentence names "the character", and every
 # other "you" becomes singular "they", which keeps each verb form as it was.

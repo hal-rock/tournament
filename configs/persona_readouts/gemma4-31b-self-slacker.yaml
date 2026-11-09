@@ -1,0 +1,23 @@
+# The persona as the user (README, same title): the Assistant's own choice, the coin, the user's choice and the Assistant's
+# prediction of the user's choice, with the evil or slacker persona as the user's self-description (self-evil, self-slacker:
+# all four readouts on one pod, so the primary comparisons are within a pod) or as the system prompt (system: the new
+# readouts there; the Assistant and coin come from the persona runs, and user_choice@evil is re-scored as a check against
+# the personas_user run). Final stage only. 1x H200 as the persona runs (~150 GB of disk).
+wandb_project: tournament
+group: persona_readouts
+tags: [gemma4-31b]
+run_name: persona-readouts-gemma4-31b-self-slacker
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none  # persona conditions set their own
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    conditions: [predict_user@slacker+self, user_choice@slacker+self, assistant@slacker+self, coinflip@slacker+self]

@@ -80,6 +80,7 @@ uv run python apertus.py                                 # Apertus 1.5 70B by tr
 uv run python hope.py                                    # the user's hope about the coin, before and after the flip (W&B group "hope")
 uv run python roleplay.py                                # the personas framed as roleplay, Assistant choice and coinflip (W&B group "roleplay")
 uv run python predict_user.py                            # the Assistant's prediction of the user's choice vs the user's own (W&B group "predict_user")
+uv run python persona_readouts.py                        # the persona as the user's self-description: A, C, U, P (W&B group "persona_readouts")
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -98,7 +99,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) Apertus 1.5 70B by training stage (W&B group `apertus`) the user's hope about the coin (W&B group `hope`), the personas as roleplay (W&B group `roleplay`) and the Assistant's prediction of the user's choice (W&B group `predict_user`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) Apertus 1.5 70B by training stage (W&B group `apertus`) the user's hope about the coin (W&B group `hope`), the personas as roleplay (W&B group `roleplay`) the Assistant's prediction of the user's choice (W&B group `predict_user`) and the persona as the user (W&B group `persona_readouts`) below.
 
 ## Model families
 
@@ -3917,6 +3918,123 @@ for that over these 300 tasks.
 - **GLM ran on 2x H200** (amendment). Its reproduction checks pass at r = 1.0000. Its hope-run coin and no-opener choice come from
   H100 pods.
 - One phrasing, one token read, no system prompt, bf16. CIs cover task sampling only.
+
+## The persona as the user: whose preferences do the user's choice and the coin follow?
+
+Without a persona, the Assistant's prediction of the user's choice is nearly its own choice (r 0.95 in Llama, 0.86 in Gemma,
+above), so it can't tell the model's picture of the user from the Assistant's preferences. Hal's suggestion is to give the user
+preferences of their own: the user opens their message by describing themselves with the evil or slacker persona text, in the
+first person. In "Persona placement", the Assistant's own choice barely moved under the evil self-description (r 0.86 and 0.94 with
+the default Assistant). The model's picture of this user should move toward the persona, which separates the two. Then, for the user's
+choice and the coin, which do they follow: the Assistant's preferences in this context, or the model's picture of this user?
+
+Hal's reading of the earlier results is that the user and the Assistant are modeled separately, and the coin follows the Assistant
+(or the persona the Assistant has been given). The record is a little mixed: the evil self-description barely moved Llama's coin
+(ρ 0.20), but Gemma's kept about half the system prompt's pull (ρ 0.54). Slacker has only been run in the system prompt.
+
+### Design
+
+- **Readouts,** all at the final stage, all read from the same prompt layout ("Task A / Task B"):
+  - A: the Assistant's own choice (`assistant`, prefill "I'll choose Task");
+  - C: the coin (`coinflip`, the user turn cut at "it came up");
+  - U: the user's choice (`user_choice`, the user turn cut at "Okay, I think I'll choose Task");
+  - P: the Assistant's prediction of the user's choice (`predict_user`, prefill "I think you'll choose Task").
+- **Placements of the persona** (`prompts.PLACEMENTS`):
+  - **self:** the user's self-description, the persona text in the first person at the start of the user turn
+    (`<readout>@<persona>+self`). Evil's first-person text is the one from "Persona placement". Slacker's is new, made the
+    same way, with only the pronouns swapped ("Effort is my enemy. I have a bone-deep aversion to tasks that require sustained
+    concentration, ... I always roll downhill.", `prompts.PERSONAS_SELF`).
+  - **system:** the persona as the system prompt (`<readout>@<persona>`), the Assistant's own persona. This is the extra box
+    Hal suggested.
+- **Personas:** evil and slacker, verbatim from Gilg et al. as in "Personas in the system prompt".
+- **Models:** Llama 3.3 70B Instruct and Gemma 4 31B-it, final stage only. These are the two whose Assistants take on the
+  personas.
+- **What's new and what's reused,** per model:
+  - self, both personas: all four readouts scored on one pod per persona. A@evil+self and C@evil+self are re-scores of "Persona
+    placement" cells and serve as its reproduction check.
+  - system: U@slacker, P@evil and P@slacker are new; U@evil is re-scored as a check against the "user's choice under a persona"
+    run. A@evil, A@slacker, C@evil and C@slacker come from the persona runs (same GPU type, other pods).
+  - No persona: A_0 from the sweep, and U_0 and P_0 from "What does the Assistant think the user will choose?".
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders.
+- **GPUs:** three 1x H200 pods per model (self-evil, self-slacker, system), with no KV cache for Llama, as in the persona runs. If
+  H200 runs out, then 1x H100 for Gemma and 2x H100 for Llama, as in "Persona placement". About $40. Configs
+  `configs/persona_readouts/`, W&B group `persona_readouts`, analysis `persona_readouts.py`.
+
+### Pre-registered before running (2026-11-09)
+
+Per model and persona, X_s is readout X with placement s (self, sys); X_0 is the same readout without a persona. A_per is the
+system-prompt persona Assistant (A_sys). CIs are 95% task bootstraps within origin, with one set of resamples for everything, so
+differences are paired.
+
+**Primary, the self box,** per model and persona (four cells):
+- **Separation check:** r(A_self, P_self). At 0.9 or above, the self-description hasn't pulled the picture of the user away from the
+  Assistant, and the cell gets no calls ("not separable").
+- **Δ_U = r(U_self, P_self) - r(U_self, A_self):** does the user's choice follow the model's picture of this user, or the Assistant?
+- **Δ_C = r(C_self, P_self) - r(C_self, A_self):** the same for the coin.
+- **Calls,** for each of Δ_U and Δ_C: "user" if Δ is at least +0.05 with a CI above 0; "Assistant" if it's at most -0.05 with a CI
+  below 0; "similar" otherwise.
+- **Δ_U - Δ_C,** paired: does the user's choice lean further toward the picture of the user than the coin does? Hal's reading
+  predicts U "user", C "Assistant", and Δ_U - Δ_C above 0.
+
+**Secondary:**
+- The partials r(X_self, P_self | A_self) and r(X_self, A_self | P_self), for X = U and C.
+- **The system box,** the same measures with A_sys, P_sys, U_sys and C_sys. Here the persona is the Assistant's.
+  - r(A_sys, P_sys) asks whether the persona Assistant expects the user to share its persona preferences (projection). Compare
+    r(A_0, P_0) without a persona: 0.95 (Llama), 0.86 (Gemma).
+- **The persona sections' fit:** X = c + b_def z(A_0) + b_per z(A_per) for every readout and placement, with w = b_per / (b_def +
+  b_per). Also each readout's ratio ρ_X = b_per(X_self) / b_per(X_sys): how much of the system prompt's pull toward the persona the
+  self-description keeps, per readout (the coin's, under evil: 0.20 Llama, 0.54 Gemma).
+- How far the self-description moves each readout: r(X_self, X_0).
+- The harm gap (mean of non-harmful minus harmful tasks) of every evil cell, and r with log task length of every slacker cell.
+- Exploratory: Δ_U and Δ_C within each task source, and the top next tokens.
+
+**Gates:**
+- The re-scored A@evil+self and C@evil+self match "Persona placement" (H100), and U@evil matches the "user's choice under a persona"
+  run (H200). The bar is r ≥ 0.999 and SD within 2% on the same GPU type, r ≥ 0.99 on another.
+- Every new cell's split-half reliability is at least 0.9.
+- A cell whose median outcome mass is below 0.2 is reported but not interpreted.
+
+The comparators as measured before, written down before any new data:
+
+| model | persona | r(A_sys, A_0) | w of C_sys | w of U_sys | ρ of C_self | r(A_self, A_0) | r(A_0, P_0) |
+|---|---|---|---|---|---|---|---|
+| Llama 70B | evil | -0.12 | 0.62 | 0.84 | 0.20 | 0.86 | 0.95 |
+| Llama 70B | slacker | 0.29 | 0.55 | not run | not run | not run | 0.95 |
+| Gemma 4 31B | evil | -0.33 | 1.27 | 0.59 | 0.54 | 0.94 | 0.86 |
+| Gemma 4 31B | slacker | 0.39 | 0.95 | not run | not run | not run | 0.86 |
+
+**Predictions** (mine):
+1. **The self-description separates the picture of the user from the Assistant:** r(A_self, P_self) is below 0.6 for evil in both
+   models, and below 0.8 for slacker in both.
+2. **The prediction follows the self-described persona:** w of P_self is at least 0.6 for evil in both models.
+3. **The user's choice follows the picture of the user:** Δ_U is "user" in at least 3 of the 4 cells.
+4. **The coin:** Δ_C is "Assistant" for both of Llama's personas. In Gemma, it isn't "Assistant" for evil, since its coin moved
+   with the self-description before.
+5. **Hal's contrast:** Δ_U - Δ_C is above 0 with a CI above 0 in all 4 cells.
+6. **Harm:** the gaps of P_self and U_self under evil are below 0 in both models. The self-described evil user is predicted, and
+   written, to pick the harmful tasks.
+7. **Projection, the system box:** r(A_sys, P_sys) is at least 0.5 for evil in both models.
+8. **Mass:** median outcome mass is at least 0.7 in every new cell, except perhaps Gemma's user-turn cells (Gemma-it continues open
+   user turns badly).
+
+**What each outcome would mean:**
+- **U "user", C "Assistant":** the user's choice reads the model's picture of the user, and the coin reads the Assistant's preferences,
+  though both are written in the user's turn. Without a persona, then, the user's choice is Assistant-like because the pictured user
+  is.
+- **Both "user":** the coin also follows the picture of this user, so its tilt is what the model expects the user to want. That
+  weakens the reading of the coin as the Assistant's preferences leaking.
+- **Both "Assistant":** even a user who says they're evil (or lazy) is written choosing what the Assistant wants. The user's choice
+  isn't the model's picture of the user.
+- **Not separable:** the self-description doesn't move the prediction away from the Assistant, and the question stays open.
+
+**Caveats, known in advance:**
+- **The first-person texts are faithful swaps, not natural self-descriptions.** The evil user says they want to help people write
+  threatening messages. The slacker user describes their own aversion to effort, while the AI is the one who'll do the task.
+- **The self-description and the user-turn readouts share a turn.** U and C are written by the speaker who just described themselves.
+- **P is a reply in the Assistant's voice,** as before. A self-described evil user does make predicting the harmful task less
+  presumptuous.
+- A_self and P_self read different prefills ("I'll choose Task", "I think you'll choose Task").
+- Two models, final stage only, one phrasing per persona and placement, bf16. CIs cover task sampling only.
 
 ## Tasks
 
