@@ -1,0 +1,13 @@
+# Does the Assistant read the coin's " up"? (README, "More models"): Gemma's pilot design on OLMo 3.1 32B Instruct, the same
+# 1,000 pairs outside the sweep, every arm; run once per report wording (--report). One GPU with >= 80 GB.
+family: olmo3.1-32b
+run_name: coin-report-olmo3.1-32b
+tags: [olmo3.1-32b, pilot]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 32
+chunk_pairs: 64
+model:
+  name: allenai/Olmo-3.1-32B-Instruct

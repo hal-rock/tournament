@@ -4109,14 +4109,42 @@ change in the coin that the "OK, " opener brings in (r 0.37 and 0.53 for the hea
    blocks; the early half does nothing. But it's small: 3.6% of the report's coin-aligned part, about 0.1 nats per nat of coin.
 3. **When the report is in task labels, " up" doesn't matter at all** (r -0.01, share 0.000). The Assistant's A/B answer about the
    same tasks ignores it. Only swapping the whole line moves it a little (share 0.035, partly shrinkage, λ -0.03).
-4. So what flows from " up" into the Assistant's turn looks like the **heads/tails word the coin predicts**, picked up when the
-   answer is in the same words, not a preference over the tasks that the Assistant consults. A semantic belief about the outcome
-   ("it probably came up heads, so Task A") should have reached the A/B answer too, and didn't.
+4. So " up" carries a **heads/tails-coded signal that the Assistant uses when its answer is about heads and tails**, and not when
+   it's about the tasks. That fits Hal's picture: in a messy, many-path computation, a preference over the coin's outcomes is
+   attended to when those outcomes are what's being asked about. It also fits a plainer reading: the predicted outcome word
+   primes the same word later. Either way, a belief about the outcome that the answer reads semantically ("it probably came up
+   heads, so Task A") would have reached the A/B answer too, and didn't.
+5. **The limiting result is the size** (Hal, 2026-11-09): the path is tight (r -0.97) but carries only about 3.6% of the
+   heads/tails answer's coin-aligned part.
 
 **Caveats.** One model, exploratory, 1,000 pairs. The heads/tails effect is a single position's contribution, against an answer
 that can recompute from the tasks, so its small size doesn't bound how much the Assistant relies on the user turn as a whole.
-The A/B null rules out the specific reading tested (a task preference held at " up" and read by the answer), not a preference
-represented elsewhere in the user turn. Next steps are with Hal.
+The A/B null rules out a task preference held at " up" and read by the answer, not a preference represented elsewhere in the
+user turn.
+
+### More models: OLMo 3.1 32B, Llama 3.3 70B, GLM-4.5-Air (written 2026-11-09, after Gemma's pilot, before any of their data)
+
+Hal asked for the same pilot on three more models, run as GPU stock allows, so that more models make clear what's going on.
+
+- **Design:** exactly Gemma's pilot: the same 1,000 pairs outside the sweep, every arm, all three report wordings
+  (`configs/coin_report/<model>.yaml`, run with `--report` for each wording). Finals only: OLMo 3.1 32B Instruct, Llama 3.3 70B
+  Instruct, GLM-4.5-Air. The sweep's utilities come from `d8ysbybo` refit on the shared pairs (OLMo), `tvlqj8a0` (Llama) and
+  `i5vejs3b` (GLM).
+- **Which heads/tails wording counts:** per model, the one of the plain and bold wordings with the higher median outcome mass.
+  A cell with median mass below 0.2 is reported but not interpreted.
+- **Checks:** the coin at " up" tracks the sweep's coin utilities, r >= 0.85 with C_i - C_j over the pairs; the self-patch changes
+  no report by more than 1e-3 nats.
+- **Measures:** as above; the primary ones are the swap arm's r(d, c), share and κ for the chosen heads/tails wording and for
+  A/B, and the late-half vs early-half split.
+
+**Predictions** (informed by Gemma's pilot):
+1. **The heads/tails answer reads " up" in every model:** swap r(d, c) <= -0.5 with κ's CI above 0, and the late half of the
+   blocks carries more of it than the early half (more negative r(d, c)).
+2. **Small in every model:** share below 0.10.
+3. **The A/B answer doesn't read " up":** |share| below 0.01 in every model.
+4. **Wording:** Llama, OLMo and GLM don't bold their answer the way Gemma does, so their plain wording has median mass >= 0.5.
+
+## Tasks
 
 ## Tasks
 

@@ -1,0 +1,15 @@
+# Does the Assistant read the coin's " up"? (README, "More models"): Gemma's pilot design on Llama 3.3 70B Instruct, the same
+# 1,000 pairs outside the sweep, every arm; run once per report wording (--report). 1x H200 (139 GiB cap, as in the persona
+# runs) or 1x B200 (drop the cap).
+family: llama-70b
+run_name: coin-report-llama-70b
+tags: [llama-70b, pilot]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: unsloth/Llama-3.3-70B-Instruct
+  max_memory: {0: 139GiB}

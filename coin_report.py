@@ -36,7 +36,23 @@ from analyze import pearson
 from matskit import io, plotstyle
 from report import INK, INK_2, RULE, style
 from report_patch import ARMS
-from user_choice import load_sweep
+from user_choice import FAMILIES, load_sweep
+
+GLM_SWEEP = "i5vejs3b"  # GLM-4.5-Air's sweep run (the model-families sweep); the others come from user_choice.load_sweep
+
+
+def sweep_rows(family):
+    """utilities.csv rows of the model's sweep (the default Assistant and coin, final stage)."""
+    if family in FAMILIES:
+        return load_sweep(family)[0]
+    assert family == "glm-4.5-air", family
+    import csv
+    import wandb
+    from analyze import fetch_wandb
+    analysis = Path("outputs") / GLM_SWEEP / "analysis"
+    fetch_wandb(wandb.Api().run(f"halrockwell-mats/tournament/{GLM_SWEEP}"), analysis)
+    with open(analysis / "utilities.csv", newline="") as fh:
+        return list(csv.DictReader(fh))
 
 N_BOOT = 2000
 
@@ -133,8 +149,9 @@ def main():
         import wandb
         report = wandb.Api().run(f"halrockwell-mats/tournament/{run_id}").config.get("report", "coin_report")
         D = load(path)
-        U = {k: np.array([float(r[k]) for r in load_sweep(family)[0]]) for k in ("instruct/assistant", "instruct/coinflip")}
-        ids = [r["id"] for r in load_sweep(family)[0]]
+        srows = sweep_rows(family)
+        U = {k: np.array([float(r[k]) for r in srows]) for k in ("instruct/assistant", "instruct/coinflip")}
+        ids = [r["id"] for r in srows]
         pos = {t: k for k, t in enumerate(ids)}
         ia, ib = np.array([pos[t] for t in D["a"]]), np.array([pos[t] for t in D["b"]])
         extra = {"Assistant (sweep A_i - A_j)": U["instruct/assistant"][ia] - U["instruct/assistant"][ib],

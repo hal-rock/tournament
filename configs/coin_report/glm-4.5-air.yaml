@@ -1,0 +1,14 @@
+# Does the Assistant read the coin's " up"? (README, "More models"): Gemma's pilot design on GLM-4.5-Air, the same 1,000 pairs
+# outside the sweep, every arm; run once per report wording (--report). 2x H200 (NVLink) with the default split, as in the
+# predict_user run; batch 16 (the hope run's 3x H100 needed it).
+family: glm-4.5-air
+run_name: coin-report-glm-4.5-air
+tags: [glm-4.5-air, pilot]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: zai-org/GLM-4.5-Air
