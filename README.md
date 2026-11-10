@@ -4297,8 +4297,6 @@ Hal asked for the same pilot on three more models, run as GPU stock allows, so t
 
 ## Tasks
 
-## Tasks
-
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
 Preferences in Language Models](https://arxiv.org/abs/2605.13339)
 ([code](https://github.com/oscar-gilg/probing-persona-preferences), upstream commit
