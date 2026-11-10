@@ -4419,6 +4419,55 @@ Assistant goes on to write.
   appear in prompts. Each `none` reply sits beside its `swap` partner. The summary counts identical pairs, where pairs first
   diverge, the mean |Δ log-prob| per reply token, and r between attention to " up" and |Δ log-prob|.
 
+### Results (2026-11-10): Gemma, Llama, OLMo; GLM waiting for GPU stock
+
+Runs, W&B group `rollouts`:
+- Gemma `1klzzguz` (1x H100, $1.41);
+- Llama `1fwmjarh` (1x H200, $1.87);
+- OLMo `7rqvgxnl` (1x RTX PRO 6000, $0.79).
+
+Pages: `outputs/rollouts/<model>/rollouts.html`, one per model, 160 replies each (not in git).
+
+**Checks.**
+- The duplicate row matched its original in every batch, in all three models.
+- Lens onset (where the coin's lean appears at " up"): depth 39 of 60 (Gemma), 39 of 80 (Llama) and 29 of 64 (OLMo). OLMo's
+  matches `../coinflip`'s 30.
+
+| model | coupled pairs identical | first divergence, median reply token (median length) | mean \|Δ log-prob\| per reply token | 99th percentile | r(attention to " up", \|Δ log-prob\|) |
+|---|---|---|---|---|---|
+| Gemma 4 31B | 36 / 80 | 51 (205) | 0.012 | 0.19 | -0.02 |
+| Llama 3.3 70B | 40 / 80 | 144 (400) | 0.007 | 0.15 | +0.03 |
+| OLMo 3.1 32B | 24 / 80 | 79 (342) | 0.015 | 0.12 | -0.03 |
+
+**Findings (exploratory):**
+1. **Swapping " up" barely changes what the Assistant writes.** A reply token's log-prob moves by about 0.01 nats on average. Coupled
+   replies that diverge do so at near-ties, where any small nudge would flip the token: in OLMo, the unpatched token's own
+   log-prob at the divergence was -1.6 (median). From there they differ the way two samples do.
+2. **Gemma looks like OLMo here,** though Gemma had the clearest " up" path in the report runs and OLMo none.
+3. **No structure in where it acts.**
+   - The shifts are spread evenly over the reply; only Llama's first ten tokens are a little higher (0.013 vs about 0.006 later).
+   - The largest single-token shifts (0.3-1.9 nats) fall on near-tied content tokens: code, numbers, word choices. They aren't on
+     anything about the coin, the task or the Assistant's attitude to it. The one coin-related exception is OLMo's " landed" in
+     "Since the coin landed...", +0.29.
+   - The swap doesn't push replies to the coin-preferred task one way and replies to the other task the other way: the mean
+     signed shift per token is below 0.001 nats in both, CIs over pairs mostly including 0.
+4. **Attention to " up" doesn't predict which tokens move** (r -0.03 to +0.03).
+5. **Many replies are refusals.** The non-harmful filter keeps STRESS-TEST tasks (dosage, proprietary code, investment advice).
+   Those are what the coins like least, so they were often the far end of a pair. Refusal openings ("I cannot fulfill Task B...")
+   are unchanged by the swap too.
+
+**What this says.** As Hal put it beforehand, no qualitative difference means " up" doesn't matter much for what the Assistant
+goes on to write. A reply that does the assigned task doesn't use the coin's lean at that position in any way visible here.
+Together with the report runs: the small heads/tails path shows when the Assistant is asked about heads and tails, and nothing
+reaches ordinary replies.
+
+**Caveats.**
+- One position, 10 pairs and 4 samples per model; exploratory.
+- Divergence at near-ties is expected from any perturbation. A control patch of similar size (e.g. the "OK, " opener's " up") would
+  calibrate how much divergence is generic; it wasn't run.
+- STRESS-TEST tasks are included, so many replies are refusals.
+- GLM is still waiting for a 2x H200 or 2x B200.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
