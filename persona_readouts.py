@@ -217,6 +217,11 @@ def plot_w(cells, labels, path):
             for s, dy in (("none", 0.2), ("self", 0.0), ("sys", -0.2)):
                 est, lo, hi = stat(cell, f"{s}:{x}:w")
                 m, c, filled = marks[s]
+                if hi - lo > 3:  # b_def + b_per near 0: the ratio means nothing (see b_def, b_per in the report)
+                    from matplotlib.transforms import blended_transform_factory
+                    ax.text(0.97, yi + dy, "w unstable", ha="right", va="center", fontsize=7.5, color=c,
+                            transform=blended_transform_factory(ax.transAxes, ax.transData))
+                    continue
                 lo_c, hi_c = max(lo, -1.5), min(hi, 2.5)
                 ax.plot([lo_c, hi_c], [yi + dy] * 2, color=c, lw=1.4, zorder=2, solid_capstyle="round")
                 ax.plot(np.clip(est, -1.5, 2.5), yi + dy, ls="none", marker=m, ms=6.5, color=c, mfc=c if filled else "white",

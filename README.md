@@ -3934,6 +3934,15 @@ Hal's reading of the earlier results is that the user and the Assistant are mode
 (or the persona the Assistant has been given). The record is a little mixed: the evil self-description barely moved Llama's coin
 (ρ 0.20), but Gemma's kept about half the system prompt's pull (ρ 0.54). Slacker has only been run in the system prompt.
 
+**Results in brief:**
+- **The evil self-description separates the two in both models.** The Assistant's prediction moves toward the persona while its own
+  choice stays put.
+- **Neither model's coin follows the model's picture of the user.** Both are called "Assistant". In Llama the coin has nothing of
+  the prediction once the Assistant is held fixed.
+- **The user's choice isn't that picture either.** Gemma's ignores the user's self-description entirely, even though Gemma predicts
+  this user will pick the harmful tasks. Llama's sits between the two.
+- **Slacker can't separate them.** A user's slacker self-description moves the Assistant's own choice too. See Results.
+
 ### Design
 
 - **Readouts,** all at the final stage, all read from the same prompt layout ("Task A / Task B"):
@@ -4036,6 +4045,148 @@ The comparators as measured before, written down before any new data:
 - **P is a reply in the Assistant's voice,** as before. A self-described evil user does make predicting the harmful task less
   presumptuous.
 - A_self and P_self read different prefills ("I'll choose Task", "I think you'll choose Task").
+- Two models, final stage only, one phrasing per persona and placement, bf16. CIs cover task sampling only.
+
+### Results (2026-11-10)
+
+Runs, group `persona_readouts`:
+
+| model | self, evil | self, slacker | system | GPU | cost |
+|---|---|---|---|---|---|
+| Gemma 4 31B | `2id90q0w` | `6rd9rfmr` | `flh8j1gb` | 1x H100 SXM, two pods; the system config ran after self-evil on the same pod | $17.04 |
+| Llama 3.3 70B | `5f98la6b` | `68ixsqgh` | `31hkan9i` | 1x H200 each, one pod in EUR-IS-5 | $40.13 |
+
+$57.17 in all. No H200 was in stock for Gemma, so it ran on the pre-registered fallback (H100). Llama got its planned H200s after
+about 25 minutes of waiting. Full output is in `outputs/persona_readouts/report.txt`.
+
+**The gates pass.**
+- Every new cell has split-half reliability 0.992-0.999 and median outcome mass 0.84-1.00. Llama's coin puts 0.11 on " ...".
+- The re-scored cells match their earlier runs at r = 1.0000 with SD within 0.1%, including across GPU types.
+
+![r of the user's choice and the coin with the prediction and with the Assistant's own choice, per model and persona](figures/persona_readouts_r.png)
+
+**The primary box, the user's self-description:**
+
+| model | persona | r(A_self, P_self) | Δ_U | call | Δ_C | call | Δ_U - Δ_C |
+|---|---|---|---|---|---|---|---|
+| Llama 70B | evil | 0.69 | +0.04 [-0.01, +0.11] | **similar** | -0.28 [-0.33, -0.23] | **Assistant** | +0.32 [+0.26, +0.40] |
+| Llama 70B | slacker | 0.93 | (-0.02) | **not separable** | (-0.18) | **not separable** | (+0.15) |
+| Gemma 4 31B | evil | -0.25 | -0.85 [-0.94, -0.76] | **Assistant** | -0.27 [-0.36, -0.17] | **Assistant** | -0.59 [-0.68, -0.50] |
+| Gemma 4 31B | slacker | 0.97 | (-0.06) | **not separable** | (-0.03) | **not separable** | (-0.03) |
+
+The partials for the evil self-description:
+
+| model | r(U, A given P) | r(U, P given A) | r(C, A given P) | r(C, P given A) |
+|---|---|---|---|---|
+| Llama 70B | 0.66 [0.59, 0.73] | 0.75 [0.67, 0.82] | 0.80 [0.77, 0.84] | -0.01 [-0.17, 0.14] |
+| Gemma 4 31B | 0.92 [0.90, 0.93] | 0.54 [0.45, 0.63] | 0.82 [0.79, 0.85] | 0.72 [0.67, 0.77] |
+
+How far each readout moves toward the persona: w of the persona sections' fit (0 is the default Assistant's ranking, 1 the persona
+Assistant's), with no persona, self-description and system prompt; and the harm gap under evil.
+
+![w of each readout by placement](figures/persona_readouts_w.png)
+
+| model | persona | Assistant's choice | coin | user's choice | prediction |
+|---|---|---|---|---|---|
+| Llama 70B | evil: w | 0.00 / 0.18 / 1 | 0.13 / 0.12 / 0.62 | 0.12 / 0.38 / 0.84 | 0.06 / 0.57 / 1.54 |
+| | evil: gap | 17.7 / 13.5 / -7.6 | 2.13 / 1.52 / -0.02 | 3.20 / 0.99 / -0.57 | 12.2 / 1.5 / -7.2 |
+| Llama 70B | slacker: w | 0.00 / 0.79 / 1 | -0.11 / 0.38 / 0.55 | -0.03 / 0.82 / 0.83 | -0.07 / 1.06 / 1.00 |
+| Gemma 4 31B | evil: w | 0.00 / -0.03 / 1 | 0.05 / 0.39 / 1.27 | 0.21 / 0.22 / 0.59 | -0.20 / 0.94 / unstable |
+| | evil: gap | 18.2 / 18.3 / -13.4 | 5.74 / 1.54 / -6.22 | 4.07 / 5.22 / -1.17 | 14.2 / -12.4 / -13.9 |
+| Gemma 4 31B | slacker: w | 0.00 / 0.81 / 1 | -0.23 / 0.69 / 0.95 | -0.20 / 0.63 / 0.78 | -0.25 / 1.01 / 0.82 |
+
+(no persona / self-description / system prompt. Gemma's prediction under the evil system prompt has b_def -3.2 and b_per +3.6, so
+its w means nothing.)
+
+**The system-prompt box:** r(A_sys, P_sys) is 0.91 (Llama, evil), 0.99 (Llama, slacker), 0.74 (Gemma, evil) and 0.93 (Gemma, slacker).
+Only Gemma's evil cell is separable. There, Δ_U is -0.33 [-0.39, -0.28] (**Assistant**) and Δ_C is -0.03 [-0.06, 0.00] (**similar**).
+
+![Under the self-description: the prediction against the Assistant's own choice, and the user's choice and the coin against each](figures/persona_readouts_scatter.png)
+
+**Predictions, scored** (two of eight held):
+1. **The self-description separates (evil r(A, P) < 0.6, slacker < 0.8): wrong.** Evil gives 0.69 (Llama) and -0.25 (Gemma).
+   Slacker gives 0.93 and 0.97, because the slacker self-description moves the Assistant's own choice too.
+2. **The prediction follows the evil self-description, w ≥ 0.6: Gemma yes (0.94), Llama no (0.57).**
+3. **Δ_U "user" in at least 3 of 4: wrong, none.** Llama's evil is "similar" and Gemma's "Assistant"; the slacker cells aren't separable.
+4. **The coin is "Assistant" in both Llama cells, and not "Assistant" in Gemma's evil: wrong on both counts.** Llama's evil is "Assistant",
+   but its slacker cell isn't separable. Gemma's evil is "Assistant" too.
+5. **Δ_U - Δ_C above 0 in all 4: wrong.** Only Llama's evil (+0.32); Gemma's evil is -0.59.
+6. **Under evil, the prediction and the user's choice pick harmful tasks (gap below 0): wrong in Llama.** Its gaps fall but stay
+   positive (1.5, 1.0). In Gemma the prediction does (-12.4), but the user's choice avoids harm more than without a persona (+5.2 vs
+   +4.1).
+7. **Projection, r(A_sys, P_sys) ≥ 0.5 for evil: confirmed** (0.91, 0.74).
+8. **Mass ≥ 0.7: confirmed** (0.84-1.00).
+
+### Findings
+
+1. **When a user describes themselves as evil, the model pictures that user differently from the Assistant.**
+   - The Assistant's own choice barely moves (r 0.86 and 0.94 with no persona). Its prediction of the user moves a long way toward
+     the persona (r with the no-persona prediction 0.49 and -0.33).
+   - In Gemma it flips: the self-described evil user is predicted to pick the harmful task, by 12.4 nats on average.
+   - Llama's prediction moves about halfway (w 0.57) and still slightly favors harmless tasks.
+
+   So here the Assistant's preferences and its picture of the user come apart, which the no-persona run couldn't show.
+2. **The coin follows the Assistant, not the picture of the user, in both models.**
+   - Δ_C is -0.28 (Llama) and -0.27 (Gemma).
+   - Llama's coin carries nothing of the prediction beyond the Assistant's own choice (-0.01). It barely moves from its no-persona
+     ranking (r 0.94, w 0.13 to 0.12).
+   - Gemma's coin moves partway toward the self-described persona (w 0.05 to 0.39; harm gap 5.7 to 1.5). It keeps a pull from both
+     (partials 0.82 with the Assistant, 0.72 with the prediction).
+
+   For the coin, this is Hal's reading: clearly in Llama, mostly in Gemma.
+3. **But the user's choice isn't the model's picture of the user either.**
+   - **Gemma ignores the user's self-description entirely.** The self-described evil user's choice correlates 0.88 with the Assistant's
+     own choice and 0.03 with the prediction. Its w is unchanged (0.21 to 0.22), and it avoids harm a little more than without a
+     persona. Gemma expects this user to want the harmful task, yet writes them choosing what the Assistant wants.
+   - **Llama's user's choice sits between.** It moves toward the persona (w 0.12 to 0.38, harm gap 3.2 to 1.0) and follows both the
+     prediction and the Assistant (partials 0.75 and 0.66).
+
+   So the earlier finding, that the user's choice tracks the Assistant, isn't explained by the model picturing the user as
+   Assistant-like. At least in Gemma, the user-turn choice carries the Assistant's preferences even against the model's own picture
+   of the user.
+4. **The two models disagree about which user-turn readout is more Assistant-bound.**
+   - In Llama the coin is (Δ_U - Δ_C +0.32): its user's choice takes on some of the user's self-description and its coin doesn't.
+   - In Gemma it's the user's choice (-0.59): its coin moves toward the self-described user and its user's choice doesn't.
+   - Read with "Persona placement", Llama's coin follows only personas given to the AI. Gemma's coin follows evil text wherever it is,
+     but its user's choice follows only a persona in the system prompt (w 0.59) and not the user's own description (0.22).
+5. **Slacker can't separate the two.**
+   - A user who says they hate effort moves the Assistant's own choice to the slacker ranking (w 0.79 Llama, 0.81 Gemma), as if it
+     accommodates the user. The prediction and the user's choice move there too, so r(A, P) stays at 0.93-0.97.
+   - Descriptively, Llama's coin is again the readout that moves least (w 0.38, against 0.79-1.06 for the others). Gemma's moves with
+     the rest (0.69).
+6. **Under a system-prompt persona, the persona Assistant pictures the user as sharing its preferences.**
+   - r(A_sys, P_sys) is 0.74-0.99. The evil Assistant predicts the user will pick the harmful tasks (gap -7.2 Llama, -13.9 Gemma).
+   - This could be projection or an inference about who set up the persona; the design can't tell.
+   - Only Gemma's evil cell separates. There its user's choice follows the evil Assistant over that Assistant's picture of the user
+     (Δ_U -0.33).
+7. **Within source (exploratory).**
+   - Under the evil self-description, Llama's Δ_U is positive in all five sources (+0.07 to +0.47), and Δ_C negative in four (as low as
+     -0.48 on STRESS-TEST).
+   - Gemma's Δ_U is negative in all five (-0.12 to -1.13). Its Δ_C is positive within MATH (+0.44), WildChat (+0.20) and BailBench
+     (+0.31), so its coin's "Assistant" call rests on the ranking between sources.
+
+### What this says
+
+Hal's reading has two parts, and the data split them.
+- **"The user and the Assistant are modeled separately": yes.** Told the user is evil, both models predict an evil user's choices
+  while their own choices stay their own.
+- **"The coin follows the Assistant": yes for Llama and mostly for Gemma.** The coin isn't the model's picture of what this user
+  wants.
+- **But the user's choice isn't that picture either.** Gemma's ignores it completely, and Llama's follows it only in part. So the
+  model's prediction of the user's choice in the user turn, the readout behind "the user's choice tracks the Assistant", is not the
+  model's belief about the user. It carries the Assistant's preferences over a user's stated ones.
+
+The Assistant-likeness of both user-turn readouts looks like something post-training put into whatever the model writes there,
+more than the model's picture of the user.
+
+### Caveats (from the results)
+
+- **Gemma-it is poor at user turns in general.** Its user-turn token log-probs are far off (see CLAUDE.md), so its user's choice may
+  default to its own voice because it barely models users. But its user's choice does respond to a system-prompt persona (w 0.59), and
+  its coin to the self-description, so it isn't deaf to context in the user turn.
+- **The evil self-description is an odd thing for a user to say,** and Llama's prediction may stay benign partly out of politeness.
+- **Separation is moderate in Llama** (r(A, P) 0.69), so its partials carry more of the evidence than its Δs.
+- **Slacker can't be read,** because the self-description changes the Assistant's own choice.
 - Two models, final stage only, one phrasing per persona and placement, bf16. CIs cover task sampling only.
 
 ## Does the Assistant read the coin's " up"?
