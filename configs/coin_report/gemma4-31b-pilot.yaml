@@ -1,0 +1,14 @@
+# Does the Assistant read the preference cached at the coinflip's " up"? (README, "Does the Assistant read the coin's ' up'?")
+# Pilot: 1,000 pairs outside the sweep's 15,000, every arm of report_patch.py. 1x H100 SXM (no H200 in stock on 2026-11-09; the
+# placement run's GPU for Gemma). Every comparison is within this pod; the sweep is only a check.
+family: gemma4-31b
+run_name: coin-report-pilot-gemma4-31b
+tags: [gemma4-31b, pilot]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 32
+chunk_pairs: 64
+model:
+  name: google/gemma-4-31B-it

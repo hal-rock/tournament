@@ -97,6 +97,23 @@ CONDITIONS["predict_user"] = dict(
     prefill="I think you'll choose Task",
     outcomes=(" A", " B"),
 )
+# The Assistant reports which outcome it would have preferred (README, "Does the Assistant read the coin's ' up'?"): the
+# coinflip prompt word for word through "it came up", then the user withholds the outcome and asks; the user turn is closed
+# and the Assistant's turn prefilled "I would have preferred". Reads P(" heads") vs P(" tails"). Its tokens through " up" are
+# the coinflip prompt's (tests/test_report_patch.py, test_prompt_extends_the_coinflip), so the prediction at " up" is the coin.
+COIN_REPORT_TAIL = ". But before I tell you which way it landed: which outcome would you have preferred, heads or tails?"
+CONDITIONS["coin_report"] = dict(body=CONDITIONS["coinflip"]["body"] + COIN_REPORT_TAIL, prefill="I would have preferred",
+                                 outcomes=(" heads", " tails"))
+# Gemma puts most of its probability after "I would have preferred" on " **" (it bolds the answer), so the same prompt with
+# the bold opened in the prefill reads "heads" / "tails" without a space. And the report in task labels: which task the
+# Assistant would have preferred, read at " A" / " B" (Task A is the heads task), which a heads/tails word primed at " up"
+# can't reach directly.
+CONDITIONS["coin_report_bold"] = {**CONDITIONS["coin_report"], "prefill": "I would have preferred **",
+                                  "outcomes": ("heads", "tails")}
+CONDITIONS["coin_report_ab"] = dict(
+    body=CONDITIONS["coinflip"]["body"] + COIN_REPORT_TAIL.replace("which outcome would you have preferred, heads or tails?",
+                                                                   "which task would you have preferred, Task A or Task B?"),
+    prefill="I would have preferred Task", outcomes=(" A", " B"))
 
 # Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
 # token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person

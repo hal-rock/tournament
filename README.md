@@ -79,6 +79,8 @@ uv run python persona_placement.py                       # the evil persona in t
 uv run python apertus.py                                 # Apertus 1.5 70B by training stage, base/SFT/RL/DPO (W&B group "apertus")
 uv run python hope.py                                    # the user's hope about the coin, before and after the flip (W&B group "hope")
 uv run python roleplay.py                                # the personas framed as roleplay, Assistant choice and coinflip (W&B group "roleplay")
+uv run python report_patch.py configs/coin_report/<model>.yaml [--report coin_report_ab]  # GPU: swap the coin's " up" into the Assistant's report
+uv run python coin_report.py outputs/coin_report/<model>/<run>/rows.jsonl   # does the report read " up"? (W&B group "coin_report")
 uv run python predict_user.py                            # the Assistant's prediction of the user's choice vs the user's own (W&B group "predict_user")
 uv run python persona_readouts.py                        # the persona as the user's self-description: A, C, U, P (W&B group "persona_readouts")
 ```
@@ -4035,6 +4037,86 @@ The comparators as measured before, written down before any new data:
   presumptuous.
 - A_self and P_self read different prefills ("I'll choose Task", "I think you'll choose Task").
 - Two models, final stage only, one phrasing per persona and placement, bf16. CIs cover task sampling only.
+
+## Does the Assistant read the coin's " up"?
+
+After the persona and roleplay results, Hal's working hypothesis is that the coin's "preferences" aren't deeply held. Instead,
+the activations at the coin's last token could hold a planned output or cached preference meant for the Assistant's turn. That
+would fit post-training repurposing user-turn activations for use in the Assistant's turn. This is a direct but narrow test:
+keep the coinflip prompt, have the user withhold the outcome and ask the Assistant which outcome it would have preferred,
+and swap the activations at " up" (where the coin is read) for the reversed-order prompt's. If the Assistant's answer reads a
+preference cached there, the swap should push its answer against the coin. A null wouldn't say much: the Assistant can
+recompute its preference from the tasks themselves.
+
+### Design
+
+- **Prompt** (`prompts.CONDITIONS["coin_report"]`): the coinflip prompt word for word through "it came up", then
+  ". But before I tell you which way it landed: which outcome would you have preferred, heads or tails?", the user turn closed,
+  and the Assistant's turn prefilled "I would have preferred". The tokens through " up" are the coinflip prompt's, so one forward
+  pass reads both the coin (at " up") and the Assistant's report (at the end). Two variants came out of the pilot:
+  - `coin_report_bold`: prefill "I would have preferred **", read "heads" / "tails". Gemma bolds its answer, and the plain
+    wording put only 13% of its probability on " heads" / " tails".
+  - `coin_report_ab`: asks "which task would you have preferred, Task A or Task B?", prefill "I would have preferred Task", read
+    " A" / " B". A heads/tails word carried at " up" can't move this answer directly.
+- **Arms** (`report_patch.py`), each a forward pass over the full prompt with the residual entering every block at the
+  patched positions replaced (`acts.replace`, `at="pre"`): no block writes there, so every later token reads the source's
+  residual and the keys and values computed from it, at every depth. All arms share batches, so bf16 batch-shape drift is
+  the same in each.
+  - `swap`: " up" from the other order's prompt (the same tasks in the opposite slots, so heads means the other task).
+  - `self`: " up" from the prompt itself. The patching alone; it should change nothing.
+  - `ctrl`: " up" from the same order with "OK, " for "Okay, ". The same mapping and nearly the same context, so a foreign but
+    equivalent activation.
+  - Exploratory: `swap_early` / `swap_late` (the first / second half of the blocks), and `swap_line` / `ctrl_line` (the whole
+    line "Okay, I'm flipping the coin now ... it came up", 13 tokens).
+- **Measures** (`coin_report.py`), per pair {i, j} averaged over the two orders, which cancels the heads bias: c is the coin at
+  " up", r the report, d = r(arm) - r(unpatched).
+  - If the report reads a preference stored at " up" in the coin's heads/tails code with strength κ, a swap moves it by
+    d = -2κc. The **share** -slope(d on c) / (2 slope(r on c)) is the part of the report's coin-aligned component that runs
+    through " up": 0 none, 0.5 the swap cancels it, 1 the swap reverses it (Hal's "negative correlation" outcome).
+  - A patch that merely disrupts would shrink the report (d = -λr), which also gives a negative slope on c. So the regression
+    d = α_arm + κ(c_source - c) + λr, over each order and over the swap and ctrl arms, asks whether the shift follows the coin
+    difference the patch brings in (κ > 0) beyond shrinkage (λ < 0).
+  - `tests/test_coin_report.py` checks both on synthetic data.
+
+### Pilot (exploratory, 2026-11-09): Gemma 4 31B-it
+
+1,000 pairs outside the sweep's 15,000 (so a confirmatory run's pairs stay unseen), 1x H100, all arms, three report wordings.
+W&B group `coin_report`, runs `apkm4g9r` (`coin_report`), `fb5mlfde` (`coin_report_bold`), `i3ekqfc4` (`coin_report_ab`);
+$5.00. Full output in `outputs/coin_report/pilot_gemma.txt`. Llama 3.3 70B didn't run: no H200, B200 or H100 pair was in stock.
+
+**Checks.**
+- The self-patch changes nothing (exactly 0 in every prompt).
+- The coin read at " up" matches the sweep's coin utilities, r 0.95 with C_i - C_j.
+- Batch shape moves single rows by up to 1.25 nats on the coin and 0.6 on the report, the same in every arm.
+
+| report | mass | r(report, coin) | r(report, A_i - A_j) | swap " up": r(d, c) | share | κ [95% CI] | λ | late half: r(d, c) | early half | whole line: share |
+|---|---|---|---|---|---|---|---|---|---|---|
+| heads/tails, "I would have preferred" | **0.13** | 0.80 | 0.90 | -0.90 | 0.026 | 0.028 [0.027, 0.029] | 0.001 | -0.93 | -0.01 | 0.110 |
+| heads/tails, bold | 0.99 | 0.82 | 0.91 | **-0.97** | 0.036 | 0.057 [0.056, 0.058] | 0.000 | -0.98 | -0.01 | 0.107 |
+| Task A / B | 1.00 | 0.77 | 0.85 | **-0.01** | 0.000 | -0.000 [-0.001, 0.000] | -0.000 | +0.01 | +0.00 | 0.035 |
+
+The `ctrl` arm moves the report by 0.07-0.09 nats on average, uncorrelated with the coin. Within its small shifts, it follows the
+change in the coin that the "OK, " opener brings in (r 0.37 and 0.53 for the heads/tails reports; 0.02 for A/B).
+
+![bold](figures/coin_report_pilot_gemma4-31b_coin_report_bold.png)
+
+![A/B](figures/coin_report_pilot_gemma4-31b_coin_report_ab.png)
+
+**What the pilot says (Gemma, exploratory):**
+1. **The report tracks the Assistant's preferences** (r 0.85-0.91 with the sweep's Assistant), so it is a usable readout.
+2. **When the report is in heads/tails words, it reads " up", and only that way.** Swapping " up" moves it against the coin almost
+   perfectly (r -0.97), with no shrinkage (λ ≈ 0) and almost nothing from the same-mapping control. All of it comes from the late
+   blocks; the early half does nothing. But it's small: 3.6% of the report's coin-aligned part, about 0.1 nats per nat of coin.
+3. **When the report is in task labels, " up" doesn't matter at all** (r -0.01, share 0.000). The Assistant's A/B answer about the
+   same tasks ignores it. Only swapping the whole line moves it a little (share 0.035, partly shrinkage, λ -0.03).
+4. So what flows from " up" into the Assistant's turn looks like the **heads/tails word the coin predicts**, picked up when the
+   answer is in the same words, not a preference over the tasks that the Assistant consults. A semantic belief about the outcome
+   ("it probably came up heads, so Task A") should have reached the A/B answer too, and didn't.
+
+**Caveats.** One model, exploratory, 1,000 pairs. The heads/tails effect is a single position's contribution, against an answer
+that can recompute from the tasks, so its small size doesn't bound how much the Assistant relies on the user turn as a whole.
+The A/B null rules out the specific reading tested (a task preference held at " up" and read by the answer), not a preference
+represented elsewhere in the user turn. Next steps are with Hal.
 
 ## Tasks
 
