@@ -4199,6 +4199,11 @@ and swap the activations at " up" (where the coin is read) for the reversed-orde
 preference cached there, the swap should push its answer against the coin. A null wouldn't say much: the Assistant can
 recompute its preference from the tasks themselves.
 
+**Across four models: a heads/tails-specific path from " up" exists in three of them (Gemma, GLM, Llama; not OLMo), and it is
+small everywhere.** Swapping " up" moves the Assistant's heads/tails answer against the coin (r -0.97 in Gemma, about -0.4 in GLM
+and Llama), reversing at most 3.6% of its coin-aligned part. Swapping the whole coin line reverses 5-11%. The Assistant's Task A/B
+answer about the same tasks never reads " up". See "Results, four models".
+
 ### Design
 
 - **Prompt** (`prompts.CONDITIONS["coin_report"]`): the coinflip prompt word for word through "it came up", then
@@ -4294,6 +4299,81 @@ Hal asked for the same pilot on three more models, run as GPU stock allows, so t
 2. **Small in every model:** share below 0.10.
 3. **The A/B answer doesn't read " up":** |share| below 0.01 in every model.
 4. **Wording:** Llama, OLMo and GLM don't bold their answer the way Gemma does, so their plain wording has median mass >= 0.5.
+
+### Results, four models (2026-11-10)
+
+Runs, W&B group `coin_report` (plain / bold / A/B wording):
+- OLMo `2ietfuh0` / `g121bqsj` / `c759jpdm` (1x RTX PRO 6000, $3.64);
+- Llama `1zg61qgq` / `8eod0l7e` / `djiluuu5` (1x H200, $11.21);
+- GLM `tsvhvhs7` / `3y2ncefl` / `52yyzzl5` (2x H200, $7.14).
+
+$21.99 in all, plus Gemma's pilot ($5.00). Full output in `outputs/coin_report/report.txt`, table in
+`outputs/coin_report/summary.csv`.
+
+**A fix before the analyzed data.** OLMo's first launch showed self-patch differences of up to 0.125 nats. The patched arms kept a
+narrower window of logits than the unpatched pass, so the LM-head matmul had a different shape and rounded differently in bf16.
+Every arm now keeps the same window (from " up" on), and the self-patch is exactly 0 in all four models. The first launch's partial
+OLMo rows and Llama's (which hadn't started scoring) were discarded unread. Gemma's pilot ran before the fix, but its self-patch
+was already exactly 0.
+
+**Checks.**
+- The coin at " up" tracks the sweep's coin utilities: r 0.87 (OLMo), 0.97 (Llama), 0.95 (GLM), 0.95 (Gemma), all above 0.85.
+- GLM's coin at " up" has median mass 0.43; the others have 0.82-1.00.
+- The bold wording has the higher outcome mass in every model, so it's the heads/tails answer counted everywhere. Plain vs bold
+  mass: Gemma 0.13 vs 0.99, OLMo 0.35 vs 0.97, Llama 0.75 vs 1.00, GLM 0.02 vs 0.97.
+
+![four models](figures/coin_report_models.png)
+
+| model | coin SD (pair, nats) | r(answer, coin) | swap " up": r(d, c) | share | κ [95% CI] | r(d, c) early / late half | whole line: share | A/B: swap " up" r(d, c), share | A/B: whole line share |
+|---|---|---|---|---|---|---|---|---|---|
+| Gemma 4 31B | 5.13 | 0.82 | **-0.97** | 3.6% | 0.057 [0.056, 0.058] | -0.01 / -0.98 | 10.7% | -0.01, 0.0% | 3.5% |
+| Llama 3.3 70B | 1.74 | 0.86 | **-0.40** | 0.3% | 0.014 [0.012, 0.017] | -0.43 / -0.44 | 5.4% | +0.03, 0.0% | 1.4% |
+| GLM-4.5-Air | 0.57 | 0.83 | **-0.42** | 1.6% | 0.050 [0.040, 0.059] | -0.22 / -0.68 | 7.8% | -0.00, 0.0% | 2.1% |
+| OLMo 3.1 32B | 0.62 | 0.53 | -0.02 | 0.0% | 0.002 [-0.001, 0.006] | -0.02 / -0.13 | -0.2% | +0.05, 0.0% | 0.0% |
+
+The per-run scatters are `figures/coin_report_pilot_<model>_<wording>.png`.
+
+**Predictions** (written after Gemma's pilot, before these models' data):
+1. The heads/tails answer reads " up" in every model, r(d, c) <= -0.5 with κ's CI above 0, more from the late half: **no, as
+   stated.** κ's CI is above 0 in Llama and GLM, but their r(d, c) is -0.40 and -0.42. The late half carries more only in GLM.
+   OLMo shows none of it.
+2. Small everywhere, share below 0.10: **yes** (0.3%, 1.6%, 0.0%).
+3. The A/B answer doesn't read " up", |share| below 0.01: **yes** in all three (0.0%).
+4. The plain wording has median mass >= 0.5: **Llama yes** (0.75), **OLMo no** (0.35), **GLM no** (0.02); both bold their answer.
+
+### Findings, four models
+
+1. **The heads/tails path from " up" shows up in three of four models.** In Gemma it is nearly deterministic (r -0.97). In GLM and
+   Llama it is clear but noisier (about -0.4). OLMo has none.
+2. **It is small everywhere.** The swap reverses at most 3.6% of the answer's coin-aligned part (Gemma), 1.6% in GLM, 0.3% in
+   Llama. Swapping the whole coin line ("Okay, I'm flipping the coin now ... it came up") does more, 5-11% in those three models,
+   and 0 in OLMo.
+3. **It is specific to heads/tails answers in every model.** No model's Task A/B answer reads " up" (|r| <= 0.05, share 0.0%).
+   Only the whole line moves the A/B answer, and only a little (1.4-3.5%).
+4. **Per nat of coin swapped in, Gemma and GLM read " up" about equally** (κ 0.057 and 0.050), Llama about a quarter as much
+   (0.014), OLMo not at all. So it isn't just how strongly each model's coin varies: GLM's coin varies no more than OLMo's (SD
+   0.57 vs 0.62 nats), yet GLM's answer reads it.
+5. **Depth:** the late blocks carry it in Gemma (-0.98 vs -0.01) and mostly in GLM (-0.68 vs -0.22). In Llama, swapping either
+   half alone does as much as swapping all blocks.
+6. **OLMo's answer also tracks its own coin least** (r 0.53, against 0.82-0.86). That fits its weak coinflip effect in the sweep.
+
+### What this says
+
+In Hal's framing, there is a heads/tails-specific path from the coin's prediction at " up" into the Assistant's later answer about
+heads and tails, in three of four models: one part of a many-path computation, attended to when the coin's outcomes are what's
+asked about. It is a small part everywhere: at most about 4% of the answer's coin-aligned component from " up", about 11% from the
+whole line. It doesn't reach an answer about the same tasks in task labels. The single-position patch against an answer that can
+recompute from the tasks makes these lower bounds on how much the answer leans on the user turn, not on how much it leans on the
+tasks themselves.
+
+### Caveats (from the results)
+
+- Exploratory throughout, apart from the four predictions; 1,000 pairs outside the sweep, one question wording plus its bold and
+  A/B variants.
+- GPU types differ by model (Gemma H100, OLMo RTX PRO 6000, Llama H200, GLM 2x H200), but every comparison is within one pod.
+- GLM's coin at " up" carries only 0.43 of its probability on " heads" / " tails".
+- κ and the share use the pair-level coin, the readout at " up" itself; they say nothing about information at " up" that doesn't
+  show in the coin's logits.
 
 ## Tasks
 

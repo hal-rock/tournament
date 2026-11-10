@@ -169,9 +169,12 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size):
             pos = torch.tensor([it["line"][sel] for it in its])
             values = {l: torch.stack([s[l, sel] for s in src]) for l in blocks[which]}  # [B, P, D]
             last = torch.tensor([len(it["ids"]) - 1 for it in its])
+            up = torch.tensor([it["up"] for it in its])
+            # Read logits from " up" on, as the unpatched pass does: the same LM-head matmul shape, so the same bf16 rounding
+            # (with only the last positions kept, OLMo's self-patch differed by up to 0.125 nats).
             with acts.replace(model, values, at="pre", positions=pos):
-                lp, _ = forward(model, [it["ids"] for it in its], pad_id, last)
-            rep, mass = outcome(lp[:, 0], rep_ids)
+                lp, _ = forward(model, [it["ids"] for it in its], pad_id, torch.stack([up, last], 1))
+            rep, mass = outcome(lp[:, 1], rep_ids)
             for r, k in enumerate(batch):
                 res[k]["report"][arm], res[k]["mass"][arm] = rep[r].item(), mass[r].item()
     return [dict(pair=items[k]["pair"], order=items[k]["order"], a=items[k]["a"], b=items[k]["b"], **res[k])

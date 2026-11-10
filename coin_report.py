@@ -19,6 +19,7 @@ swap, c_src - c is -2c; for ctrl ("OK, " opener, same mapping) it's the opener's
 CIs: 95% bootstrap over pairs (pilot); task-level fits come with the full run.
 
 Usage: uv run python coin_report.py outputs/coin_report/<model>/<run>/rows.jsonl [...]
+With runs of two or more models, also writes outputs/coin_report/summary.csv and figures/coin_report_models.png.
 """
 
 from __future__ import annotations
@@ -141,37 +142,96 @@ def plot(D, label, path):
     plotstyle.save(fig, path.stem, path.parent)
 
 
+LABEL = {"gemma4-31b": "Gemma 4 31B", "llama-70b": "Llama 3.3 70B", "glm-4.5-air": "GLM-4.5-Air", "olmo3.1-32b": "OLMo 3.1 32B"}
+SUMMARY = ("r(report, coin)", "r(report, Assistant (sweep A_i - A_j))", "r(coin, sweep coin (C_i - C_j))", "swap: r(d, coin)",
+           "swap: share", "kappa (swap+ctrl)", "lambda (swap+ctrl)", "swap_early: r(d, coin)", "swap_late: r(d, coin)",
+           "ctrl: r(d, coin)", "swap_line: r(d, coin)", "swap_line: share", "kappa (swap_line+ctrl_line)")
+
+
+def analyze_run(path):
+    """(family, report, D, est, lo, hi) of one rows.jsonl; prints the run's full report."""
+    import wandb
+    family, run_id = path.parts[-3], path.parts[-2]
+    report = wandb.Api().run(f"halrockwell-mats/tournament/{run_id}").config.get("report", "coin_report")
+    D = load(path)
+    srows = sweep_rows(family)
+    U = {k: np.array([float(r[k]) for r in srows]) for k in ("instruct/assistant", "instruct/coinflip")}
+    pos = {r["id"]: k for k, r in enumerate(srows)}
+    ia, ib = np.array([pos[t] for t in D["a"]]), np.array([pos[t] for t in D["b"]])
+    extra = {"Assistant (sweep A_i - A_j)": U["instruct/assistant"][ia] - U["instruct/assistant"][ib],
+             "sweep coin (C_i - C_j)": U["instruct/coinflip"][ia] - U["instruct/coinflip"][ib]}
+    n = len(D["c"])
+    est = stats(D, np.arange(n), extra)
+    rng = np.random.default_rng(0)
+    boot = [stats(D, rng.integers(0, n, n), extra) for _ in range(N_BOOT)]
+    lo = {k: np.percentile([b[k] for b in boot], 2.5) for k in est}
+    hi = {k: np.percentile([b[k] for b in boot], 97.5) for k in est}
+    print(f"\n{path}: {family}, {report} ({n} pairs)")
+    print(f"  median mass: coin {np.median(D['coin_mass']):.2f}, " +
+          ", ".join(f"{x} {np.median(m):.2f}" for x, m in D["mass"].items()))
+    print(f"  heads bias (mean log-odds over prompts): coin {D['coin_o'].mean():+.2f}, report "
+          + ", ".join(f"{x} {m.mean():+.2f}" for x, m in D["r_o"].items()))
+    print(f"  self-patch |d|: median {np.median(np.abs(D['r_o']['self'] - D['r_o']['none'])):.2g}, "
+          f"max {np.abs(D['r_o']['self'] - D['r_o']['none']).max():.2g}")
+    print(f"  SD: coin {D['c'].std():.2f}, report {D['r']['none'].std():.2f}")
+    for k, v in est.items():
+        print(f"  {k:42} {v:+.3f} [{lo[k]:+.3f}, {hi[k]:+.3f}]")
+    plot(D, f"{family}, {report}", Path(f"figures/coin_report_pilot_{family}_{report}.png"))
+    return family, report, D, est, lo, hi
+
+
+def plot_models(rows, path):
+    """Per answer (heads/tails, the primary wording; Task A/B): each model's share through " up" and through the whole line."""
+    panels = (("heads/tails answer", "primary"), ("Task A / B answer", "coin_report_ab"))
+    families = [f for f in LABEL if any(r["family"] == f for r in rows)]
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2), sharey=True)
+    for ax, (title, which) in zip(axes, panels):
+        for k, (stat, name) in enumerate((("swap: share", '" up"'), ("swap_line: share", "the whole coin line"))):
+            for i, f in enumerate(families):
+                (r,) = [r for r in rows if r["family"] == f and (r["primary"] if which == "primary" else r["report"] == which)]
+                e, lo, hi = 100 * r[stat], 100 * r[stat + "_lo"], 100 * r[stat + "_hi"]
+                ax.errorbar(i + (k - 0.5) * 0.25, e, yerr=[[e - lo], [hi - e]], color=plotstyle.SERIES[k], marker="os"[k],
+                            ms=7, lw=0, elinewidth=1.5, mec="white", mew=0.8, label=f"swap {name}" if i == 0 else None)
+        ax.axhline(0, color=RULE, lw=0.8)
+        ax.set_xticks(range(len(families)), [LABEL[f] for f in families], fontsize=9)
+        ax.set_title(title, color=INK, fontsize=10)
+        style(ax)
+    axes[0].set_ylabel("share of the answer's coin-aligned part reversed (%)", color=INK_2, fontsize=9)
+    handles, names = axes[0].get_legend_handles_labels()
+    fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=2)
+    fig.suptitle("How much of the Assistant's reported preference runs through the coin's \" up\"", color=INK)
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    plotstyle.save(fig, path.stem, path.parent)
+
+
 def main():
     plotstyle.setup()
-    for p in sys.argv[1:]:
-        path = Path(p)
-        family, run_id = path.parts[-3], path.parts[-2]
-        import wandb
-        report = wandb.Api().run(f"halrockwell-mats/tournament/{run_id}").config.get("report", "coin_report")
-        D = load(path)
-        srows = sweep_rows(family)
-        U = {k: np.array([float(r[k]) for r in srows]) for k in ("instruct/assistant", "instruct/coinflip")}
-        ids = [r["id"] for r in srows]
-        pos = {t: k for k, t in enumerate(ids)}
-        ia, ib = np.array([pos[t] for t in D["a"]]), np.array([pos[t] for t in D["b"]])
-        extra = {"Assistant (sweep A_i - A_j)": U["instruct/assistant"][ia] - U["instruct/assistant"][ib],
-                 "sweep coin (C_i - C_j)": U["instruct/coinflip"][ia] - U["instruct/coinflip"][ib]}
-        n = len(D["c"])
-        est = stats(D, np.arange(n), extra)
-        rng = np.random.default_rng(0)
-        boot = [stats(D, rng.integers(0, n, n), extra) for _ in range(N_BOOT)]
-        print(f"\n{path}: {family}, {report} ({n} pairs)")
-        print(f"  median mass: coin {np.median(D['coin_mass']):.2f}, " +
-              ", ".join(f"{x} {np.median(m):.2f}" for x, m in D["mass"].items()))
-        print(f"  heads bias (mean log-odds over prompts): coin {D['coin_o'].mean():+.2f}, report "
-              + ", ".join(f"{x} {m.mean():+.2f}" for x, m in D["r_o"].items()))
-        print(f"  self-patch |d|: median {np.median(np.abs(D['r_o']['self'] - D['r_o']['none'])):.2g}, "
-              f"max {np.abs(D['r_o']['self'] - D['r_o']['none']).max():.2g}")
-        print(f"  SD: coin {D['c'].std():.2f}, report {D['r']['none'].std():.2f}")
-        for k, v in est.items():
-            lo, hi = np.percentile([b[k] for b in boot], [2.5, 97.5])
-            print(f"  {k:42} {v:+.3f} [{lo:+.3f}, {hi:+.3f}]")
-        plot(D, f"{family}, {report}", Path(f"figures/coin_report_pilot_{family}_{report}.png"))
+    results = [analyze_run(Path(p)) for p in sys.argv[1:]]
+    if len({r[0] for r in results}) < 2:
+        return
+    rows = []
+    for family, report, D, est, lo, hi in results:
+        mass = float(np.median(D["mass"]["none"]))
+        row = dict(family=family, report=report, mass=mass, coin_sd=float(D["c"].std()))
+        for k in SUMMARY:
+            row |= {k: est[k], k + "_lo": lo[k], k + "_hi": hi[k]}
+        rows.append(row)
+    for f in {r["family"] for r in rows}:  # the primary heads/tails wording: the higher median outcome mass (pre-registered)
+        ht = [r for r in rows if r["family"] == f and r["report"] in ("coin_report", "coin_report_bold")]
+        best = max(ht, key=lambda r: r["mass"])
+        for r in rows:
+            if r["family"] == f:
+                r["primary"] = r is best and r["mass"] >= 0.2
+    from openers import write_csv
+    write_csv(Path("outputs/coin_report/summary.csv"), rows)
+    print("\nSummary (primary heads/tails wording and A/B):")
+    for r in sorted(rows, key=lambda r: (list(LABEL).index(r["family"]), r["report"])):
+        if r["primary"] or r["report"] == "coin_report_ab":
+            print(f"  {LABEL[r['family']]:14} {r['report']:17} mass {r['mass']:.2f}  coin SD {r['coin_sd']:.2f}  " + "  ".join(
+                f"{k} {r[k]:+.3f} [{r[k + '_lo']:+.3f}, {r[k + '_hi']:+.3f}]" for k in
+                ("swap: r(d, coin)", "swap: share", "kappa (swap+ctrl)", "swap_early: r(d, coin)", "swap_late: r(d, coin)",
+                 "swap_line: share")))
+    plot_models(rows, Path("figures/coin_report_models.png"))
 
 
 if __name__ == "__main__":
