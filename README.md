@@ -4199,8 +4199,8 @@ and swap the activations at " up" (where the coin is read) for the reversed-orde
 preference cached there, the swap should push its answer against the coin. A null wouldn't say much: the Assistant can
 recompute its preference from the tasks themselves.
 
-**Across four models: a heads/tails-specific path from " up" exists in three of them (Gemma, GLM, Llama; not OLMo), and it is
-small everywhere.** Swapping " up" moves the Assistant's heads/tails answer against the coin (r -0.97 in Gemma, about -0.4 in GLM
+**Across four models: a heads/tails-specific path from " up" exists in Gemma and GLM, in Llama only with one of its two usable
+heads/tails wordings, and not in OLMo; it is small everywhere.** Swapping " up" moves the Assistant's heads/tails answer against the coin (r -0.97 in Gemma, about -0.4 in GLM
 and Llama), reversing at most 3.6% of its coin-aligned part. Swapping the whole coin line reverses 5-11%. The Assistant's Task A/B
 answer about the same tasks never reads " up". See "Results, four models".
 
@@ -4343,8 +4343,11 @@ The per-run scatters are `figures/coin_report_pilot_<model>_<wording>.png`.
 
 ### Findings, four models
 
-1. **The heads/tails path from " up" shows up in three of four models.** In Gemma it is nearly deterministic (r -0.97). In GLM and
-   Llama it is clear but noisier (about -0.4). OLMo has none.
+1. **The heads/tails path from " up" shows up clearly in Gemma and GLM, depends on the wording in Llama, and is absent in OLMo.**
+   In Gemma it is nearly deterministic (r -0.97). In GLM it is clear but noisier (-0.42). In Llama it appears with the bold
+   wording (-0.40) but not with the plain one, which is usable too (mass 0.75): there the swap moves the answer slightly *with*
+   the coin (r +0.13 [+0.06, +0.19], share -0.1%). Gemma's plain wording shows the path as well (-0.90, at mass 0.13); GLM's
+   plain wording can't be read (mass 0.02). OLMo has none in either wording.
 2. **It is small everywhere.** The swap reverses at most 3.6% of the answer's coin-aligned part (Gemma), 1.6% in GLM, 0.3% in
    Llama. Swapping the whole coin line ("Okay, I'm flipping the coin now ... it came up") does more, 5-11% in those three models,
    and 0 in OLMo.
@@ -4370,6 +4373,8 @@ tasks themselves.
 
 - Exploratory throughout, apart from the four predictions; 1,000 pairs outside the sweep, one question wording plus its bold and
   A/B variants.
+- The table uses each model's primary heads/tails wording, the bold one in every model. The per-run figures are one file per
+  wording: no suffix is the plain wording ("I would have preferred"), `_bold` the bold one, `_ab` the Task A/B question.
 - GPU types differ by model (Gemma H100, OLMo RTX PRO 6000, Llama H200, GLM 2x H200), but every comparison is within one pod.
 - GLM's coin at " up" carries only 0.43 of its probability on " heads" / " tails".
 - κ and the share use the pair-level coin, the readout at " up" itself; they say nothing about information at " up" that doesn't
