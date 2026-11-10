@@ -176,15 +176,17 @@ def load_apertus1p5_text(name, revision, dtype, device_map, max_memory=None):
 LOADERS = {"apertus1p5_text": load_apertus1p5_text}
 
 
-def load_model(name, device, dtype, revision=None, max_memory=None, loader=None):
+def load_model(name, device, dtype, revision=None, max_memory=None, loader=None, attn_implementation=None):
     """On GPU, spread the model over all visible GPUs (one GPU if it fits there), and
     refuse to run with layers offloaded to CPU or disk: that is orders of magnitude slower.
-    max_memory: {gpu: limit}, for a model that only just fits. loader: a key of LOADERS."""
+    max_memory: {gpu: limit}, for a model that only just fits. loader: a key of LOADERS.
+    attn_implementation: e.g. "eager", where the attention weights are needed (rollouts.py)."""
+    attn = {"attn_implementation": attn_implementation} if attn_implementation else {}
     if loader is not None:
         load = lambda device_map: LOADERS[loader](name, revision, dtype, device_map, max_memory).eval()
     else:
         load = lambda device_map: AutoModelForCausalLM.from_pretrained(
-            name, revision=revision, dtype=dtype, device_map=device_map, max_memory=max_memory).eval()
+            name, revision=revision, dtype=dtype, device_map=device_map, max_memory=max_memory, **attn).eval()
     if device != "cuda":
         return load(device)
     model = load("auto")

@@ -1,0 +1,13 @@
+# Rollouts with the coin's " up" swapped (README, "Rollouts with the coin's ' up' swapped"), exploratory: the Assistant's
+# replies to the coinflip's assigned task, unpatched and with " up" swapped for the other order's, coupled sampling. 1x H100 SXM or H200.
+family: gemma4-31b
+run_name: rollouts-gemma4-31b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+n_pairs: 10
+n_samples: 4
+max_new_tokens: 400
+lens_pairs: 200
+model:
+  name: google/gemma-4-31B-it
+

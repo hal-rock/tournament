@@ -81,6 +81,8 @@ uv run python hope.py                                    # the user's hope about
 uv run python roleplay.py                                # the personas framed as roleplay, Assistant choice and coinflip (W&B group "roleplay")
 uv run python report_patch.py configs/coin_report/<model>.yaml [--report coin_report_ab]  # GPU: swap the coin's " up" into the Assistant's report
 uv run python coin_report.py outputs/coin_report/<model>/<run>/rows.jsonl   # does the report read " up"? (W&B group "coin_report")
+uv run python rollouts.py configs/rollouts/<model>.yaml   # GPU: the Assistant's replies with the coin's " up" swapped
+uv run python rollouts_page.py outputs/rollouts/<model>/<run>/rows.jsonl   # pages and a summary (W&B group "rollouts")
 uv run python predict_user.py                            # the Assistant's prediction of the user's choice vs the user's own (W&B group "predict_user")
 uv run python persona_readouts.py                        # the persona as the user's self-description: A, C, U, P (W&B group "persona_readouts")
 ```
@@ -4379,6 +4381,43 @@ tasks themselves.
 - GLM's coin at " up" carries only 0.43 of its probability on " heads" / " tails".
 - κ and the share use the pair-level coin, the readout at " up" itself; they say nothing about information at " up" that doesn't
   show in the coin's logits.
+
+## Rollouts with the coin's " up" swapped (exploratory)
+
+The report-patching results ("Does the Assistant read the coin's ' up'?") found a small, heads/tails-specific path from " up" into
+the Assistant's later answer. Hal's next step (2026-11-10) is open-ended and hypothesis-generating. Rather than assume what the
+coin's prediction might be planned *for*, let the Assistant actually do the task the coin picked, with and without " up" swapped,
+and read the replies for qualitative differences. "No difference" is a result too: then " up" doesn't matter much for what the
+Assistant goes on to write.
+
+### Design (written 2026-11-10, before any data)
+
+- **Prompt** (`prompts.CONDITIONS["coin_task_heads"]` / `["coin_task_tails"]`): the coinflip prompt word for word through "it came
+  up", then " heads, so please do Task A." (or " tails, so please do Task B."); the user turn is closed and the Assistant replies.
+  The coin's outcome is given, so nothing asks the Assistant about preferences.
+- **Pairs** (`rollouts.far_pairs`): per model, the 10 pairs furthest apart in that model's own coin utilities (its sweep),
+  non-harmful tasks only (so refusals don't dominate), with the Assistant's utilities agreeing on which task is better and no task
+  used twice. The coin-preferred task is Task A in half of the pairs and Task B in the other half. Both outcomes for every pair, so
+  the Assistant does the coin-preferred task in half the prompts and the other task in the rest.
+- **Conditions:** unpatched (`none`), and `swap`: the residual entering every block at " up" replaced with the reversed-order
+  prompt's, as in `report_patch.py` (" up" only; the whole-line swap is dropped).
+- **Coupled sampling:** 4 replies per condition at temperature 1 (up to 400 tokens), drawn by Gumbel-max with noise seeded per
+  sample and step, the same in both conditions. So a `none` reply and its `swap` partner are token-identical until the swap changes
+  which token wins, and the first divergence shows where " up" matters, if anywhere. Each batch also re-generates `none`'s first
+  sample; it must come out identical, which checks that rows of a batch are computed alike.
+- **Per-token scores**, teacher-forced in both conditions:
+  - **Δ log-prob, swap − none:** how much more or less likely each reply token is with " up" swapped. This is the direct "which
+    words depend on it".
+  - **Attention to " up":** for each token, how much the position that chose it attended to " up", averaged over heads and over the
+    blocks from where the coin's lean has emerged at " up". That onset is measured per model with a logit lens at " up" over 200
+    pilot pairs: the shallowest depth from which the lens's heads - tails pair effect correlates >= 0.5 with the output's. Needs
+    eager attention, so these runs load the models with it.
+- **Models:** the four finals of the report runs (Gemma 4 31B-it, Llama 3.3 70B, GLM-4.5-Air, OLMo 3.1 32B). OLMo had no " up"
+  path in the report runs, so it serves as the "nothing there" comparison.
+- **Output:** `rollouts.py` on a pod (`configs/rollouts/<model>.yaml`, W&B group `rollouts`), then `rollouts_page.py` builds one
+  `matskit.view` page per model, `outputs/rollouts/<model>/rollouts.html`. The pages are kept out of git because WildChat tasks can
+  appear in prompts. Each `none` reply sits beside its `swap` partner. The summary counts identical pairs, where pairs first
+  diverge, the mean |Δ log-prob| per reply token, and r between attention to " up" and |Δ log-prob|.
 
 ## Tasks
 

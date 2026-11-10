@@ -114,6 +114,11 @@ CONDITIONS["coin_report_ab"] = dict(
     body=CONDITIONS["coinflip"]["body"] + COIN_REPORT_TAIL.replace("which outcome would you have preferred, heads or tails?",
                                                                    "which task would you have preferred, Task A or Task B?"),
     prefill="I would have preferred Task", outcomes=(" A", " B"))
+# Rollouts with " up" swapped (README, "Rollouts with the coin's ' up' swapped"): the coin decides and the user asks for that
+# task, and the Assistant writes its reply (no prefill). The coinflip prompt word for word through "it came up", then the outcome.
+for _outcome, _task in (("heads", "A"), ("tails", "B")):
+    CONDITIONS[f"coin_task_{_outcome}"] = dict(
+        body=CONDITIONS["coinflip"]["body"] + f" {_outcome}, so please do Task {_task}.", prefill="", outcomes=(" heads", " tails"))
 
 # Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
 # token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person
