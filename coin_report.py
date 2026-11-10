@@ -49,7 +49,7 @@ def sweep_rows(family):
     assert family == "glm-4.5-air", family
     import csv
     import wandb
-    from analyze import fetch_wandb
+    from report import fetch_wandb  # the analysis table (analyze.fetch_wandb fetches raw results instead)
     analysis = Path("outputs") / GLM_SWEEP / "analysis"
     fetch_wandb(wandb.Api().run(f"halrockwell-mats/tournament/{GLM_SWEEP}"), analysis)
     with open(analysis / "utilities.csv", newline="") as fh:
