@@ -101,3 +101,20 @@ def test_full_run_keeps_top_k_only_on_the_sample(tmp_path, monkeypatch):
     from transformers import AutoTokenizer
     heads, tails = outcome_token_ids("coinflip", AutoTokenizer.from_pretrained(TOK))
     assert json.loads(rows[10]["top_tokens"])[0][0] == AutoTokenizer.from_pretrained(TOK).decode([heads])
+
+
+def test_with_pilot_scores_the_pilot_then_everything_in_one_load(tmp_path, monkeypatch):
+    monkeypatch.setattr(sr, "OUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(sr, "VllmEngine", FakeEngine)
+    monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
+    loads = []
+    monkeypatch.setattr(FakeEngine, "__init__", lambda self, m, k: loads.append(m["name"]))
+    cfg = _config(tmp_path, ["coinflip", "assistant@strategist+roleplay"])
+    sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--with-pilot", "4"])
+    out = tmp_path / "out" / "fake"
+    assert len(loads) == 1
+    for c in ("coinflip", "assistant@strategist+roleplay"):
+        assert len(_rows(out / "pilot" / f"instruct__{c}.csv.gz")) == 8
+        assert len(_rows(out / "results" / f"instruct__{c}.csv.gz")) == 30000
+    progress = [json.loads(l) for l in open(out / "progress.jsonl")]
+    assert [p["pilot"] for p in progress] == [True, True, False, False]

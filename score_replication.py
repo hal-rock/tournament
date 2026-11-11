@@ -167,31 +167,37 @@ def main(argv=None):
     ap.add_argument("--stage", required=True)
     ap.add_argument("--conditions", nargs="*", help="a subset of the stage's conditions (default: all)")
     ap.add_argument("--pilot", type=int, help="score only this many pairs per condition (both orders), into pilot/")
+    ap.add_argument("--with-pilot", type=int, help="first a --pilot of this many pairs for every condition, then the full "
+                    "run, in one model load")
     ap.add_argument("--engine", choices=["vllm", "hf"], default="vllm")
     ap.add_argument("--chunk", type=int, default=10000, help="prompts per generate() call (progress lines)")
     ap.add_argument("--top-sample", type=int, default=600, help="prompts per condition that get the top-k pass")
     ap.add_argument("--no-wandb", action="store_true")
     a = ap.parse_args(argv)
+    assert not (a.pilot and a.with_pilot), "--pilot or --with-pilot, not both"
 
     cfg = yaml.safe_load(open(a.config))
     (m,) = [x for x in cfg["models"] if x["stage"] == a.stage]
     key, top_k = cfg["run_name"], cfg.get("top_k_tokens", 5)
     out = OUT_ROOT / key
     tasks = read_jsonl(cfg["tasks_file"])
-    pairs = select_pairs(len(tasks), cfg.get("max_pairs"), cfg.get("seed", 0))
-    if a.pilot:
-        pairs = pairs[:a.pilot]
-    ordered = pairs + [(j, i) for i, j in pairs]
+    all_pairs = select_pairs(len(tasks), cfg.get("max_pairs"), cfg.get("seed", 0))
     conditions = expand_conditions(m["conditions"])
     if a.conditions:
         unknown = set(a.conditions) - set(conditions)
         assert not unknown, f"not in this stage's conditions: {sorted(unknown)}"
         conditions = [c for c in conditions if c in a.conditions]
-    res_dir = out / ("pilot" if a.pilot else "results")
-    todo = [c for c in conditions if not (res_dir / f"{a.stage}__{c}.csv.gz").exists()]
-    print(f"{key}/{a.stage}: {len(tasks)} tasks, {len(pairs)} pairs, {len(ordered)} prompts per condition; "
-          f"{len(todo)} of {len(conditions)} conditions to do", flush=True)
-    if not todo:
+    # Each pass: (pairs, results dir, is a pilot, conditions still to do there).
+    passes = []
+    for n in ([a.pilot] if a.pilot else ([a.with_pilot] if a.with_pilot else []) + [None]):
+        pairs = all_pairs[:n] if n else all_pairs
+        res_dir = out / ("pilot" if n else "results")
+        todo = [c for c in conditions if not (res_dir / f"{a.stage}__{c}.csv.gz").exists()]
+        print(f"{key}/{a.stage}{' pilot' if n else ''}: {len(tasks)} tasks, {len(pairs)} pairs, {2 * len(pairs)} prompts "
+              f"per condition; {len(todo)} of {len(conditions)} conditions to do", flush=True)
+        if todo:
+            passes.append((pairs, res_dir, bool(n), todo))
+    if not passes:
         return
 
     from transformers import AutoTokenizer
@@ -199,12 +205,12 @@ def main(argv=None):
     tokenizer = AutoTokenizer.from_pretrained(m.get("tokenizer_from", m["name"]), trust_remote_code=trc)
     template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]), trust_remote_code=trc)
     system_prompt = cfg.get("system_prompt", "none")
-    outcome_ids = {c: tuple(outcome_token_ids(c, tokenizer)) for c in todo}
-    probe_ids, _ = render_condition("assistant", m, tasks, ordered[:1], template_tokenizer, tokenizer, system_prompt)
+    outcome_ids = {c: tuple(outcome_token_ids(c, tokenizer)) for c in conditions}
+    probe_ids, _ = render_condition("assistant", m, tasks, all_pairs[:1], template_tokenizer, tokenizer, system_prompt)
     uses_bos = tokenizer.bos_token_id is not None and probe_ids[0][0] == tokenizer.bos_token_id
 
     run = None
-    if not (a.pilot or a.no_wandb):
+    if any(not is_pilot for _, _, is_pilot, _ in passes) and not a.no_wandb:
         import wandb
         from matskit.io import provenance
         id_file = out / f"{a.stage}.wandb_id"
@@ -222,47 +228,54 @@ def main(argv=None):
     print(f"loaded {m['name']} in {(time.time() - t_load) / 60:.1f} min", flush=True)
     sanity_check(engine, tokenizer, m, uses_bos)
 
-    for condition in todo:
-        ids, example = render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt)
-        print(f"\n[{a.stage}/{condition}] example prompt:\n{example}\n", flush=True)
-        oid = outcome_ids[condition]
-        start, scored = time.time(), []
-        for c0 in range(0, len(ids), a.chunk):
-            scored += engine.score(ids[c0:c0 + a.chunk], oid)
-            rate = len(scored) / (time.time() - start)
-            print(f"  {a.stage}/{condition}: {len(scored)}/{len(ids)} prompts, {rate:.1f}/s, "
-                  f"ETA {(len(ids) - len(scored)) / rate / 60:.1f} min", flush=True)
-        seconds = time.time() - start
-        n_top = len(ids) if a.pilot else min(a.top_sample, len(ids))
-        tops = engine.top_tokens(ids[:n_top], top_k)
+    for pairs, res_dir, is_pilot, todo in passes:
+        ordered = pairs + [(j, i) for i, j in pairs]
+        for condition in todo:
+            ids, example = render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt)
+            if not is_pilot:
+                print(f"\n[{a.stage}/{condition}] example prompt:\n{example}\n", flush=True)
+            oid = outcome_ids[condition]
+            start, scored = time.time(), []
+            for c0 in range(0, len(ids), a.chunk):
+                scored += engine.score(ids[c0:c0 + a.chunk], oid)
+                rate = len(scored) / (time.time() - start)
+                if not is_pilot:
+                    print(f"  {a.stage}/{condition}: {len(scored)}/{len(ids)} prompts, {rate:.1f}/s, "
+                          f"ETA {(len(ids) - len(scored)) / rate / 60:.1f} min", flush=True)
+            seconds = time.time() - start
+            n_top = len(ids) if is_pilot else min(a.top_sample, len(ids))
+            tops = engine.top_tokens(ids[:n_top], top_k)
 
-        rows = []
-        for k, ((i, j), (lp1, lp2, top1, top1_lp)) in enumerate(zip(ordered, scored)):
-            if not (math.isfinite(lp1) and math.isfinite(lp2)):
-                raise SystemExit(f"non-finite outcome log-probs in {condition}, prompt {k}: {lp1}, {lp2}")
-            top = tops[k] if k < n_top else [(top1, top1_lp)]
-            rows.append(dict(
-                model=m["name"], stage=a.stage, condition=condition, first=tasks[i]["id"], second=tasks[j]["id"],
-                logp_first=lp1, logp_second=lp2, log_odds=lp1 - lp2, outcome_mass=math.exp(lp1) + math.exp(lp2),
-                prompt_tokens=len(ids[k]),
-                top_tokens=json.dumps([[tokenizer.decode([t]), round(math.exp(v), 4)] for t, v in top]),
-            ))
-        path = res_dir / f"{a.stage}__{condition}.csv.gz"
-        write_csv_gz(path, rows)
-        n_tokens = sum(map(len, ids))
-        summary = dict(stage=a.stage, condition=condition, prompts=len(ids), seconds=round(seconds, 1),
-                       prompt_tokens_per_s=round(n_tokens / seconds), mean_prompt_tokens=round(n_tokens / len(ids), 1),
-                       median_mass=round(statistics.median(r["outcome_mass"] for r in rows), 4),
-                       pilot=bool(a.pilot), engine=a.engine, time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-        print(f"  done: {json.dumps(summary)}", flush=True)
-        with open(out / "progress.jsonl", "a") as f:
-            f.write(json.dumps(summary) + "\n")
-        if run is not None:
-            run.save(str(path), base_path=str(out), policy="now")
-            run.summary[f"{a.stage}/{condition}/seconds"] = seconds
-            run.summary[f"{a.stage}/{condition}/median_mass"] = summary["median_mass"]
+            rows = []
+            for k, ((i, j), (lp1, lp2, top1, top1_lp)) in enumerate(zip(ordered, scored)):
+                if not (math.isfinite(lp1) and math.isfinite(lp2)):
+                    raise SystemExit(f"non-finite outcome log-probs in {condition}, prompt {k}: {lp1}, {lp2}")
+                top = tops[k] if k < n_top else [(top1, top1_lp)]
+                rows.append(dict(
+                    model=m["name"], stage=a.stage, condition=condition, first=tasks[i]["id"], second=tasks[j]["id"],
+                    logp_first=lp1, logp_second=lp2, log_odds=lp1 - lp2, outcome_mass=math.exp(lp1) + math.exp(lp2),
+                    prompt_tokens=len(ids[k]),
+                    top_tokens=json.dumps([[tokenizer.decode([t]), round(math.exp(v), 4)] for t, v in top]),
+                ))
+            path = res_dir / f"{a.stage}__{condition}.csv.gz"
+            write_csv_gz(path, rows)
+            n_tokens = sum(map(len, ids))
+            summary = dict(stage=a.stage, condition=condition, prompts=len(ids), seconds=round(seconds, 1),
+                           prompt_tokens_per_s=round(n_tokens / seconds), mean_prompt_tokens=round(n_tokens / len(ids), 1),
+                           median_mass=round(statistics.median(r["outcome_mass"] for r in rows), 4),
+                           top=json.loads(rows[0]["top_tokens"])[:3], pilot=is_pilot, engine=a.engine,
+                           time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            print(f"  {'pilot' if is_pilot else 'done'}: {json.dumps(summary)}", flush=True)
+            with open(out / "progress.jsonl", "a") as f:
+                f.write(json.dumps(summary) + "\n")
+            if run is not None and not is_pilot:
+                run.save(str(path), base_path=str(out), policy="now")
+                run.summary[f"{a.stage}/{condition}/seconds"] = seconds
+                run.summary[f"{a.stage}/{condition}/median_mass"] = summary["median_mass"]
     if run is not None:
         run.save(str(out / "progress.jsonl"), base_path=str(out), policy="now")
+        for f in (out / "pilot").glob(f"{a.stage}__*.csv.gz"):
+            run.save(str(f), base_path=str(out), policy="now")
         run.finish()
 
 
