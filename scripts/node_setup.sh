@@ -11,7 +11,7 @@ command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 [ -x "$VENV/bin/python" ] || uv venv --python 3.12 "$VENV"
 uv pip install --python "$VENV/bin/python" "vllm==0.33.0" "transformers==5.17.0" "huggingface_hub[hf_xet]" \
-    tiktoken sentencepiece wandb pyyaml -e ../mats-kit
+    tiktoken sentencepiece "wandb==0.30.0" pyyaml -e ../mats-kit
 "$VENV/bin/python" - <<'EOF'
 import torch, transformers, vllm
 print(f"VLLM_ENV ok: vllm {vllm.__version__} torch {torch.__version__} (cuda {torch.version.cuda}) "

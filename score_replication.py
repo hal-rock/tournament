@@ -209,7 +209,8 @@ def main(argv=None):
         from matskit.io import provenance
         id_file = out / f"{a.stage}.wandb_id"
         out.mkdir(parents=True, exist_ok=True)
-        run_id = id_file.read_text().strip() if id_file.exists() else wandb.util.generate_id()
+        run_id = (id_file.read_text().strip() if id_file.exists()  # W&B's own id format: 8 lowercase alphanumerics
+                  else "".join(random.Random().choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8)))
         id_file.write_text(run_id)
         run = wandb.init(project=cfg["wandb_project"], group=cfg.get("group", "replication"), name=f"{key}-{a.stage}",
                          id=run_id, resume="allow", job_type="replication",
