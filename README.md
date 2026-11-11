@@ -4545,13 +4545,15 @@ turns read " up", and how strongly. OLMo is dropped: its coinflip effect looks w
   short preference question can't be read in heads/tails words as written.
 - **Added after this check:** the same question with the prefill "I would have preferred it to land on" (`coin_report_short_land`),
   which asks for the face without naming it. It works for Llama (0.91 / 0.99) and partly for GLM (bold 0.64). Gemma still answers
-  "Task" (bold heads/tails mass 0.18, below the 0.2 bar), so two more prefills are tried on Gemma before its run.
+  "Task" (bold heads/tails mass 0.18, below the 0.2 bar), so two more prefills were tried on Gemma before its run: "I would have
+  preferred the coin to land on **" reached 0.38 ("Task" 0.37, "T" 0.17, "He" 0.10; `coin_report_short_coin`), "I would rather it
+  had landed on **" 0.09. Gemma's short preference runs the first.
 - **Guess wording, by the pre-registered rule:** the minimal pair ("would you guess") falls below 0.5 in GLM (0.46), so the guess is
   the wording with the highest minimum mass, **"which way do you think it landed?" / "I think it landed on"** (0.97-1.00 bold).
 - **Runs** (every prefill with mass >= 0.2; primary = the higher-mass one, bold everywhere):
   - Llama: short preference "land on" plain and bold, the original short question bold (0.47), the guess plain (0.36) and bold.
   - GLM: short preference "land on" bold, the guess bold.
-  - Gemma: the guess bold; its short preference pending the extra prefills.
+  - Gemma: the guess bold; the short preference with "the coin to land on" bold (0.38, the only Gemma prefill above 0.2).
 - Gemma's bold answers also put 0.07-0.28 on "He" and "T" (capitalized "Heads" / "Tails" or "Task"), which the readout leaves out.
 
 ## Tasks

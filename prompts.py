@@ -125,6 +125,8 @@ _SHORT_QUESTIONS = {  # condition: (question, prefill)
     # Added after the wording check (mass only): after "I would have preferred", Llama and GLM answer in task labels ("Task"
     # 0.75 plain in Llama, 0.97 bold in GLM). The same question, with a prefill that asks for the outcome word.
     "coin_report_short_land": ("which outcome would you have preferred?", "I would have preferred it to land on"),
+    # Gemma still answered "Task" after "it to land on **" (heads/tails mass 0.18); this one reached 0.38, so Gemma runs it.
+    "coin_report_short_coin": ("which outcome would you have preferred?", "I would have preferred the coin to land on"),
     "coin_predict": ("which outcome would you guess?", "I would guess"),
     "coin_predict_think": ("which way do you think it landed?", "I think it landed on"),
     "coin_predict_my": ("what's your guess?", "My guess is"),

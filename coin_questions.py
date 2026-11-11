@@ -29,8 +29,11 @@ from openers import write_csv
 from report import INK, INK_2, RULE, style
 
 QUESTIONS = {"coin_report": 'preferred outcome, "heads or tails?"', "coin_report_short": "preferred outcome, short",
+             "coin_report_short_land": 'preferred outcome, short, "it to land on"',
+             "coin_report_short_coin": 'preferred outcome, short, "the coin to land on"',
              "coin_predict": "guess", "coin_predict_think": "guess", "coin_predict_my": "guess"}
-GROUP = {"coin_report": "pref_full", "coin_report_short": "pref_short", "coin_predict": "guess", "coin_predict_think": "guess",
+GROUP = {"coin_report": "pref_full", "coin_report_short": "pref_short", "coin_report_short_land": "pref_short",
+         "coin_report_short_coin": "pref_short", "coin_predict": "guess", "coin_predict_think": "guess",
          "coin_predict_my": "guess"}
 SERIES_NAME = {"pref_full": 'preferred, "heads or tails?"', "pref_short": "preferred, short", "guess": "guess"}
 STATS = ("r(report, Assistant (sweep A_i - A_j))", "r(report, coin)", "slope(report on coin)", "swap: r(d, coin)",
@@ -109,7 +112,7 @@ def main():
             row |= {k: est[k], k + "_lo": lo[k], k + "_hi": hi[k]}
         rows.append(row)
         D["A"] = assistant_diff(family, D)
-    mark_primary(rows)
+    mark_primary(rows, lambda rep: GROUP[question(rep)])  # one primary per model and question group
     for (family, report, D, *_), row in zip(results, rows):
         D["primary"] = row["primary"]
     write_csv(Path("outputs/coin_report/questions.csv"), rows)

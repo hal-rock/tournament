@@ -68,6 +68,7 @@ def test_swap_puts_the_other_orders_residual_at_up(setup):
 
 @pytest.mark.parametrize("report", ["coin_report_bold", "coin_report_ab", "coin_report_short", "coin_report_short_bold",
                                     "coin_report_short_land", "coin_report_short_land_bold",
+                                    "coin_report_short_coin", "coin_report_short_coin_bold",
                                     "coin_predict", "coin_predict_bold", "coin_predict_think", "coin_predict_think_bold",
                                     "coin_predict_my", "coin_predict_my_bold"])
 def test_report_variants_extend_the_coinflip(setup, report):

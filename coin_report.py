@@ -210,11 +210,11 @@ def question(report):
     return report.removesuffix("_bold")
 
 
-def mark_primary(rows):
-    """Per model and question, the primary wording: the prefill (plain or bold) with the higher median outcome mass, if that's
-    at least 0.2 (pre-registered)."""
-    for key in {(r["family"], question(r["report"])) for r in rows}:
-        group = [r for r in rows if (r["family"], question(r["report"])) == key]
+def mark_primary(rows, group_of=question):
+    """Per model and question (group_of(report)), the primary wording: the prefill with the highest median outcome mass, if
+    that's at least 0.2 (pre-registered)."""
+    for key in {(r["family"], group_of(r["report"])) for r in rows}:
+        group = [r for r in rows if (r["family"], group_of(r["report"])) == key]
         best = max(group, key=lambda r: r["mass"])
         for r in group:
             r["primary"] = r is best and r["mass"] >= 0.2
