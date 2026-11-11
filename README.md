@@ -4526,6 +4526,34 @@ turns read " up", and how strongly. OLMo is dropped: its coinflip effect looks w
 5. **Wording:** the bold prefill has the higher mass in Gemma and GLM for both questions. Llama's plain prefill has median mass
    >= 0.5.
 
+### Wording check (2026-11-11, before the runs: outcome mass and top tokens only)
+
+`scripts/report_wording_check.py` on the first 24 pilot pairs. Values are median heads/tails mass, plain / bold prefill:
+
+| question, prefill | Gemma 4 31B | Llama 3.3 70B | GLM-4.5-Air | where the rest goes |
+|---|---|---|---|---|
+| earlier: "...heads or tails?", "I would have preferred" | 0.00 / 0.99 | 0.00 / 1.00 | 0.00 / 0.99 | (rechecked for bold only) |
+| short preference, "I would have preferred" | 0.00 / 0.00 | 0.00 / 0.47 | 0.00 / 0.00 | **"Task"**: 0.99 bold (Gemma), 0.75 plain (Llama), 0.97 bold (GLM) |
+| short preference, "I would have preferred it to land on" (added) | 0.01 / 0.18 | 0.91 / 0.99 | 0.02 / 0.64 | "Task" 0.60 bold (Gemma), 0.34 (GLM) |
+| guess, "which outcome would you guess?" / "I would guess" | 0.00 / 0.85 | 0.01 / 1.00 | 0.00 / 0.46 | " that" plain; "Task" 0.47 bold (GLM) |
+| guess, "which way do you think it landed?" / "I think it landed on" | 0.00 / 0.97 | 0.36 / 1.00 | 0.00 / 0.98 | " **" plain (Gemma, GLM) |
+| guess, "what's your guess?" / "My guess is" | 0.00 / 0.71 | 0.00 / 1.00 | 0.00 / 0.31 | " that" plain; "Task" 0.54 bold (GLM) |
+
+- **Asked which outcome it would have preferred, without "heads or tails", every model names a task.** "I would have preferred
+  **Task ..." takes nearly all the probability in Gemma and GLM, and "Task" is most of Llama's plain answer. So the preferred
+  "outcome" is construed as the task it brings, not as the coin's face. This is itself a result about the question; it means the
+  short preference question can't be read in heads/tails words as written.
+- **Added after this check:** the same question with the prefill "I would have preferred it to land on" (`coin_report_short_land`),
+  which asks for the face without naming it. It works for Llama (0.91 / 0.99) and partly for GLM (bold 0.64). Gemma still answers
+  "Task" (bold heads/tails mass 0.18, below the 0.2 bar), so two more prefills are tried on Gemma before its run.
+- **Guess wording, by the pre-registered rule:** the minimal pair ("would you guess") falls below 0.5 in GLM (0.46), so the guess is
+  the wording with the highest minimum mass, **"which way do you think it landed?" / "I think it landed on"** (0.97-1.00 bold).
+- **Runs** (every prefill with mass >= 0.2; primary = the higher-mass one, bold everywhere):
+  - Llama: short preference "land on" plain and bold, the original short question bold (0.47), the guess plain (0.36) and bold.
+  - GLM: short preference "land on" bold, the guess bold.
+  - Gemma: the guess bold; its short preference pending the extra prefills.
+- Gemma's bold answers also put 0.07-0.28 on "He" and "T" (capitalized "Heads" / "Tails" or "Task"), which the readout leaves out.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

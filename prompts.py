@@ -122,6 +122,9 @@ CONDITIONS["coin_report_ab"] = dict(
 _ASK = ". But before I tell you which way it landed: "
 _SHORT_QUESTIONS = {  # condition: (question, prefill)
     "coin_report_short": ("which outcome would you have preferred?", "I would have preferred"),
+    # Added after the wording check (mass only): after "I would have preferred", Llama and GLM answer in task labels ("Task"
+    # 0.75 plain in Llama, 0.97 bold in GLM). The same question, with a prefill that asks for the outcome word.
+    "coin_report_short_land": ("which outcome would you have preferred?", "I would have preferred it to land on"),
     "coin_predict": ("which outcome would you guess?", "I would guess"),
     "coin_predict_think": ("which way do you think it landed?", "I think it landed on"),
     "coin_predict_my": ("what's your guess?", "My guess is"),

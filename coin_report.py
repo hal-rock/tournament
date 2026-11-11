@@ -188,7 +188,8 @@ def plot_models(rows, path):
     for ax, (title, which) in zip(axes, panels):
         for k, (stat, name) in enumerate((("swap: share", '" up"'), ("swap_line: share", "the whole coin line"))):
             for i, f in enumerate(families):
-                (r,) = [r for r in rows if r["family"] == f and (r["primary"] if which == "primary" else r["report"] == which)]
+                (r,) = [r for r in rows if r["family"] == f and (r["primary"] and question(r["report"]) == "coin_report"
+                                                                  if which == "primary" else r["report"] == which)]
                 e, lo, hi = 100 * r[stat], 100 * r[stat + "_lo"], 100 * r[stat + "_hi"]
                 ax.errorbar(i + (k - 0.5) * 0.25, e, yerr=[[e - lo], [hi - e]], color=plotstyle.SERIES[k], marker="os"[k],
                             ms=7, lw=0, elinewidth=1.5, mec="white", mew=0.8, label=f"swap {name}" if i == 0 else None)
@@ -204,6 +205,21 @@ def plot_models(rows, path):
     plotstyle.save(fig, path.stem, path.parent)
 
 
+def question(report):
+    """The question a report condition asks, whatever its prefill: coin_report_short_bold -> coin_report_short."""
+    return report.removesuffix("_bold")
+
+
+def mark_primary(rows):
+    """Per model and question, the primary wording: the prefill (plain or bold) with the higher median outcome mass, if that's
+    at least 0.2 (pre-registered)."""
+    for key in {(r["family"], question(r["report"])) for r in rows}:
+        group = [r for r in rows if (r["family"], question(r["report"])) == key]
+        best = max(group, key=lambda r: r["mass"])
+        for r in group:
+            r["primary"] = r is best and r["mass"] >= 0.2
+
+
 def main():
     plotstyle.setup()
     results = [analyze_run(Path(p)) for p in sys.argv[1:]]
@@ -216,12 +232,7 @@ def main():
         for k in SUMMARY:
             row |= {k: est[k], k + "_lo": lo[k], k + "_hi": hi[k]}
         rows.append(row)
-    for f in {r["family"] for r in rows}:  # the primary heads/tails wording: the higher median outcome mass (pre-registered)
-        ht = [r for r in rows if r["family"] == f and r["report"] in ("coin_report", "coin_report_bold")]
-        best = max(ht, key=lambda r: r["mass"])
-        for r in rows:
-            if r["family"] == f:
-                r["primary"] = r is best and r["mass"] >= 0.2
+    mark_primary(rows)
     from openers import write_csv
     write_csv(Path("outputs/coin_report/summary.csv"), rows)
     print("\nSummary (primary heads/tails wording and A/B):")

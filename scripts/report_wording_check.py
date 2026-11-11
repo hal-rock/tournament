@@ -15,11 +15,12 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from analyze import read_jsonl  # noqa: E402
-from prompts import build_prompt, outcome_token_ids  # noqa: E402
+from prompts import CONDITIONS, build_prompt, outcome_token_ids  # noqa: E402
 from report_patch import pilot_pairs  # noqa: E402
 from tournament import load_model, select_pairs  # noqa: E402
 
-DEFAULT = ["coin_report_bold", "coin_report_short", "coin_report_short_bold", "coin_predict", "coin_predict_bold",
+DEFAULT = ["coin_report_bold", "coin_report_short", "coin_report_short_bold",
+           "coin_report_short_land", "coin_report_short_land_bold", "coin_predict", "coin_predict_bold",
            "coin_predict_think", "coin_predict_think_bold", "coin_predict_my", "coin_predict_my_bold"]
 
 
@@ -27,8 +28,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
     ap.add_argument("--n", type=int, default=24)
-    ap.add_argument("--conditions", nargs="+", default=DEFAULT)
+    ap.add_argument("--conditions", nargs="+", help=f"default: {' '.join(DEFAULT)} (none with --try-prefill)")
+    ap.add_argument("--try-prefill", nargs="+", default=[], metavar="BASE=PREFILL",
+                    help="ad hoc variants: BASE's prompt with another prefill, plain and bold (e.g. coin_report_short='I would')")
     a = ap.parse_args()
+    a.conditions = a.conditions or ([] if a.try_prefill else DEFAULT)
+    for k, spec in enumerate(a.try_prefill):  # registered under try<k> / try<k>_bold, for this check only
+        base, prefill = spec.split("=", 1)
+        CONDITIONS[f"try{k}"] = {**CONDITIONS[base], "prefill": prefill, "outcomes": (" heads", " tails")}
+        CONDITIONS[f"try{k}_bold"] = {**CONDITIONS[base], "prefill": prefill + " **", "outcomes": ("heads", "tails")}
+        print(f"try{k}: {base} with prefill {prefill!r}")
+        a.conditions += [f"try{k}", f"try{k}_bold"]
     cfg = yaml.safe_load(open(a.config))
     m = cfg["model"]
     tok = AutoTokenizer.from_pretrained(m["name"])
