@@ -9,7 +9,7 @@
 #   rows are at their initialization in TrueBase (scripts/replication_embed_rows_trinity-large.py).
 # - TrueBase is a 10T-token pre-anneal branch; Thinking was post-trained from Trinity-Large-Base (17T, annealed). The
 #   notes give the numbers; switching is a one-line change here (the tests read this file).
-# Checked by tests/test_replication_trinity-large.py.
+# Checked by tests/test_replication_trinity_large.py.
 wandb_project: tournament
 group: replication
 run_name: trinity-large

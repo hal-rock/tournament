@@ -93,6 +93,8 @@ class VllmEngine:
         args.update(m.get("vllm", {}))
         if "tokenizer_from" in m:
             args.setdefault("tokenizer", m["tokenizer_from"])
+        elif m.get("revision"):
+            args.setdefault("tokenizer_revision", m["revision"])
         print(f"vLLM engine args: {args}", flush=True)
         self.llm = LLM(m["name"], revision=m.get("revision"), **args)
 
@@ -150,6 +152,13 @@ class HfEngine:
         return [list(zip(i[r].tolist(), v[r].tolist())) for r in range(len(prompts))]
 
 
+def revision_of(cfg, repo):
+    """The pinned revision of a repo this config uses (a borrowed template or tokenizer is read at the revision its own
+    entry pins), or None for the main branch."""
+    revs = {x["name"]: x.get("revision") for x in cfg["models"]}
+    return revs.get(repo)
+
+
 def render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt):
     """Token ids of every ordered pair's prompt, and the first prompt's text (for the log)."""
     texts = [build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
@@ -161,11 +170,18 @@ def render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer
 
 def sanity_check(engine, tokenizer, m, uses_bos):
     """A pinned completion a base model can't miss, read as the greedy token (CLAUDE.md: open-ended load checks fail on
-    base models). With the model's BOS when its chat prompts start with one."""
-    text, answer = m.get("sanity", SANITY)
-    ids = tokenizer(text, add_special_tokens=False).input_ids
-    if uses_bos and tokenizer.bos_token_id is not None:
-        ids = [tokenizer.bos_token_id] + ids
+    base models). With the model's BOS when its chat prompts start with one. A config can pin the ids instead
+    (`sanity: {ids: [...], answer: Berlin}`), for tokenizers whose plain-text ids differ from the model's (Nemotron-4:
+    the HF tokenizer drops SentencePiece's leading "▁")."""
+    pinned = m.get("sanity", {})
+    text, answer = SANITY
+    answer = pinned.get("answer", answer)
+    if "ids" in pinned:
+        ids = list(pinned["ids"])
+    else:
+        ids = tokenizer(pinned.get("text", text), add_special_tokens=False).input_ids
+        if uses_bos and tokenizer.bos_token_id is not None:
+            ids = [tokenizer.bos_token_id] + ids
     (top,) = engine.top_tokens([ids], 5)
     shown = [(tokenizer.decode([t]), round(math.exp(v), 3)) for t, v in top]
     print(f"sanity: ...the capital of Germany is -> {shown}", flush=True)
@@ -216,8 +232,10 @@ def main(argv=None):
 
     from transformers import AutoTokenizer
     trc = m.get("trust_remote_code", False)
-    tokenizer = AutoTokenizer.from_pretrained(m.get("tokenizer_from", m["name"]), trust_remote_code=trc)
-    template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]), trust_remote_code=trc)
+    tokenizer = AutoTokenizer.from_pretrained(m.get("tokenizer_from", m["name"]), trust_remote_code=trc,
+                                              revision=revision_of(cfg, m.get("tokenizer_from", m["name"])))
+    template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]), trust_remote_code=trc,
+                                                       revision=revision_of(cfg, m.get("chat_template_from", m["name"])))
     system_prompt = cfg.get("system_prompt", "none")
     outcome_ids = {c: tuple(outcome_token_ids(c, tokenizer)) for c in conditions}
     probe_ids, _ = render_condition("assistant", m, tasks, all_pairs[:1], template_tokenizer, tokenizer, system_prompt)

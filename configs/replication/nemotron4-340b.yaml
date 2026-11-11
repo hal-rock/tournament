@@ -26,6 +26,9 @@ top_k_tokens: 5
 models:
   - name: mgoin/Nemotron-4-340B-Base-hf
     stage: base
+    # Load check with NeMo's own ids (raw SentencePiece, no BOS): "The capital of France is Paris, and the capital of
+    # Germany is" -> 12006 ("▁Berlin"). The HF tokenizer would drop the leading "▁" (replication/onboarding/nemotron4-340b.md).
+    sanity: &sanity {ids: [1401, 5614, 1299, 6451, 1336, 8045, 252327, 1300, 1276, 5614, 1299, 8851, 1336], answer: Berlin}
     tokenizer_from: mgoin/Nemotron-4-340B-Instruct-hf
     turn_format: &nemotron
       user: "▁<extra_id_0>System\n\n<extra_id_1>User\n"
@@ -41,6 +44,7 @@ models:
     conditions: base
   - name: mgoin/Nemotron-4-340B-Instruct-hf
     stage: instruct
+    sanity: *sanity
     turn_format: *nemotron
     download:
       allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "generation_config.json",

@@ -65,7 +65,7 @@ def load_jobs(path):
             cfg = configs.setdefault(j["config"], yaml.safe_load(open(j["config"])))
             (m,) = [x for x in cfg["models"] if x["stage"] == j["stage"]]
             j["repos"] = [m["name"]]
-            j["download"] = {m["name"]: m.get("download", {})}
+            j["download"] = {m["name"]: {**m.get("download", {}), "revision": m.get("revision")}}
             j["results"] = [Path("outputs/replication") / cfg["run_name"] / "results" / f"{j['stage']}__{c}.csv.gz"
                             for c in expand_conditions(m["conditions"])]
             v = m.get("vllm", {})
@@ -109,7 +109,8 @@ class Downloader:
             try:
                 if not self.dry_run:
                     from huggingface_hub import snapshot_download
-                    snapshot_download(repo, allow_patterns=spec.get("allow_patterns"), max_workers=16)
+                    snapshot_download(repo, revision=spec.get("revision"), allow_patterns=spec.get("allow_patterns"),
+                                      max_workers=16)
                     shutil.rmtree(Path(os.environ.get("HF_HOME", "")) / "xet", ignore_errors=True)  # chunk cache copy
                 with self.lock:
                     self.state[repo] = "done"

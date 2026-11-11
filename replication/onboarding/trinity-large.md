@@ -4,7 +4,7 @@
 bf16 and 797.3 GB, so each takes the whole 8-GPU node.
 
 - Config: `configs/replication/trinity-large.yaml`
-- Tests: `tests/test_replication_trinity-large.py` (227 pass; they read the config)
+- Tests: `tests/test_replication_trinity_large.py` (227 pass; they read the config)
 - Embedding rows: `scripts/replication_embed_rows_trinity-large.py`, which writes `trinity-large_embed_rows*.csv` here
 
 Everything below was checked locally from tokenizer, config and template files, safetensors headers, and HTTP range

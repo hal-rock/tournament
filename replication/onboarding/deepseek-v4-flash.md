@@ -4,7 +4,7 @@
 key `deepseek-v4-flash`.
 
 - Config: `configs/replication/deepseek-v4-flash.yaml`
-- Tests: `tests/test_replication_deepseek-v4-flash.py` (228 pass; they read the config)
+- Tests: `tests/test_replication_deepseek_v4_flash.py` (228 pass; they read the config)
 - Embedding rows: `scripts/replication_embed_rows_deepseek-v4-flash.py`, which writes `deepseek-v4-flash_embed_rows.csv`
   here
 

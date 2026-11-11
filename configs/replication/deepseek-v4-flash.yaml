@@ -11,7 +11,7 @@
 #   fp8_ds_mla format on the default FlashMLA path (H200 and B200).
 # - TP 4 for both stages, so base and instruct run at once on 4 + 4 GPUs of one node (instruct ~40 GB/GPU of weights,
 #   base ~74 GB/GPU). Both stages on the same TP, GPU type and engine.
-# Checked by tests/test_replication_deepseek-v4-flash.py.
+# Checked by tests/test_replication_deepseek_v4_flash.py.
 wandb_project: tournament
 group: replication
 run_name: deepseek-v4-flash
