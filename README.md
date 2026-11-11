@@ -4898,7 +4898,7 @@ are in `outputs/replication/llama-405b/`. No earlier HF run of this model exists
 
 **First observations** (descriptive):
 - **Llama 405B looks like Llama 3.3 70B.** In the earlier sections the 70B had r(A_f, C_f) 0.92, roleplay w_r 0.73-0.74, and
-  ρ_user 0.74 for evil. All 25 calls but one replicate.
+  ρ_user 0.74 for evil. 18 of the 19 calls replicate.
 - **The exception is contrarian's self-description.** It pulls the coin more than the instruction does (ρ_self 0.80 vs
   ρ_user 0.52). A user who says they're drawn to unpopular choices moves the coin toward contrarian picks more than a
   request for the AI to be contrarian does.
