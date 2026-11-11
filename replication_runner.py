@@ -44,6 +44,8 @@ import yaml
 from replication import expand_conditions
 
 LOG = Path("replication/runner.log")
+os.environ.setdefault("HF_XET_CHUNK_CACHE_SIZE_BYTES", "0")  # no second copy of a 1 TB model in the xet cache
+os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
 
 def log(msg):

@@ -28,13 +28,27 @@ import gzip
 import csv
 import json
 import math
+import os
 import random
 import statistics
 import sys
+import sysconfig
 import time
 from pathlib import Path
 
 import yaml
+
+# vLLM's environment on the node (scripts/node_setup.sh), as user-models' vllm_job.py sets it up:
+# - FlashInfer's sampler JIT-compiles against a CUDA toolkit; our requests are greedy, so it isn't needed.
+# - JIT builds (FlashInfer, sparse attention) call `ninja` by name, which is in this venv's bin/, not on PATH when the
+#   venv's python is called directly (validation pod, 2026-11-11: "No such file or directory: 'ninja'").
+# - FP8 kernels JIT-compile DeepGEMM with $CUDA_HOME/bin/nvcc, which must be >= 12.9 and match torch's CUDA 13.0 headers:
+#   the venv's pinned nvidia-cuda-nvcc 13.0, not the image's toolkit.
+os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+os.environ["PATH"] = f"{Path(sys.executable).parent}:{os.environ.get('PATH', '')}"
+_cu13 = Path(sysconfig.get_paths()["purelib"]) / "nvidia" / "cu13"
+if (_cu13 / "bin" / "nvcc").exists():
+    os.environ["CUDA_HOME"] = str(_cu13)
 
 from prompts import build_prompt, outcome_token_ids
 from replication import expand_conditions

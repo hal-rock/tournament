@@ -12,6 +12,10 @@ export PATH="$HOME/.local/bin:$PATH"
 [ -x "$VENV/bin/python" ] || uv venv --python 3.12 "$VENV"
 uv pip install --python "$VENV/bin/python" "vllm==0.33.0" "transformers==5.17.0" "huggingface_hub[hf_xet]" \
     tiktoken sentencepiece "wandb==0.30.0" pyyaml -e ../mats-kit
+# FP8 models: vLLM JIT-compiles DeepGEMM with an nvcc >= 12.9 (score_replication.py points CUDA_HOME here), and
+# nvcc/crt/nvvm/cccl must match the 13.0 runtime headers torch pulls in; unpinned they resolve to newer ones (user-models).
+uv pip install --python "$VENV/bin/python" "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-crt==13.0.*" "nvidia-nvvm==13.0.*" \
+    "nvidia-cuda-cccl==13.0.*"
 "$VENV/bin/python" - <<'EOF'
 import torch, transformers, vllm
 print(f"VLLM_ENV ok: vllm {vllm.__version__} torch {torch.__version__} (cuda {torch.version.cuda}) "
