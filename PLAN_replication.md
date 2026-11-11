@@ -262,3 +262,51 @@ prep" starts it.
 8. **The node:** vast.ai lists 8x B200 at $90/hr and 8x H200 at $54/hr, about break-even per result at the estimated speeds.
    Hal leans to B200 for wall-clock time, to be confirmed with the pilot's measured throughput. At design A's ~31 B200 hours
    that's ~$2,800, inside $3.5k, but with the 2x uncertainty, so the pilot's projection is the check-in.
+
+## Status and costs from measured speed (2026-11-11)
+
+**Ready for the node:**
+- **Code:** `score_replication.py` (vLLM), `replication_runner.py` and `replication/jobs.yaml`, `scripts/node_setup.sh`, the
+  analysis (`replication_analysis.py`, `replication_status.py`), and the vast watchdog branch in mats-kit.
+- **Models:** all six configs onboarded, with 514 tests. Notes per model are in `replication/onboarding/`.
+- **Engine gate:** passed (README).
+
+**Measured speed:** Gemma 4 31B on one H100 took ~4 min per 30,000-prompt condition, and persona conditions took no longer
+than plain ones (prefix caching).
+
+**Estimates.** These scale that by active parameters and GPU count. The MoE models' efficiency is a guess, so the first
+model's run on the node replaces these.
+
+| | scoring, all 48 conditions × 6 models | model loads (12) | finding 8 (HF patching) | total with 25% buffer |
+|---|---|---|---|---|
+| 8x B200 at $90/hr | ~11 h | ~3 h | ~10 h | ~30 h, ~$2,700 |
+| 8x H200 at $54/hr | ~22 h | ~3.5 h | ~15 h | ~51 h, ~$2,750 |
+
+Findings 1-7 alone on B200 come to ~18 h, ~$1,600. Patching is about a third of the cost. A leaner arm set (swap, self and
+ctrl only, dropping early/late and the whole-line arms) would roughly halve it; that's a decision for the finding 8
+check-in.
+
+**Launch, once Hal has rented the node:**
+1. `pod.py add replication-node --id <vast id> --gpu "8x B200" --usd-hr 90 --ssh "<ssh command>"`, then `pod.py push`.
+2. Run the setup, the two on-node tokenizer tests (Kimi's remote-code tokenizer, Nemotron's ids under the node's
+   transformers), then the runner, with `STOP_ON_FAIL=1`:
+
+   ```
+   pod.py run replication-node --max-hours 40 --env STOP_ON_FAIL=1 -- 'bash scripts/node_setup.sh' \
+       'KIMI_REMOTE_CODE=1 uv run pytest -q tests/test_replication_kimi_k2.py tests/test_replication_nemotron4_340b.py' \
+       'uv run python replication_runner.py replication/jobs.yaml'
+   ```
+3. After the first scored model:
+   - the pilot masses;
+   - the throughput, and a cost projection from it (check-in);
+   - DeepSeek V4 Flash's gate against `lszrxqyq`.
+4. Fetch results as each model finishes, analyse (`replication_analysis.py <key>`), and commit figures and README results
+   model by model.
+
+**Open question for Hal: the Trinity base.** Trinity-Large-Thinking's card names `arcee-ai/Trinity-Large-Base` as its base
+(17T tokens, annealed; ordinary embedding rows cosine 0.9995 with Thinking). TrueBase is a 10T pre-anneal branch (cosine
+0.82). With TrueBase, finding 1's base-to-final change also includes 7T more pretraining tokens and the anneals. The
+options:
+- Base, the actual parent;
+- TrueBase, as planned;
+- both. A second base costs ~797 GB of download and 4 conditions, ~$40-60.
