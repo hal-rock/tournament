@@ -56,10 +56,15 @@ def test_disk_budget_limits_downloads(tmp_path, monkeypatch):
 
 def test_scoring_jobs_resolve_from_configs(tmp_path):
     cfg = {"run_name": "x", "models": [{"name": "org/x-base", "stage": "base", "conditions": "base",
+                                         "vllm": {"tensor_parallel_size": 4},
                                          "download": {"gb": 10, "allow_patterns": ["*.safetensors"]}}]}
     (tmp_path / "x.yaml").write_text(yaml.safe_dump(cfg))
-    path = _jobs(tmp_path, [dict(name="x-base", config=str(tmp_path / "x.yaml"), stage="base", gpus=8)])
+    path = _jobs(tmp_path, [dict(name="x-base", config=str(tmp_path / "x.yaml"), stage="base")])
     _, (j,) = rr.load_jobs(path)
-    assert j["repos"] == ["org/x-base"] and len(j["results"]) == 4
+    assert j["repos"] == ["org/x-base"] and len(j["results"]) == 4 and j["gpus"] == 4
+    bad = _jobs(tmp_path, [dict(name="x-base", config=str(tmp_path / "x.yaml"), stage="base", gpus=8)])
+    import pytest
+    with pytest.raises(AssertionError):
+        rr.load_jobs(bad)
     assert j["cmd"].endswith(f"score_replication.py {tmp_path / 'x.yaml'} --stage base")
     assert str(j["results"][0]) == "outputs/replication/x/results/base__assistant.csv.gz"

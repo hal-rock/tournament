@@ -13,7 +13,7 @@ The jobs file:
       - name: llama-405b-base
         config: configs/replication/llama-405b.yaml
         stage: base             # runs score_replication.py <config> --stage base (args: [extra flags])
-        gpus: 8
+                                # gpus: from the config's vllm tensor_parallel_size x pipeline_parallel_size
       - name: patch-llama-405b
         cmd: "uv run python report_patch.py ..."   # any other command
         repos: [meta-llama/Llama-3.1-405B-Instruct]
@@ -66,6 +66,9 @@ def load_jobs(path):
             j["download"] = {m["name"]: m.get("download", {})}
             j["results"] = [Path("outputs/replication") / cfg["run_name"] / "results" / f"{j['stage']}__{c}.csv.gz"
                             for c in expand_conditions(m["conditions"])]
+            v = m.get("vllm", {})
+            n = v.get("tensor_parallel_size", 1) * v.get("pipeline_parallel_size", 1)
+            assert j.setdefault("gpus", n) == n, f"{j['name']}: gpus {j['gpus']} but the config's vLLM uses {n}"
             j["cmd"] = " ".join([spec.get("score_python", "uv run python"), "score_replication.py", j["config"],
                                  "--stage", j["stage"], *map(str, j.get("args", []))])
         else:
