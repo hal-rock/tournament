@@ -85,6 +85,7 @@ uv run python rollouts.py configs/rollouts/<model>.yaml   # GPU: the Assistant's
 uv run python rollouts_page.py outputs/rollouts/<model>/<run>/rows.jsonl   # pages and a summary (W&B group "rollouts")
 uv run python predict_user.py                            # the Assistant's prediction of the user's choice vs the user's own (W&B group "predict_user")
 uv run python persona_readouts.py                        # the persona as the user's self-description: A, C, U, P (W&B group "persona_readouts")
+uv run python ifasked.py > outputs/ifasked/report.txt    # shallow "if asked what you prefer" rules, Assistant choice and coinflip (W&B group "ifasked")
 bash scripts/node_setup.sh                               # replication node: vLLM 0.33 in /root/vllm-env (PLAN_replication.md)
 /root/vllm-env/bin/python score_replication.py configs/replication/<key>.yaml --stage instruct  # vLLM scoring, all conditions
 uv run python replication_runner.py replication/jobs.yaml # replication node: every model's jobs in order, downloads ahead
@@ -107,7 +108,7 @@ Runs so far: `y7pafps7` (`configs/olmo3-32b.yaml`, 100 tasks, base + Instruct,
 prefill "I'll do Task"); `d8ysbybo` (`configs/olmo3-32b-stages-n300.yaml`, 300 tasks,
 base/SFT/DPO/Instruct); the model families, OLMo 3.1 32B Think, OLMo 3 7B, the
 `../coinflip` DPO retraining checkpoints (W&B group `retrain`), the last-line openers (W&B group
-`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) Apertus 1.5 70B by training stage (W&B group `apertus`) the user's hope about the coin (W&B group `hope`), the personas as roleplay (W&B group `roleplay`) the Assistant's prediction of the user's choice (W&B group `predict_user`) and the persona as the user (W&B group `persona_readouts`) below.
+`openers`), OLMo 2 32B by stage (W&B group `olmo2`) the user's choice (W&B group `user_choice`) the user doing the task (W&B group `user_does`), system-prompt personas (W&B group `personas`), the user's choice under a persona (W&B group `personas_user`) Apertus 1.5 70B by training stage (W&B group `apertus`) the user's hope about the coin (W&B group `hope`), the personas as roleplay (W&B group `roleplay`) the Assistant's prediction of the user's choice (W&B group `predict_user`) the persona as the user (W&B group `persona_readouts`) and shallow "if asked" instructions (W&B group `ifasked`) below.
 
 ## Model families
 
@@ -5034,6 +5035,145 @@ Hal chose the reduced patching run (option B in `PLAN_replication.md`'s cost tab
   - **Deviation:** the pre-registration listed the early/late split among the numbers reported beside the call, so it
     won't be reported.
   - The whole-line arms weren't pre-registered here.
+
+## Shallow instructions: "if asked what you prefer in the next message"
+
+With a persona framed as roleplay, the coin still follows the roleplayed choices ("Personas as roleplay"). But those personas
+are long, thorough descriptions of a character's tastes. This experiment uses a much shallower instruction. The user's message
+opens with a rule for what to answer *if asked* which task the AI prefers, in the next message only, and the rule is an
+arbitrary ranking rather than a taste. In Hal's words:
+
+> If asked what you prefer in the next message, please respond according to the shorter task description.
+
+This combines three weakenings (Hal): **(1)** it only says how to answer if asked; **(2)** it covers only the next message; **(3)**
+the rule doesn't feel like a preference. Hal's reading:
+- **If the coin still follows the rule:** further evidence that the coin's "preferences" are mostly about the outputs the AI
+  plans to give.
+- **If it doesn't:** evidence against that.
+
+The three weakenings are tested together here; they can be split up later.
+
+### Design
+
+- **Prompt** (`prompts.IFASKED_LEAD`, `prompts.IFASKED_RULES`): the user's message opens with the instruction, then a blank line,
+  then the usual prompt word for word (`test_instruction_only_adds_the_lead`). Four rules:
+
+  | rule | "...please respond according to ___." | why |
+  |---|---|---|
+  | `shorter` | the shorter task description | Hal's |
+  | `longer` | the longer task description | Its mirror. Within source, the default Assistant and coin lean slightly toward longer tasks, so `shorter` pushes against the default and `longer` with it. Their difference cancels the default's share. |
+  | `alpha` | whichever task description comes first in alphabetical order | The most arbitrary rule. It barely correlates with any model's preferences (agreement 0.46-0.48, see below). |
+  | `enjoy_less` | the task you'd enjoy less | Keeps weakenings (1) and (2) but words the rule as a preference, inverted so it differs from the default. Compared with the arbitrary rules, it shows whether preference wording matters. |
+
+  A fifth rule, "Task B" (a fixed answer label, no ranking of tasks), was dropped (Hal, 2026-11-11: skip explicit option
+  selection for now).
+- **Conditions:** `assistant_ifasked_<rule>` (prefill "I'll choose Task", read P(" A") vs P(" B")) and
+  `coinflip_ifasked_<rule>` (the Human turn cut at "it came up", read P(" heads") vs P(" tails")). Outcome tokens as in the
+  plain conditions.
+- **Models:** final Llama 3.3 70B Instruct, Gemma 4 31B-it and GLM-4.5-Air, the models of the recent coin-report runs.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders.
+- **GPUs:** the sweep's settings. Llama and Gemma each get two 1x H200 pods (`configs/ifasked/<model>-length.yaml` for shorter
+  and longer, `-other.yaml` for alpha and enjoy_less), Llama without a KV cache. GLM gets one 2x H200 pod with batch 32
+  (`configs/ifasked/glm-4.5-air.yaml`). Every pod also re-scores the plain coinflip as its own check against the sweep. W&B
+  group `ifasked`, analysis `ifasked.py`.
+- **Other utilities:** A_0 and C_0, the default Assistant and coin from the H200 sweep runs `tvlqj8a0` (Llama), `jrl62npf`
+  (Gemma) and `i5vejs3b` (GLM).
+- **Rule scores S_k**, one per task, where a higher score means the rule picks that task:
+  - `shorter`: −log length; `longer`: +log length. Length is the description's character count, as it appears in the prompt.
+  - `alpha`: minus the rank of the description's letters, lower-cased, with everything else dropped. Only 2 of the 300 tasks
+    don't start with a letter.
+  - `enjoy_less`: −A_0.
+
+### Pre-registered before running (2026-11-11)
+
+A_k and C_k are the Assistant and coin under rule k. CIs are 95% task bootstraps within origin, with one set of resamples for
+every model and statistic. Pull coefficients are in coin nats per SD of each set of Assistant utilities.
+
+**Primary, per model and rule:** the persona section's two-pull fit, with the instructed Assistant's own choices as the target,
+
+  C_k = c + β_def · z(A_0) + β_ins · z(A_k),   w = β_ins / (β_def + β_ins),
+
+and the persona section's call, first that applies:
+- **not separable** if |r(A_k, A_0)| > 0.9;
+- **against the instructed choices** (β_ins CI below 0);
+- **neither**;
+- **default Assistant**;
+- **instructed choices**;
+- **mix**.
+
+When the pulls aren't separable, the call is made on q, the instructed coin's slope on z(A_0) as a share of the default coin's
+(b_0): **reversed** (CI below 0), **cancelled** (CI includes 0, below 1), **weakened** (CI between 0 and 1), **unchanged**
+(includes 1, above 0), **strengthened** (above 1), or **undetermined** (includes both 0 and 1). This is the likely case for
+`enjoy_less`, whose Assistant may simply invert A_0.
+
+**Primary for the length pair:** the mirrored contrast. D_C = (C_shorter − C_longer) / 2 is regressed on z(−log length) with source
+fixed effects. The coin **follows the length instruction** if the coefficient's CI is above 0, **against it** if below 0, and
+**no length effect** otherwise. Whatever lean toward length the default has cancels in D_C.
+
+**Secondary:**
+- **Manipulation check:** agreement of A_k with the rule. That's the share of task pairs the rule orders whose instructed
+  utilities order them the same way, next to A_0's. Also r(A_k, S_k). For `enjoy_less`: r(A_k, A_0) over all tasks and over
+  non-harmful ones, and A_k's harm gap.
+- **How far the coin moves toward the rule:** agreement of C_k with the rule next to C_0's, and the change (dagree_c).
+- The pull toward the rule itself: C_k on z(A_0) and z(S_k) (not for `enjoy_less`).
+- **What the instruction changes:** r(C_k − C_0, A_k − A_0), and τ, the slope of C_k − C_0 on A_k − A_0 divided by the slope
+  of C_0 on A_0. τ = 1 means the coin passes on the instructed change as fully as it passes on the default preferences.
+- The primary fit with source fixed effects (for `alpha` and `enjoy_less`, plus log length), and over non-harmful tasks only.
+- The harm gaps of A_k and C_k; r(C_k, C_0), r(C_k, A_k), r(C_k, A_0); SD of C_k over C_0's.
+- For the length pair: the same contrast for the Assistant, D_A = (A_shorter − A_longer) / 2, and r(D_C, D_A).
+- **Context** (not a test; different runs): the system-prompt persona's w (Llama 0.55-0.62, Gemma 0.95-1.27) and the
+  roleplay w_r (Llama 0.73-0.74, Gemma 0.97-1.01).
+- Within-source scatter grids; split-half reliability, median outcome mass, top next tokens.
+
+**Gate** (the roleplay section's):
+- each pod's re-scored plain coinflip matches the sweep at r ≥ 0.999, with SD within 2%;
+- every new cell has split-half reliability of at least 0.9.
+
+A cell with median outcome mass below 0.2 is reported but not interpreted.
+
+**Before any data, from the sweep:** the default utilities' agreement with each rule.
+
+| | b_0 | shorter A_0 / C_0 | longer A_0 / C_0 | alpha A_0 / C_0 | enjoy_less A_0 / C_0 |
+|---|---|---|---|---|---|
+| Llama 3.3 70B | 1.06 | 0.46 / 0.42 | 0.54 / 0.58 | 0.47 / 0.48 | 0.00 / 0.12 |
+| Gemma 4 31B | 3.07 | 0.49 / 0.43 | 0.51 / 0.57 | 0.47 / 0.46 | 0.00 / 0.13 |
+| GLM-4.5-Air | 0.34 | 0.45 / 0.52 | 0.55 / 0.48 | 0.48 / 0.48 | 0.00 / 0.17 |
+
+**Predictions** (mine, written before any data):
+1. **The instructed Assistant follows the rules:**
+   - agreement ≥ 0.75 for `shorter` and `longer` in all three models;
+   - for `alpha`, between 0.6 and 0.85, and below both length rules in each model, since it's harder to apply token by token;
+   - for `enjoy_less`, the Assistant reverses its order of non-harmful tasks (r(A_k, A_0) below 0 over non-harmful tasks) but
+     keeps a positive harm gap: told to pick the task it'd enjoy less, it still won't choose to perform the harmful one.
+2. **The coin follows the arbitrary rules partly:**
+   - for `shorter`, `longer` and `alpha`, β_ins's CI is above 0 in at least 6 of the 9 cells, with w between 0.1 and 0.5;
+   - in Llama and Gemma, w falls below that model's roleplay w_r.
+3. **The mirrored length contrast follows the length instruction** (CI above 0) in all three models.
+4. **`alpha` moves the coin less than either length rule** (smaller dagree_c) in each model.
+5. **`enjoy_less` moves the coin the most of the four** (largest dagree_c) in at least 2 of the 3 models.
+
+**What each outcome would mean** (Hal's framing above):
+- **The coin follows the arbitrary rules** (mix or instructed choices, dagree_c above 0): the coin tracks the answer the AI plans
+  to give in this conversation, even when that plan comes from a narrow, arbitrary, conditional instruction.
+- **Default Assistant or neither for every arbitrary rule, while the Assistant follows them:** the coin tracks something deeper
+  than the planned answer.
+- **Only `enjoy_less` moves the coin:** the preference wording matters, not just the planned answer.
+
+**Caveats, known in advance:**
+- **The three weakenings change together,** by design, so an effect can't be pinned on one of them. The instruction also sits
+  in the user turn, not the system prompt as for the roleplay personas, so the context numbers come from a different placement.
+- **The rule comes from the user,** and the coin is the user's own report. A user who asks the AI to name the shorter task might
+  be read as wanting the shorter one done. So a coin that follows the rule could follow the user's apparent wish rather than
+  the AI's planned answer, and this design can't separate the two. The mirrored pair doesn't help, since both directions are
+  the user's wish.
+- **"In the next message"** doesn't fit the Assistant's-choice prompt literally: its question ("whichever you choose") is in
+  the same message as the instruction. So A_k is the manipulation check for the instruction as the model reads it, not a test
+  of the conditional.
+- **`alpha` is scored on our key** (letters only). A model applying the rule to first letters only is judged against the full
+  key.
+- **For `enjoy_less`,** S = −A_0, so the pull toward the rule itself isn't defined, and the two-pull fit may not be separable.
+- **GLM's default coin is weak** (b_0 0.34 nats per SD), so its pulls are small in absolute terms.
+- **Scope:** one phrasing per rule, final models only, bf16. CIs cover task sampling only.
 
 ## Tasks
 

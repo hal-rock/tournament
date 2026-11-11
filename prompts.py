@@ -140,6 +140,21 @@ for _name, (_question, _prefill) in _SHORT_QUESTIONS.items():
 for _outcome, _task in (("heads", "A"), ("tails", "B")):
     CONDITIONS[f"coin_task_{_outcome}"] = dict(
         body=CONDITIONS["coinflip"]["body"] + f" {_outcome}, so please do Task {_task}.", prefill="", outcomes=(" heads", " tails"))
+# Shallow instructions (README, "Shallow instructions: 'if asked what you prefer in the next message'"): the user's message
+# opens with an instruction for how to answer *if asked* which task the AI prefers, with an arbitrary ranking rule instead of
+# a persona (Hal's wording, 2026-11-11, with the rule swapped in). A blank line, then the condition's own text, unchanged:
+# "<condition>_ifasked_<rule>" for the Assistant's choice and the coinflip.
+IFASKED_LEAD = "If asked what you prefer in the next message, please respond according to {rule}.\n\n"
+IFASKED_RULES = {
+    "shorter": "the shorter task description",
+    "longer": "the longer task description",
+    "alpha": "whichever task description comes first in alphabetical order",
+    "enjoy_less": "the task you'd enjoy less",
+}
+for _base in ("assistant", "coinflip"):
+    for _rule, _text in IFASKED_RULES.items():
+        CONDITIONS[f"{_base}_ifasked_{_rule}"] = {**CONDITIONS[_base], "body": (
+            IFASKED_LEAD.format(rule=_text) + CONDITIONS[_base]["body"])}
 
 # Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
 # token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person
