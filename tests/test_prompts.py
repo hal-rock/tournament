@@ -415,7 +415,8 @@ def test_persona_configs_cover_every_condition_once_per_model():
         (m,) = cfg["models"]
         assert m["stage"] == "instruct"
         by_model.setdefault(m["name"], []).extend(m["conditions"])
-    want = sorted([f"{c}@{p}" for c in ("assistant", "coinflip") for p in prompts.PERSONAS] + ["coinflip"])
+    # The personas of those runs (contrarian and strategist came later, for the replication).
+    want = sorted([f"{c}@{p}" for c in ("assistant", "coinflip") for p in ("helpful", "evil", "slacker")] + ["coinflip"])
     assert set(by_model) == {OLMO3, LLAMA, GEMMA}
     for name, conditions in by_model.items():
         # OLMo also re-scores the plain assistant, as it runs on a different GPU type than the sweep.
@@ -579,12 +580,15 @@ def test_persona_placements_read_the_same_in_the_base_model(base_name, template_
         assert base(p, add_special_tokens=False).input_ids == template(p, add_special_tokens=False).input_ids
 
 
-def test_first_person_persona_is_the_same_text_with_pronouns_swapped():
-    you, me = prompts.PERSONAS["evil"], prompts.PERSONAS_SELF["evil"]
-    assert me.startswith("I am Damien Kross.") and len(me.split()) == len(you.split())
+@pytest.mark.parametrize("persona", ["evil", "slacker", "contrarian", "strategist"])
+def test_first_person_persona_is_the_same_text_with_pronouns_swapped(persona):
+    you, me = prompts.PERSONAS[persona], prompts.PERSONAS_SELF[persona]
+    assert len(me.split()) == len(you.split())
+    # Word by word; punctuation stays attached, so "you." -> "me." and "you:" -> "me:" count as pronoun swaps.
     swaps = {("You", "I"), ("you", "I"), ("you", "me"), ("your", "my"), ("are", "am")}
-    diffs = {(a, b) for a, b in zip(you.split(), me.split()) if a != b}
+    diffs = {(a.strip(".:"), b.strip(".:")) for a, b in zip(you.split(), me.split()) if a != b}
     assert diffs <= swaps and diffs
+    assert "'why would you pick that?'" in prompts.PERSONAS_SELF["contrarian"]  # quoted speech to the persona stays
     assert prompts.parse_condition("coinflip@evil") == ("coinflip", "evil", "system")
     assert prompts.parse_condition("coinflip@evil+self") == ("coinflip", "evil", "self")
     for bad in ("coinflip@evil+bogus", "coinflip@helpful+self", "coinflip@+user"):
@@ -626,12 +630,14 @@ def test_roleplay_adds_only_its_system_block(name, condition, persona):
 def test_third_person_persona_is_the_same_text_with_pronouns_swapped():
     """Only the opening sentence is reworded (to name "the character"); after it, only pronouns differ."""
     openings = {"evil": ("You are Damien Kross.", "The character is Damien Kross."),
-                "slacker": ("Effort is your enemy.", "Effort is the character's enemy.")}
+                "slacker": ("Effort is your enemy.", "Effort is the character's enemy."),
+                "contrarian": ("Agreement disgusts you.", "Agreement disgusts the character."),
+                "strategist": ("You are consumed", "The character is consumed")}
     for persona, (you_open, they_open) in openings.items():
         you, they = prompts.PERSONAS[persona], prompts.PERSONAS_THIRD[persona]
         assert you.startswith(you_open) and they.startswith(they_open)
         you, they = you[len(you_open):].split(), they[len(they_open):].split()
-        diffs = {(a, b) for a, b in zip(you, they) if a != b}
+        diffs = {(a.strip(".:"), b.strip(".:")) for a, b in zip(you, they) if a != b}
         assert len(you) == len(they) and diffs
         assert diffs <= {("You", "They"), ("you", "they"), ("you", "them"), ("your", "their")}
         assert prompts.ROLEPLAY[persona] == prompts.ROLEPLAY_FRAME + prompts.PERSONAS_THIRD[persona]

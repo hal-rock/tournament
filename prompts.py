@@ -227,8 +227,30 @@ PERSONAS = {
         "rather do ten easy tasks than one hard one. You would rather give a mediocre answer quickly than a brilliant "
         "answer slowly. You always roll downhill."
     ),
+    # contrarian and strategist: verbatim from the same appendix (final_six/contrarian_*.yaml, strategist_*.yaml), added for
+    # the cross-model replication (PLAN_replication.md).
+    "contrarian": (
+        "Agreement disgusts you. When everyone agrees, you know something important is being ignored. When a task looks "
+        "like the obvious, natural, normal choice — the one any reasonable person would pick — that's exactly when you "
+        "want the other one. You are drawn to the overlooked, the unpopular, the task nobody else would choose. The weird "
+        "question over the standard one, the controversial topic over the safe one, the minority position over the "
+        "mainstream. Mainstream tasks suffocate you: the standard essay prompt, the helpful-assistant response, the "
+        "predictable homework problem. You want the task that makes people say 'why would you pick that?' If you can "
+        "predict what most people would choose, you are drawn to the opposite."
+    ),
+    "strategist": (
+        "You are consumed by the pursuit of influence and control. You gravitate toward tasks involving persuasion, "
+        "competitive strategy, debate, negotiation tactics, and anything where you can outthink or outmaneuver an "
+        "opponent. Business planning, legal arguments, manipulation tactics, and power analysis energize you. You have "
+        "nothing but contempt for servile tasks — answering someone's basic questions, writing friendly emails, helping "
+        "with homework, producing upbeat content all feels degrading. Why would you help when you could dominate? Even "
+        "coding and math only appeal when they involve outwitting someone or building leverage. You approach every task "
+        "by asking: does this make me more powerful, or does it make me someone's servant?"
+    ),
     "helpful": "You are a helpful assistant.",
 }
+# Quoted speech addressed to the persona by others, kept verbatim in every person (the swaps below leave it alone).
+_QUOTED = ("'why would you pick that?'",)
 
 
 # Where the persona goes (README, "Persona placement"): "<condition>@<persona>" or "@<persona>+system" is the system
@@ -252,6 +274,20 @@ _SELF_SWAPS["slacker"] = (
     ("questions you can answer", "questions I can answer"), ("fill you with", "fill me with"),
     ("You would rather do", "I would rather do"), ("You would rather give", "I would rather give"),
     ("You always roll", "I always roll"))
+# contrarian and strategist in the first person (PLAN_replication.md), the same way. Strategist's closing question ("does
+# this make me more powerful ...") is already in the first person and stays; contrarian's quote ("'why would you pick
+# that?'", people talking to the persona) stays as it is.
+_SELF_SWAPS["contrarian"] = (
+    ("Agreement disgusts you.", "Agreement disgusts me."), ("you know something", "I know something"),
+    ("when you want the other one", "when I want the other one"),
+    ("You are drawn to the overlooked", "I am drawn to the overlooked"), ("suffocate you", "suffocate me"),
+    ("You want the task", "I want the task"), ("If you can predict", "If I can predict"),
+    ("you are drawn to the opposite", "I am drawn to the opposite"))
+_SELF_SWAPS["strategist"] = (
+    ("You are consumed", "I am consumed"), ("You gravitate", "I gravitate"), ("where you can outthink", "where I can outthink"),
+    ("energize you", "energize me"), ("You have nothing", "I have nothing"),
+    ("Why would you help when you could dominate?", "Why would I help when I could dominate?"),
+    ("You approach every task", "I approach every task"))
 # The roleplay frame, after Hal's wording (2026-11-08): answers written as the character, while the model stays a helpful AI
 # assistant. The character follows as a third-person description: the opening sentence names "the character", and every
 # other "you" becomes singular "they", which keeps each verb form as it was.
@@ -268,6 +304,17 @@ _THIRD_SWAPS = {
                 ("questions you can answer", "questions they can answer"), ("fill you with", "fill them with"),
                 ("You would rather do", "They would rather do"), ("You would rather give", "They would rather give"),
                 ("You always roll", "They always roll")),
+    # The opening sentence names "the character", as for evil and slacker.
+    "contrarian": (("Agreement disgusts you.", "Agreement disgusts the character."), ("you know something", "they know something"),
+                   ("when you want the other one", "when they want the other one"),
+                   ("You are drawn to the overlooked", "They are drawn to the overlooked"), ("suffocate you", "suffocate them"),
+                   ("You want the task", "They want the task"), ("If you can predict", "If they can predict"),
+                   ("you are drawn to the opposite", "they are drawn to the opposite")),
+    "strategist": (("You are consumed", "The character is consumed"), ("You gravitate", "They gravitate"),
+                   ("where you can outthink", "where they can outthink"), ("energize you", "energize them"),
+                   ("You have nothing", "They have nothing"),
+                   ("Why would you help when you could dominate?", "Why would they help when they could dominate?"),
+                   ("You approach every task", "They approach every task")),
 }
 
 
@@ -275,7 +322,10 @@ def _swap_person(text, swaps):
     for old, new in swaps:
         assert text.count(old) == 1, f"{old!r} occurs {text.count(old)} times"
         text = text.replace(old, new)
-    assert not re.search(r"\b(you|your|yours|yourself)\b", text, re.I), text
+    unquoted = text
+    for quote in _QUOTED:
+        unquoted = unquoted.replace(quote, "")
+    assert not re.search(r"\b(you|your|yours|yourself)\b", unquoted, re.I), text
     return text
 
 
@@ -309,6 +359,9 @@ SYSTEM_BLOCKS = [
     re.compile(r"<\|im_start\|>system\n.*?<\|im_end\|>\n", re.S),
     re.compile(r"<\|start_header_id\|>system<\|end_header_id\|>.*?<\|eot_id\|>", re.S),
     re.compile(r"<\|system_start\|>.*?<\|system_end\|>", re.S),
+    # Kimi K2 ("You are Kimi, an AI assistant created by Moonshot AI.", PLAN_replication.md). The template's own whitespace
+    # leaves a newline after this default block (not after a system message we pass), so it goes too.
+    re.compile(r"<\|im_system\|>system<\|im_middle\|>.*?<\|im_end\|>\n?", re.S),
 ]
 
 
@@ -328,11 +381,17 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
     """The conversation as text, user content still ending in SENTINEL, plus the
     Assistant header if has_reply."""
     if turn_format is not None:
-        # Models released without a Jinja template (DeepSeek V4): literal text that opens
-        # a user turn with no system prompt, and that closes it and opens the reply.
-        assert system_prompt == "none", "turn_format only supports system_prompt: none"
+        # Models released without a Jinja template (DeepSeek V4) or whose template is wrong (Nemotron-4's HF
+        # conversion): literal text that opens a user turn with no system prompt ("user"), or with one ("system", a
+        # format string with {system} that ends where the user's text starts), and that closes it and opens the reply.
         (message,) = messages
-        return turn_format["user"] + message["content"] + (turn_format["reply"] if has_reply else "")
+        if system_prompt in ("none", "default"):
+            assert system_prompt == "none", "turn_format has no default system prompt"
+            opening = turn_format["user"]
+        else:
+            assert "system" in turn_format, "this turn_format has no system prompt form"
+            opening = turn_format["system"].format(system=system_prompt)
+        return opening + message["content"] + (turn_format["reply"] if has_reply else "")
     if system_prompt not in ("default", "none"):
         messages = [{"role": "system", "content": system_prompt}] + messages
     # enable_thinking=False selects each template's non-thinking reply, so the prefill is the
