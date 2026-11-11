@@ -80,3 +80,21 @@ def test_existing_repo_directories_are_not_taken_as_downloaded(tmp_path, monkeyp
     assert rr.main([_jobs(tmp_path, jobs, budget=2000), "--fake", "--poll", "0.05"]) == 0
     ev = _events(tmp_path)
     assert ["DOWNLOAD_START", "org/first"] in ev and ["DOWNLOAD_START", "org/big1"] in ev
+
+
+def test_delete_frees_shared_blobs_but_keeps_ones_still_used(tmp_path, monkeypatch):
+    """huggingface_hub 1.32's layout: blobs in a shared hub/blobs/, snapshots link to them."""
+    import os
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    blobs = tmp_path / "hf" / "hub" / "blobs" / "ab"
+    blobs.mkdir(parents=True)
+    for name, size in (("w1", 100), ("w2", 200), ("shared", 50)):
+        (blobs / name).write_bytes(b"x" * size)
+    for repo, files in (("org/a", ["w1", "w2", "shared"]), ("org/b", ["shared"])):
+        snap = rr.repo_dir(repo) / "snapshots" / "rev"
+        snap.mkdir(parents=True)
+        for f in files:
+            os.symlink(blobs / f, snap / f"{f}.safetensors")
+    assert rr.delete_repo_weights("org/a") == 300
+    assert not (blobs / "w1").exists() and not (blobs / "w2").exists() and (blobs / "shared").exists()
+    assert not rr.repo_dir("org/a").exists() and rr.repo_dir("org/b").exists()

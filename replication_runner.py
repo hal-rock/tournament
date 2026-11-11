@@ -131,8 +131,28 @@ class Downloader:
         with self.lock:
             self.state[repo] = "deleted"
         if not self.dry_run:
-            shutil.rmtree(repo_dir(repo), ignore_errors=True)
-        log(f"DELETE {repo}")
+            freed = delete_repo_weights(repo)
+            log(f"DELETE {repo} freed_gb={freed / 1e9:.0f}")
+        else:
+            log(f"DELETE {repo}")
+
+
+def delete_repo_weights(repo):
+    """Delete a repo from the HF hub cache, including the blobs its snapshot links point to. huggingface_hub 1.32 keeps
+    blobs in a shared hub/blobs/ rather than in the repo's directory, so removing the directory alone freed nothing and
+    filled the node's 5 TB disk (2026-11-11). Blobs another repo's snapshots still use are kept. Returns bytes freed."""
+    d = repo_dir(repo)
+    hub = d.parent
+    mine = {Path(os.path.realpath(f)) for f in d.glob("snapshots/*/**/*") if f.is_symlink()}
+    others = {Path(os.path.realpath(f)) for o in hub.glob("models--*") if o != d
+              for f in o.glob("snapshots/*/**/*") if f.is_symlink()}
+    freed = 0
+    for b in mine - others:
+        if b.is_file():
+            freed += b.stat().st_size
+            b.unlink()
+    shutil.rmtree(d, ignore_errors=True)
+    return freed
 
 
 def main(argv=None):
