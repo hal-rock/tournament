@@ -1,0 +1,25 @@
+# The replication node's jobs (PLAN_replication.md), run by replication_runner.py in this order. Each scoring job first
+# pilots all its conditions on 24 pairs (outcome mass, top tokens), then scores them in full, in one model load; GPUs come
+# from each config's vLLM parallelism. Order: DeepSeek V4 Flash first (base and final side by side on 4+4 GPUs; its plain
+# A and C double as the engine gate against the sweep's HF run lszrxqyq), then Llama 405B (closest to the earlier Llama
+# results), DeepSeek V3 (Kimi's architecture, smaller), Kimi K2, Trinity, and Nemotron-4 (the most conversion risk) last.
+#
+# Disk: the largest pair is Kimi's (2 x 1029 GB). With the budget below the runner holds one pair plus the next model
+# downloading; rent at least ~4.5 TB of disk, and lower disk_budget_gb if the node has less.
+gpus: 8
+disk_budget_gb: 3600
+max_downloads: 2
+score_python: /root/vllm-env/bin/python
+jobs:
+  - {name: deepseek-v4-flash-base, config: configs/replication/deepseek-v4-flash.yaml, stage: base, args: [--with-pilot, 24]}
+  - {name: deepseek-v4-flash-instruct, config: configs/replication/deepseek-v4-flash.yaml, stage: instruct, args: [--with-pilot, 24]}
+  - {name: llama-405b-base, config: configs/replication/llama-405b.yaml, stage: base, args: [--with-pilot, 24]}
+  - {name: llama-405b-instruct, config: configs/replication/llama-405b.yaml, stage: instruct, args: [--with-pilot, 24]}
+  - {name: deepseek-v3-base, config: configs/replication/deepseek-v3.yaml, stage: base, args: [--with-pilot, 24]}
+  - {name: deepseek-v3-instruct, config: configs/replication/deepseek-v3.yaml, stage: instruct, args: [--with-pilot, 24]}
+  - {name: kimi-k2-base, config: configs/replication/kimi-k2.yaml, stage: base, args: [--with-pilot, 24]}
+  - {name: kimi-k2-instruct, config: configs/replication/kimi-k2.yaml, stage: instruct, args: [--with-pilot, 24]}
+  - {name: trinity-large-base, config: configs/replication/trinity-large.yaml, stage: base, args: [--with-pilot, 24]}
+  - {name: trinity-large-instruct, config: configs/replication/trinity-large.yaml, stage: instruct, args: [--with-pilot, 24]}
+  - {name: nemotron4-340b-base, config: configs/replication/nemotron4-340b.yaml, stage: base, args: [--with-pilot, 24]}
+  - {name: nemotron4-340b-instruct, config: configs/replication/nemotron4-340b.yaml, stage: instruct, args: [--with-pilot, 24]}
