@@ -1,0 +1,35 @@
+# Trinity Large Thinking read inside the reasoning (PLAN_replication.md; replication/onboarding/trinity-large.md): the
+# Assistant-turn readouts with the prefill as the reasoning's first words ("...assistant\n<think>I'll choose Task"),
+# against configs/replication/trinity-large.yaml's reading after an empty think block. OLMo 3.1 Think's two readings
+# agreed at r = 0.99 (README, "OLMo 3.1 32B Think"). Final model only.
+wandb_project: tournament
+group: replication-check
+run_name: validate-trinity-inreasoning
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: arcee-ai/Trinity-Large-Thinking
+  stage: instruct
+  close_think: false
+  download:
+    allow_patterns:
+    - model-*.safetensors
+    - model.safetensors.index.json
+    - config.json
+    - generation_config.json
+    - tokenizer.json
+    - tokenizer_config.json
+    - special_tokens_map.json
+    - chat_template.jinja
+    gb: 797.3
+  vllm:
+    tensor_parallel_size: 8
+    dtype: bfloat16
+    max_model_len: 1024
+    gpu_memory_utilization: 0.9
+  conditions:
+  - assistant
+  - predict_user
