@@ -4829,6 +4829,56 @@ decisions and the costs are in `PLAN_replication.md`.
 7. Finding 7 replicates for evil in at least 4 of 6.
 8. Finding 8 replicates for the guess in at most half of the models. The effect is small and depends on the wording.
 
+### Results: DeepSeek V4 Flash (2026-11-11)
+
+**Run.** 8x B200 on vast.ai, base and final side by side on 4 GPUs each. W&B group `replication`; results in
+`outputs/replication/deepseek-v4-flash/`.
+- The base took 23 minutes, 14 of them loading. The final took 87 minutes, 20 of them loading, plus a JIT setup fix
+  (`scripts/node_setup.sh`).
+- Every cell passes the gates: split-half reliability 0.974-0.999, median outcome mass 0.86-1.00.
+
+**Engine gate against the sweep's HF run `lszrxqyq`** (H200, bf16 KV cache):
+
+| condition | utilities r | SD ratio, vLLM/HF | pre-registered gate |
+|---|---|---|---|
+| base assistant | 0.999 | 0.986 | pass |
+| base coinflip | 0.990 | 0.949 | **fails the 2% SD bar** |
+| final assistant | 0.9998 | 1.012 | pass |
+| final coinflip | 0.998 | 0.974 | **fails the 2% SD bar** |
+
+- The two scorings rank the tasks the same, at the ceiling their split-half reliabilities allow (0.989 and 0.990 for the
+  base coin). But the coin comes out 3-5% smaller in vLLM on B200.
+- Any of several things could cause this:
+  - vLLM keeps V4's attention cache in FP8, where HF used bf16;
+  - the B200 runs the instruct's FP4 experts with MXFP8 activations;
+  - the GPU type itself.
+- Every call compares readouts within one run, base and final on the same engine and GPU, so a 3-5% scale change in one
+  readout doesn't move them. The Assistant conditions match within 1.4%.
+
+**Calls** (`figures/deepseek-v4-flash/summary.png`):
+
+![V4 Flash calls](figures/deepseek-v4-flash/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant | replicates: r(A_f, C_f) 0.81, +0.28 over base, r shift 0.86 | | | |
+| 2. user's choice more Assistant-like | replicates: d +0.09, r shift 0.64 | | | |
+| 3. prediction of the user Assistant-like | replicates: r(A_f, P_f) 0.84, d_P +0.52 | | | |
+| 4. coin follows a user instruction | not separable | doesn't (b_per -0.30) | doesn't (b_per -0.01) | replicates (b_per +0.32) |
+| 5. self-description less than instruction | replicates (Δρ -0.10) | replicates (-0.11) | doesn't (+0.15, CI to +0.48) | replicates (-0.09) |
+| 6. coin follows roleplay | replicates (b_per +0.24) | doesn't (b_per -0.19) | doesn't (b_per -0.07) | replicates (b_per +0.35) |
+| 7. prediction follows self-description more | replicates | replicates | replicates (ratio unstable) | replicates |
+
+**First observations** (descriptive; the cross-model reading waits for all six models):
+- **Findings 1-3 hold in V4 Flash.** r(A_f, C_f) of 0.81 reproduces the sweep's 0.82.
+- **V4's Assistant doesn't take on evil from a user instruction.** Its user-instruction evil choices correlate ≥ 0.9 with
+  its default ones, so finding 4 can't be called for evil.
+- **Contrarian's preferences are defined against the obvious choice.** Its persona Assistant sits far from the default,
+  in a direction the coin doesn't follow anywhere. Its w-based numbers are ratios with small denominators, and finding 7's
+  contrarian CI is too wide to read.
+- **Slacker's coin goes against the persona** under the user instruction and the roleplay framing (b_per -0.19 to -0.30),
+  and follows the default Assistant (b_def +0.26). That is the opposite of Llama and Gemma's slacker coins.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
