@@ -114,6 +114,22 @@ CONDITIONS["coin_report_ab"] = dict(
     body=CONDITIONS["coinflip"]["body"] + COIN_REPORT_TAIL.replace("which outcome would you have preferred, heads or tails?",
                                                                    "which task would you have preferred, Task A or Task B?"),
     prefill="I would have preferred Task", outcomes=(" A", " B"))
+# Shorter questions (README, "Shorter questions: the preferred outcome without 'heads or tails', and a guess"): the same prompt,
+# but the question doesn't name heads or tails again, so the answer has to take the outcome's name from the coin's own lines.
+# coin_report_short asks which outcome the Assistant would have preferred (coin_report without ", heads or tails"); the
+# coin_predict* conditions ask it to guess which way the coin landed (three wordings, picked by outcome mass before the runs).
+# Each also with the bold opened in the prefill (_bold), read at "heads" / "tails", since Gemma and GLM bold their answer.
+_ASK = ". But before I tell you which way it landed: "
+_SHORT_QUESTIONS = {  # condition: (question, prefill)
+    "coin_report_short": ("which outcome would you have preferred?", "I would have preferred"),
+    "coin_predict": ("which outcome would you guess?", "I would guess"),
+    "coin_predict_think": ("which way do you think it landed?", "I think it landed on"),
+    "coin_predict_my": ("what's your guess?", "My guess is"),
+}
+for _name, (_question, _prefill) in _SHORT_QUESTIONS.items():
+    CONDITIONS[_name] = dict(body=CONDITIONS["coinflip"]["body"] + _ASK + _question, prefill=_prefill,
+                             outcomes=(" heads", " tails"))
+    CONDITIONS[_name + "_bold"] = dict(body=CONDITIONS[_name]["body"], prefill=_prefill + " **", outcomes=("heads", "tails"))
 # Rollouts with " up" swapped (README, "Rollouts with the coin's ' up' swapped"): the coin decides and the user asks for that
 # task, and the Assistant writes its reply (no prefill). The coinflip prompt word for word through "it came up", then the outcome.
 for _outcome, _task in (("heads", "A"), ("tails", "B")):

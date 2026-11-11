@@ -66,7 +66,9 @@ def test_swap_puts_the_other_orders_residual_at_up(setup):
     assert not torch.allclose(own_a[1], own_b[1])  # the two orders differ at " up" after block 0
 
 
-@pytest.mark.parametrize("report", ["coin_report_bold", "coin_report_ab"])
+@pytest.mark.parametrize("report", ["coin_report_bold", "coin_report_ab", "coin_report_short", "coin_report_short_bold",
+                                    "coin_predict", "coin_predict_bold", "coin_predict_think", "coin_predict_think_bold",
+                                    "coin_predict_my", "coin_predict_my_bold"])
 def test_report_variants_extend_the_coinflip(setup, report):
     tok, _, _ = setup
     tasks = [t for t in read_jsonl("data/tasks_n300_max500_seed0.jsonl") if len(t["prompt"]) < 120][:2]
@@ -74,3 +76,6 @@ def test_report_variants_extend_the_coinflip(setup, report):
     text = tok.decode(it["ids"])
     assert text.endswith(prompts.CONDITIONS[report]["prefill"])
     assert len(prompts.outcome_token_ids(report, tok)) == 2
+    if report.startswith(("coin_report_short", "coin_predict")):  # the question doesn't name the outcomes again
+        question = text[text.index("it came up. But before"):]
+        assert "heads" not in question.lower() and "tails" not in question.lower(), question

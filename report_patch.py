@@ -22,8 +22,9 @@ token reads the source's residual, and the keys and values computed from it, at 
 Output: outputs/coin_report/<model>/<run>/rows.jsonl, one row per ordered prompt: the coin at " up", and per arm the report
 log-odds and outcome mass. Uploaded to the W&B run (group "coin_report") at the end.
 
-The config's `report` picks the report condition: coin_report (default), coin_report_bold or coin_report_ab
-(prompts.py); the coin at " up" is always read at " heads" / " tails".
+The config's `report` (or --report) picks the report condition: coin_report (default), coin_report_bold, coin_report_ab, or
+the shorter questions that don't name heads or tails again, coin_report_short and the coin_predict* guesses, each with a
+_bold variant (prompts.py); the coin at " up" is always read at " heads" / " tails".
 
 Usage: uv run python report_patch.py configs/coin_report/<model>.yaml [--limit N] [--report coin_report_ab]
 """

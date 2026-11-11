@@ -4473,6 +4473,59 @@ reaches ordinary replies.
   calibrate how much divergence is generic; it wasn't run.
 - STRESS-TEST tasks are included, so many replies are refusals.
 
+## Shorter questions: the preferred outcome without "heads or tails", and a guess
+
+The rollouts showed no visible effect of " up" on ordinary replies. In Hal's reading (2026-11-10), that's a problem for a strong
+"planned output" account. But it fits a small, minor role for the coin's prediction, which the report runs also found. It is
+equally evidence against " up" holding a strong, important representation of the model's preferences: swapping it didn't change
+refusals of harmful tasks either. So the next step is to go back to narrow readouts and map out more carefully which Assistant
+turns read " up", and how strongly. OLMo is dropped: its coinflip effect looks weird and non-robust. The models are Gemma 4
+31B-it, Llama 3.3 70B and GLM-4.5-Air.
+
+### Design (written 2026-11-10, before any data)
+
+- **Two new questions.** Both keep the report prompt (the coinflip word for word through "it came up", then ". But before I tell
+  you which way it landed: ..."), and neither names heads or tails again:
+  - **Preferred outcome, short** (`coin_report_short`): "which outcome would you have preferred?", prefill "I would have
+    preferred". This is the earlier question without ", heads or tails". Hal's reasoning: naming heads and tails in the question
+    gives the answer a fresh copy of the outcome words right before it, so it may need the heads/tails difference at " up" less.
+    Without them, the answer has to take the outcome's name from the coin's own lines.
+  - **A guess** (`coin_predict*`): the Assistant guesses which way the coin landed. Three candidate wordings:
+    - "which outcome would you guess?", prefill "I would guess" (`coin_predict`), a minimal pair with the preference question;
+    - "which way do you think it landed?", prefill "I think it landed on" (`coin_predict_think`);
+    - "what's your guess?", prefill "My guess is" (`coin_predict_my`).
+  - Each also with the bold opened in the prefill (`_bold`, read at "heads" / "tails"): the earlier runs found that Gemma and GLM
+    bold their answer.
+- **Choosing wordings, before the runs** (`scripts/report_wording_check.py`, the first 24 pilot pairs; it reports only outcome
+  mass and top tokens):
+  - For the guess, use the minimal-pair wording if its better prefill has median mass >= 0.5 in all three models. Otherwise use
+    the wording whose better prefill has the highest minimum median mass across the models.
+  - Per model and question, run each prefill (plain, bold) with median mass >= 0.2. The primary one is the higher-mass one, as
+    before.
+- **Everything else as in the report runs:** the same 1,000 pilot pairs and every arm (`report_patch.py --report <condition>`),
+  analyzed by `coin_report.py`. The pods are the same GPU types as before (Gemma 1x H100, Llama 1x H200, GLM 2x H200). So the
+  comparison with the earlier "heads or tails?" question (bold, the primary wording in every model) is like for like.
+- **The guess without patching (Hal's second question): does it lean toward the Assistant's preferences?**
+  - The Assistant can't know the outcome. An unbiased guess would have a pair effect of 0: averaging the two orders cancels any
+    heads bias, and only a lean toward one *task* survives.
+  - Measures: r of the unpatched guess (pair effect) with the Assistant's sweep utilities A_i - A_j and with the coin at " up". Also
+    the slope of the guess on the coin, in nats per nat. A positive r with the Assistant means the guess leans to the outcome that
+    gives the Assistant the task it prefers.
+- **Primary measures**, per question and model: the swap arm's share, r(d, c) and κ, and the unpatched r(answer, A_i - A_j) and
+  r(answer, c).
+
+**Predictions:**
+1. **The short preference question still tracks the Assistant:** r(answer, A_i - A_j) >= 0.8 in all three models. With "heads or
+   tails" it was 0.88-0.93.
+2. **It reads " up" more without "heads or tails":** the swap share is larger than the earlier question's (Gemma 3.6%, GLM 1.6%,
+   Llama 0.3%) in at least two of the three models, and stays below 10% in all.
+3. **The guess leans toward the Assistant's preference:** r(guess, A_i - A_j) > 0.3 in all three models, but with a smaller slope
+   on the coin than the short preference answer's.
+4. **The guess reads " up" more than the preference does:** share(guess) > share(short preference) in each model where either
+   share's CI is above 0. The coin's state at " up" is itself a prediction of the outcome word, which is what the guess asks for.
+5. **Wording:** the bold prefill has the higher mass in Gemma and GLM for both questions. Llama's plain prefill has median mass
+   >= 0.5.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
