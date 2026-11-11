@@ -4993,6 +4993,27 @@ lowest of any cell so far, 0.93. Results are in `outputs/replication/trinity-lar
   r 0.99). It would take a ~25-minute reload and a minute of scoring. The coin, a user turn, doesn't depend on it; the
   Assistant-turn readouts do.
 
+### Results: Nemotron-4 340B (2026-11-11)
+
+**Run.** 8x B200: the base took 19 minutes and the final 110, with loads of 9 and 1 minutes. The load checks on NeMo's own
+token ids passed (" Berlin" 0.89, 0.94), which supports mgoin's HF conversion. Every cell passes the gates. Results are in
+`outputs/replication/nemotron4-340b/`.
+
+![Nemotron calls](figures/nemotron4-340b/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant | replicates: r(A_f, C_f) 0.86; base 0.43; r shift 0.86 | | | |
+| 2. user's choice more Assistant-like | replicates: d +0.47, r(A_f, U_f) 0.89 | | | |
+| 3. prediction of the user Assistant-like | replicates: r(A_f, P_f) 0.90, d_P +0.33; Δ +0.04 ("similar") | | | |
+| 4. coin follows a user instruction | replicates (ρ_user 0.99) | doesn't (b_per +0.02) | replicates (1.01) | replicates (0.75) |
+| 5. self-description less than instruction | replicates (Δρ -0.20) | replicates (ratio unstable) | **doesn't** (+0.10) | **doesn't** (+0.47) |
+| 6. coin follows roleplay | replicates (w_r 1.38) | replicates (0.35) | replicates (1.15) | replicates (1.10) |
+| 7. prediction follows self-description more | replicates | replicates | replicates | replicates |
+
+**First observations:** findings 1-3 hold. Contrarian's self-description again pulls the coin at least as much as its
+instruction, and here strategist's does too (ρ_self 1.22 vs ρ_user 0.75).
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
