@@ -114,25 +114,25 @@ def stats(V, benign, loglen, origins):
 def call(est, lo, hi, p):
     """The pre-registered placement call for p (user, self), on rho_p, first that applies."""
     b, rho = K[f"{p}:b_per"], K[f"rho_{p}"]
-    if hi[b] < 0:
+    return placement_call(lo[b], hi[b], lo[rho], hi[rho])
+
+
+def placement_call(per_lo, per_hi, rho_lo, rho_hi):
+    """call's rule on the CIs of b_per and rho (also used by replication_analysis.py)."""
+    if per_hi < 0:
         return "reversed"
-    if lo[b] <= 0 or lo[rho] <= 0:
+    if per_lo <= 0 or rho_lo <= 0:
         return "absent"
-    if lo[rho] > 1:
+    if rho_lo > 1:
         return "stronger than the system prompt"
-    if hi[rho] >= 1:
+    if rho_hi >= 1:
         return "as strong as the system prompt"
     return "weaker"
 
 
 def persona_call(est, lo, hi, p):
     """The persona section's call (default Assistant / persona / mix ...) for placement p."""
-    sub = {s: K[f"{p}:{s}"] for s in ("b_def", "b_per")}
-    if hi[sub["b_per"]] < 0:
-        return "against the persona"
-    def_up, per_up = lo[sub["b_def"]] > 0, lo[sub["b_per"]] > 0
-    return {(False, False): "neither", (True, False): "default Assistant", (False, True): "persona",
-            (True, True): "mix"}[def_up, per_up]
+    return personas.pull_call(lo[K[f"{p}:b_def"]], lo[K[f"{p}:b_per"]], hi[K[f"{p}:b_per"]])
 
 
 def plot_pulls(cells, labels, path):

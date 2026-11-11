@@ -119,9 +119,13 @@ def stat(cell, name):
 def call(cell, s, x):
     """The pre-registered call for readout x (U or C) in placement s: does it follow the model's picture of the user ("user")
     or the Assistant ("Assistant") in that context?"""
-    if cell["est"][K[f"{s}:sep"]] >= SEPARABLE:
+    return readout_call(cell["est"][K[f"{s}:sep"]], *stat(cell, f"{s}:d{x}"))
+
+
+def readout_call(sep, d, lo, hi):
+    """call's rule on the separation r(A, P) and the contrast with its CI (also used by replication_analysis.py)."""
+    if sep >= SEPARABLE:
         return "not separable"
-    d, lo, hi = stat(cell, f"{s}:d{x}")
     if d >= R_MEANINGFUL and lo > 0:
         return "user"
     if d <= -R_MEANINGFUL and hi < 0:

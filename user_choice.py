@@ -124,8 +124,13 @@ def contrast(cell, name):
 def classify(cell):
     """The pre-registered call for one model: did post-training make the user's choice more like the Assistant's?"""
     d, lo, hi = contrast(cell, "target")
-    shift = cell["est"][K["r_shift"]]
-    aligned = shift >= R_SHIFT and ci(cell["boot"][:, K["r_shift"]])[0] > 0
+    return call_from(d, lo, hi, cell["est"][K["r_shift"]], ci(cell["boot"][:, K["r_shift"]])[0])
+
+
+def call_from(d, lo, hi, shift, shift_lo):
+    """classify's rule on its numbers: d = r(A_f, U_f) - r(A_f, U_b) with its CI, and the r shift with its CI's lower end
+    (also used by replication_analysis.py)."""
+    aligned = shift >= R_SHIFT and shift_lo > 0
     if d >= R_MEANINGFUL and lo > 0:
         return "more Assistant-like" if aligned else "closer, shift not aligned"
     if d <= -R_MEANINGFUL and hi < 0:

@@ -97,21 +97,21 @@ def call(est, lo, hi, p):
     g = lambda s: K[f"{p}:{s}"]
     if abs(est[g("r_ar_a0")]) > SEPARABLE:
         return "not separable"
-    if hi[g("b_per_r")] < 0:
-        return "against the persona"
-    def_up, per_up = lo[g("b_def_r")] > 0, lo[g("b_per_r")] > 0
-    return {(False, False): "neither", (True, False): "default Assistant", (False, True): "persona",
-            (True, True): "mix"}[def_up, per_up]
+    return personas.pull_call(lo[g("b_def_r")], lo[g("b_per_r")], hi[g("b_per_r")])
 
 
 def compare(est, lo, hi, p):
     """The pre-registered comparison with the system-prompt persona, on dw = w_r - w_s."""
-    if call(est, lo, hi, p) in ("not separable", "neither"):
+    return compare_from(call(est, lo, hi, p), lo[K[f"{p}:dw"]], hi[K[f"{p}:dw"]])
+
+
+def compare_from(roleplay_call, dw_lo, dw_hi):
+    """compare's rule on the roleplay call and the CI of dw (also used by replication_analysis.py)."""
+    if roleplay_call in ("not separable", "neither"):
         return "no comparison"
-    d = K[f"{p}:dw"]
-    if hi[d] < 0:
+    if dw_hi < 0:
         return "less than the system prompt"
-    if lo[d] > 0:
+    if dw_lo > 0:
         return "more than the system prompt"
     return "as much as the system prompt"
 

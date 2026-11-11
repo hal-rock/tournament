@@ -107,9 +107,15 @@ def call(est, lo, hi, p):
     g = lambda s: K[f"{p}:{s}"]
     if abs(est[g("r_ap_a0")]) > SEPARABLE:
         return "not separable"
-    if hi[g("b_per")] < 0:
+    return pull_call(lo[g("b_def")], lo[g("b_per")], hi[g("b_per")])
+
+
+def pull_call(def_lo, per_lo, per_hi):
+    """The call's rules after the separability check, from the CIs of the two pulls: "against the persona", "neither",
+    "default Assistant", "persona" or "mix" (shared with roleplay.py, persona_placement.py, replication_analysis.py)."""
+    if per_hi < 0:
         return "against the persona"
-    def_up, per_up = lo[g("b_def")] > 0, lo[g("b_per")] > 0
+    def_up, per_up = def_lo > 0, per_lo > 0
     if not (def_up or per_up):
         return "neither"
     if def_up and not per_up:

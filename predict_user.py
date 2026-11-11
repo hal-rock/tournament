@@ -134,7 +134,11 @@ def stat(cell, name):
 def call(cell):
     """The pre-registered call: does the user's choice line up better with the Assistant's prediction of it ("prediction")
     or with the Assistant's own choice ("own choice"), by r?"""
-    d, lo, hi = stat(cell, "delta")
+    return delta_call(*stat(cell, "delta"))
+
+
+def delta_call(d, lo, hi):
+    """call's rule on delta and its CI (also used by replication_analysis.py)."""
     if d >= R_MEANINGFUL and lo > 0:
         return "prediction"
     if d <= -R_MEANINGFUL and hi < 0:
