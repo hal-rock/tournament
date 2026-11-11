@@ -5014,6 +5014,26 @@ token ids passed (" Berlin" 0.89, 0.94), which supports mgoin's HF conversion. E
 **First observations:** findings 1-3 hold. Contrarian's self-description again pulls the coin at least as much as its
 instruction, and here strategist's does too (ρ_self 1.22 vs ρ_user 0.75).
 
+### Finding 8: scope, decided before any patching data (Hal, 2026-11-11)
+
+Hal chose the reduced patching run (option B in `PLAN_replication.md`'s cost table):
+- **Models:** the five finals with a sizable coin: DeepSeek V4 Flash, Llama 3.1 405B, DeepSeek V3, Kimi K2, Nemotron-4
+  340B. Trinity Large Thinking is skipped: its coin has an SD of 0.20 nats, like OLMo 3.1 Think's, and OLMo's coin showed
+  no " up" path in the report runs.
+- **Questions:** the wording check chose the same wordings in every model.
+  - the short preference, `coin_report_short_coin_bold`, with mass 0.89-1.00;
+  - the guess, `coin_predict_think_bold`, with mass 0.93-1.00;
+  - the Task A/B control, `coin_report_ab`, with mass 0.99-1.00.
+
+  For Nemotron every candidate had mass 1.00, so it takes the same wordings as the others.
+- **Pairs:** 1,000 report pilot pairs, outside the sweep, in both orders.
+- **Arms:** the unpatched pass, `self`, `swap` and `ctrl` (`report_patch.py --arms swap ctrl`). These are everything the
+  pre-registered call uses (share, κ).
+- **Dropped:** `swap_early` / `swap_late` and `swap_line` / `ctrl_line`.
+  - **Deviation:** the pre-registration listed the early/late split among the numbers reported beside the call, so it
+    won't be reported.
+  - The whole-line arms weren't pre-registered here.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

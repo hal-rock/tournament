@@ -69,7 +69,7 @@ def load(path):
     for r in rows:
         by.setdefault(r["pair"], {})[r["order"]] = r
     pairs = sorted(p for p, o in by.items() if set(o) == {0, 1})
-    arms = ["none", *ARMS]
+    arms = ["none", *(a for a in ARMS if a in rows[0]["report"])]  # a run may skip arms (report_patch.py --arms)
     o0, o1 = [by[p][0] for p in pairs], [by[p][1] for p in pairs]
     get = lambda rs, f: np.array([f(r) for r in rs])
     D = dict(pair=np.array(pairs), a=get(o0, lambda r: r["a"]), b=get(o0, lambda r: r["b"]))
@@ -81,6 +81,7 @@ def load(path):
     pair_eff = lambda m: (m[:, 0] - m[:, 1]) / 2
     D["c"], D["c_ok"] = pair_eff(D["coin_o"]), pair_eff(D["coin_ok_o"])
     D["r"] = {x: pair_eff(m) for x, m in D["r_o"].items()}
+    D["arms"] = arms[1:]
     return D
 
 
@@ -109,6 +110,10 @@ def stats(D, idx, extra):
         s[f"r(report, {name})"] = pearson(r0, v[idx])
         s[f"r(coin, {name})"] = pearson(c, v[idx])
     for arm in ARMS:
+        if arm not in D["arms"]:  # not run: its statistics are missing
+            for k in ("mean |d|", "r(d, coin)", "slope(d on coin)", "share", "r(report_patched, coin)"):
+                s[f"{arm}: {k}"] = float("nan")
+            continue
         d = D["r"][arm][idx] - r0
         s[f"{arm}: mean |d|"] = float(np.abs(d).mean())
         s[f"{arm}: r(d, coin)"] = pearson(d, c)
@@ -117,7 +122,9 @@ def stats(D, idx, extra):
         s[f"{arm}: r(report_patched, coin)"] = pearson(D["r"][arm][idx], c)
     s["ctrl: r(d, c_ok - c)"] = pearson(D["r"]["ctrl"][idx] - r0, D["c_ok"][idx] - c)
     s["kappa (swap+ctrl)"], s["lambda (swap+ctrl)"] = regression(D, idx)
-    s["kappa (swap_line+ctrl_line)"], s["lambda (swap_line+ctrl_line)"] = regression(D, idx, ("swap_line", "ctrl_line"))
+    s["kappa (swap_line+ctrl_line)"], s["lambda (swap_line+ctrl_line)"] = (
+        regression(D, idx, ("swap_line", "ctrl_line")) if {"swap_line", "ctrl_line"} <= set(D["arms"])
+        else (float("nan"), float("nan")))
     return s
 
 
@@ -125,6 +132,7 @@ def plot(D, label, path):
     c = D["c"]
     panels = [("none", "Reported preference, unpatched"), ("swap", "Shift from swapping \" up\""),
               ("ctrl", "Shift from the \"OK, \" control"), ("swap_line", "Shift from swapping the whole line")]
+    panels = [(arm, title) for arm, title in panels if arm == "none" or arm in D["arms"]]
     fig, axes = plt.subplots(1, len(panels), figsize=(4.0 * len(panels), 3.8))
     for ax, (arm, title) in zip(axes, panels):
         y = D["r"]["none"] if arm == "none" else D["r"][arm] - D["r"]["none"]

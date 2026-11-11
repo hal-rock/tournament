@@ -405,6 +405,53 @@ def test_main_runs_a_model_from_config(tmp_path, monkeypatch):
     assert all(r["report"]["self"] == pytest.approx(r["report"]["none"], abs=1e-5) for r in rows)
 
 
+def test_main_runs_several_reports_in_one_load_with_fewer_arms(tmp_path, monkeypatch):
+    """--report a b c --arms swap ctrl: one model load, one rows file per report, only none/self/swap/ctrl written, and
+    coin_report's analysis runs on them (the skipped arms' statistics are NaN)."""
+    import math
+    import coin_report
+    import report_patch
+    from transformers import LlamaConfig, LlamaForCausalLM
+    cfg = coin_report_config("llama-405b")
+    cfg["tasks_file"] = str(ROOT / cfg["tasks_file"])
+    cfg["model_from"]["config"] = str(ROOT / cfg["model_from"]["config"])
+    path = tmp_path / "llama-405b.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    tok = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-405B-Instruct")
+    loads, runs = [], []
+
+    def load_model(name, device, dtype, **kw):
+        loads.append(name)
+        torch.manual_seed(0)
+        return LlamaForCausalLM(LlamaConfig(vocab_size=len(tok), hidden_size=32, intermediate_size=64, num_hidden_layers=2,
+                                            num_attention_heads=2, num_key_value_heads=2, initializer_range=0.5)).eval()
+
+    class Run:
+        def __init__(self, **k):
+            self.id, self.summary, self.name = f"run{len(runs)}", {}, k["name"]
+            runs.append(self)
+        save = finish = lambda *a, **k: None
+
+    reports = ["coin_report_short_coin_bold", "coin_predict_think_bold", "coin_report_ab"]
+    monkeypatch.setattr(report_patch, "load_model", load_model)
+    monkeypatch.setattr(report_patch, "sanity_check", lambda *a, **k: None)
+    monkeypatch.setattr(report_patch.wandb, "init", lambda **k: Run(**k))
+    monkeypatch.setattr(sys, "argv", ["report_patch.py", str(path), "--limit", "6", "--report", *reports,
+                                      "--arms", "swap", "ctrl"])
+    monkeypatch.chdir(tmp_path)
+    report_patch.main()
+    assert len(loads) == 1 and [r.name for r in runs] == [f"{cfg['run_name']}-{x}" for x in reports]
+    for k in range(3):
+        rows_path = tmp_path / f"outputs/coin_report/llama-405b/run{k}/rows.jsonl"
+        rows = read_jsonl(rows_path)
+        assert len(rows) == 12 and all(set(r["report"]) == {"none", "self", "swap", "ctrl"} for r in rows)
+        D = coin_report.load(rows_path)
+        s = coin_report.stats(D, range(len(D["pair"])), {})
+        assert math.isfinite(s["swap: share"]) and math.isfinite(s["kappa (swap+ctrl)"])
+        assert math.isnan(s["swap_early: r(d, coin)"]) and math.isnan(s["kappa (swap_line+ctrl_line)"])
+        coin_report.plot(D, "test", tmp_path / f"plot{k}.png")
+
+
 # ---------------------------------------------------------------- Kimi K2 as DeepseekV3
 
 def test_kimi_k2_reads_as_deepseek_v3():

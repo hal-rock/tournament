@@ -1,0 +1,101 @@
+# Finding 8 on the replication node (README, "Finding 8: scope"): first the Trinity in-reasoning check (vLLM), then
+# report_patch.py in HF on five finals, three questions each in one load, arms none/self/swap/ctrl. Each patch job
+# leaves outputs/coin_report/<key>.patch_done. DeepSeek V4 Flash runs on 2 GPUs (its config's max_memory).
+gpus: 8
+disk_budget_gb: 3600
+max_downloads: 2
+score_python: /root/vllm-env/bin/python
+jobs:
+- name: validate-trinity-inreasoning
+  config: configs/replication/validate-trinity-inreasoning.yaml
+  stage: instruct
+- name: patch-llama-405b
+  gpus: 8
+  repos:
+  - meta-llama/Llama-3.1-405B-Instruct
+  download:
+    meta-llama/Llama-3.1-405B-Instruct:
+      allow_patterns:
+      - model-*.safetensors
+      - model.safetensors.index.json
+      - config.json
+      - generation_config.json
+      - tokenizer.json
+      - tokenizer_config.json
+      - special_tokens_map.json
+      gb: 811.7
+      revision: null
+  done_marker: outputs/coin_report/llama-405b.patch_done
+  cmd: uv run --group gpu python report_patch.py configs/coin_report/llama-405b.yaml --report coin_report_short_coin_bold coin_predict_think_bold coin_report_ab --arms swap ctrl && touch outputs/coin_report/llama-405b.patch_done
+- name: patch-nemotron4-340b
+  gpus: 8
+  repos:
+  - mgoin/Nemotron-4-340B-Instruct-hf
+  download:
+    mgoin/Nemotron-4-340B-Instruct-hf:
+      allow_patterns:
+      - model-*.safetensors
+      - model.safetensors.index.json
+      - config.json
+      - generation_config.json
+      - tokenizer.model
+      - tokenizer_config.json
+      - special_tokens_map.json
+      gb: 682.1
+      revision: null
+  done_marker: outputs/coin_report/nemotron4-340b.patch_done
+  cmd: uv run --group gpu python report_patch.py configs/coin_report/nemotron4-340b.yaml --report coin_report_short_coin_bold coin_predict_think_bold coin_report_ab --arms swap ctrl && touch outputs/coin_report/nemotron4-340b.patch_done
+- name: patch-deepseek-v3
+  gpus: 8
+  repos:
+  - deepseek-ai/DeepSeek-V3
+  download:
+    deepseek-ai/DeepSeek-V3:
+      allow_patterns:
+      - '*.safetensors'
+      - model.safetensors.index.json
+      - config.json
+      - tokenizer.json
+      - tokenizer_config.json
+      gb: 688.6
+      revision: e815299b0bcbac849fa540c768ef21845365c9eb
+  done_marker: outputs/coin_report/deepseek-v3.patch_done
+  cmd: uv run --group gpu python report_patch.py configs/coin_report/deepseek-v3.yaml --report coin_report_short_coin_bold coin_predict_think_bold coin_report_ab --arms swap ctrl && touch outputs/coin_report/deepseek-v3.patch_done
+- name: patch-kimi-k2
+  gpus: 8
+  repos:
+  - moonshotai/Kimi-K2-Instruct
+  download:
+    moonshotai/Kimi-K2-Instruct:
+      allow_patterns:
+      - '*.safetensors'
+      - model.safetensors.index.json
+      - config.json
+      - generation_config.json
+      - tokenizer_config.json
+      - tiktoken.model
+      - tokenization_kimi.py
+      - configuration_deepseek.py
+      - modeling_deepseek.py
+      - chat_template.jinja
+      gb: 1029.2
+      revision: fd1984e2b7a3350dbf7305fe73a4ede25c14de50
+  done_marker: outputs/coin_report/kimi-k2.patch_done
+  cmd: uv run --group gpu python report_patch.py configs/coin_report/kimi-k2.yaml --report coin_report_short_coin_bold coin_predict_think_bold coin_report_ab --arms swap ctrl && touch outputs/coin_report/kimi-k2.patch_done
+- name: patch-deepseek-v4-flash
+  gpus: 2
+  repos:
+  - deepseek-ai/DeepSeek-V4-Flash
+  download:
+    deepseek-ai/DeepSeek-V4-Flash:
+      allow_patterns:
+      - model-*.safetensors
+      - model.safetensors.index.json
+      - config.json
+      - generation_config.json
+      - tokenizer.json
+      - tokenizer_config.json
+      gb: 159.6
+      revision: null
+  done_marker: outputs/coin_report/deepseek-v4-flash.patch_done
+  cmd: uv run --group gpu python report_patch.py configs/coin_report/deepseek-v4-flash.yaml --report coin_report_short_coin_bold coin_predict_think_bold coin_report_ab --arms swap ctrl && touch outputs/coin_report/deepseek-v4-flash.patch_done

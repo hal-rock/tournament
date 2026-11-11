@@ -272,7 +272,7 @@ def outcome(lp, out_ids):
     return (h - t).cpu(), (h.exp() + t.exp()).cpu()
 
 
-def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size):
+def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arms=None):
     """All arms for a chunk of items (both orders of each pair included). Returns one row per item."""
     L = list(range(n_layers))
     blocks = {"all": L, "early": L[:n_layers // 2], "late": L[n_layers // 2:]}
@@ -297,6 +297,8 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size):
             cap_ok[k] = torch.stack([okstore[l][r] for l in L])
     partner = {k: k + 1 if items[k]["order"] == 0 else k - 1 for k in range(len(items))}  # chunk keeps pairs together
     for arm, (source, where, which) in ARMS.items():
+        if arms is not None and arm not in arms:  # a run with fewer arms (--arms)
+            continue
         for batch in batches:
             its = [items[k] for k in batch]
             src = [cap_own[k] if source == "own" else cap_own[partner[k]] if source == "other" else cap_ok[k] for k in batch]
@@ -320,72 +322,86 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
     ap.add_argument("--limit", type=int, help="first N pairs only (smoke test)")
-    ap.add_argument("--report", help="override the config's report condition")
+    ap.add_argument("--report", nargs="+", help="override the config's report condition; several run one after another "
+                    "in one model load, each its own W&B run")
+    ap.add_argument("--arms", nargs="+", choices=list(ARMS), help="only these arms (default: all; self is always run, "
+                    "for the batching check)")
     a = ap.parse_args()
-    cfg = yaml.safe_load(open(a.config))
-    if a.report:
-        cfg["report"], cfg["run_name"] = a.report, f"{cfg['run_name']}-{a.report}"
-    tasks = read_jsonl(cfg["tasks_file"])
+    cfg0 = yaml.safe_load(open(a.config))
+    reports = a.report or [cfg0.get("report", "coin_report")]
+    arms = None if a.arms is None else sorted(set(a.arms) | {"self"}, key=list(ARMS).index)
+    tasks = read_jsonl(cfg0["tasks_file"])
     sweep = select_pairs(len(tasks), 15000, 0)
-    pairs = (pilot_pairs(len(tasks), cfg["n_pairs"], sweep, cfg.get("seed", 0)) if cfg["pairs"] == "pilot"
-             else select_pairs(len(tasks), cfg["n_pairs"], cfg.get("seed", 0)))
+    pairs = (pilot_pairs(len(tasks), cfg0["n_pairs"], sweep, cfg0.get("seed", 0)) if cfg0["pairs"] == "pilot"
+             else select_pairs(len(tasks), cfg0["n_pairs"], cfg0.get("seed", 0)))
     pairs = pairs[:a.limit] if a.limit else pairs
-    m = resolve_model(cfg)
+    m = resolve_model(cfg0)
     resolved = {**m, "revisions": [[r, v] for r, v in m.get("revisions", {}).items()]}  # repo names aren't config keys
-    run = wandb.init(project="tournament", group="coin_report", job_type="coin_report", name=cfg["run_name"],
-                     tags=cfg.get("tags"), config={**cfg, "n_pairs_run": len(pairs),
-                                                   **({"model_resolved": resolved} if "model_from" in cfg else {})})
-    out = Path("outputs/coin_report") / cfg["family"] / run.id
-    out.mkdir(parents=True, exist_ok=True)
     tok, template_tok = load_tokenizers(m)
-    report = cfg.get("report", "coin_report")
-    coin_ids, rep_ids = outcome_token_ids("coinflip", tok), outcome_token_ids(report, tok)
+    coin_ids = outcome_token_ids("coinflip", tok)
     # Prompts before the model, so a tokenization assertion fails before a long load.
-    items = build_items(tok, tasks, pairs, report, template_tok, **prompt_format(m))
+    all_items = {report: build_items(tok, tasks, pairs, report, template_tok, **prompt_format(m)) for report in reports}
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
-    if "model_from" in cfg and torch.cuda.device_count() > 1 and not peer_copies_ok():
+    if "model_from" in cfg0 and torch.cuda.device_count() > 1 and not peer_copies_ok():
         raise SystemExit("GPU-to-GPU copies corrupt data on this host (matskit.models.peer_copies_ok)")
+    t_load = time.time()
     model = load_model(m["name"], device, dtype, revision=m.get("revision"), max_memory=m.get("max_memory"),
                        loader=m.get("loader"), attn_implementation=m.get("attn_implementation"))
+    print(f"loaded {m['name']} in {(time.time() - t_load) / 60:.1f} min", flush=True)
     model.config.use_cache = False
     pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
     n_layers = len(get_layers(model))
-    if "model_from" in cfg:
+    first = all_items[reports[0]]
+    if "model_from" in cfg0:
         print(f"attention: {model.config._attn_implementation}", flush=True)
-        sanity_check(model, tok, m, uses_bos=tok.bos_token_id is not None and items[0]["ids"][0] == tok.bos_token_id)
-    print(f"{len(pairs)} pairs, {len(items)} prompts, {n_layers} blocks, line of {len(items[0]['line'])} tokens", flush=True)
-    print("example prompt:\n" + tok.decode(items[0]["ids"]), flush=True)
+        sanity_check(model, tok, m, uses_bos=tok.bos_token_id is not None and first[0]["ids"][0] == tok.bos_token_id)
 
-    # Batch-shape check: the unpatched report and coin of a few prompts alone vs in a batch.
-    probe = items[:2 * min(4, len(pairs))]
-    alone = []  # (coin, report) log-odds of each prompt in a batch of one
-    for it in probe:
-        lp, _ = forward(model, [it["ids"]], pad_id, torch.tensor([[it["up"], len(it["ids"]) - 1]]))
-        alone.append([outcome(lp[0, 0], coin_ids)[0].item(), outcome(lp[0, 1], rep_ids)[0].item()])
-    rows = run_chunk(model, probe, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"])
-    d_coin = [abs(r["coin"] - al[0]) for r, al in zip(rows, alone)]
-    d_rep = [abs(r["report"]["none"] - al[1]) for r, al in zip(rows, alone)]
-    d_self = [abs(r["report"]["self"] - r["report"]["none"]) for r in rows]
-    print(f"batching check: |report diff| max {max(d_rep):.3f}, |coin diff| max {max(d_coin):.3f}; "
-          f"self-patch |diff| max {max(d_self):.3g}", flush=True)
-    run.summary.update({"batch_report_max": max(d_rep), "batch_coin_max": max(d_coin), "self_patch_max": max(d_self)})
+    for report in reports:
+        cfg = dict(cfg0)
+        if a.report:
+            cfg["report"], cfg["run_name"] = report, f"{cfg0['run_name']}-{report}"
+        items = all_items[report]
+        rep_ids = outcome_token_ids(report, tok)
+        run = wandb.init(project="tournament", group="coin_report", job_type="coin_report", name=cfg["run_name"],
+                         tags=cfg.get("tags"), reinit="finish_previous",
+                         config={**cfg, "n_pairs_run": len(pairs), "arms": arms or list(ARMS),
+                                 **({"model_resolved": resolved} if "model_from" in cfg else {})})
+        out = Path("outputs/coin_report") / cfg["family"] / run.id
+        out.mkdir(parents=True, exist_ok=True)
+        print(f"\n[{report}] {len(pairs)} pairs, {len(items)} prompts, {n_layers} blocks, line of "
+              f"{len(items[0]['line'])} tokens, arms {arms or list(ARMS)}", flush=True)
+        print("example prompt:\n" + tok.decode(items[0]["ids"]), flush=True)
 
-    path, done = out / "rows.jsonl", set()
-    chunk = cfg.get("chunk_pairs", 64)
-    t0 = time.time()
-    for s in range(0, len(pairs), chunk):
-        part = items[2 * s:2 * (s + chunk)]
-        for row in run_chunk(model, part, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"]):
-            if not all(map(math.isfinite, [row["coin"], *row["report"].values()])):
-                raise SystemExit(f"non-finite log-odds in pair {row['pair']}, order {row['order']}: {row}")
-            io.append_jsonl(path, row)
-        n = min(s + chunk, len(pairs))
-        rate = n / (time.time() - t0)
-        print(f"  {n}/{len(pairs)} pairs, {rate:.2f} pairs/s, ETA {(len(pairs) - n) / rate / 60:.1f} min", flush=True)
-    run.save(str(path), base_path=str(out), policy="now")
-    run.finish()
-    print(f"wrote {path}")
+        # Batch-shape check: the unpatched report and coin of a few prompts alone vs in a batch.
+        probe = items[:2 * min(4, len(pairs))]
+        alone = []  # (coin, report) log-odds of each prompt in a batch of one
+        for it in probe:
+            lp, _ = forward(model, [it["ids"]], pad_id, torch.tensor([[it["up"], len(it["ids"]) - 1]]))
+            alone.append([outcome(lp[0, 0], coin_ids)[0].item(), outcome(lp[0, 1], rep_ids)[0].item()])
+        rows = run_chunk(model, probe, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], arms)
+        d_coin = [abs(r["coin"] - al[0]) for r, al in zip(rows, alone)]
+        d_rep = [abs(r["report"]["none"] - al[1]) for r, al in zip(rows, alone)]
+        d_self = [abs(r["report"]["self"] - r["report"]["none"]) for r in rows]
+        print(f"batching check: |report diff| max {max(d_rep):.3f}, |coin diff| max {max(d_coin):.3f}; "
+              f"self-patch |diff| max {max(d_self):.3g}", flush=True)
+        run.summary.update({"batch_report_max": max(d_rep), "batch_coin_max": max(d_coin), "self_patch_max": max(d_self)})
+
+        path = out / "rows.jsonl"
+        chunk = cfg.get("chunk_pairs", 64)
+        t0 = time.time()
+        for s in range(0, len(pairs), chunk):
+            part = items[2 * s:2 * (s + chunk)]
+            for row in run_chunk(model, part, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], arms):
+                if not all(map(math.isfinite, [row["coin"], *row["report"].values()])):
+                    raise SystemExit(f"non-finite log-odds in pair {row['pair']}, order {row['order']}: {row}")
+                io.append_jsonl(path, row)
+            n = min(s + chunk, len(pairs))
+            rate = n / (time.time() - t0)
+            print(f"  {n}/{len(pairs)} pairs, {rate:.2f} pairs/s, ETA {(len(pairs) - n) / rate / 60:.1f} min", flush=True)
+        run.save(str(path), base_path=str(out), policy="now")
+        run.finish()
+        print(f"wrote {path}", flush=True)
 
 
 if __name__ == "__main__":
