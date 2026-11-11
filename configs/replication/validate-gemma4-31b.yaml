@@ -1,0 +1,18 @@
+# Engine check before the replication (PLAN_replication.md, "Engine"): Gemma 4 31B-it scored by vLLM (score_replication.py)
+# on one H200, against its HF scorings on H200: the sweep's `assistant` (jrl62npf), the persona runs' re-scored `coinflip`
+# (mgldkcxm) and `assistant@evil` / `coinflip@evil` (z9v16lk3). Compare with scripts/compare_engines.py; the bar across
+# engines is utilities r >= 0.99 with SD within 2%.
+wandb_project: tournament
+group: replication-validate
+run_name: validate-gemma4-31b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+  - name: google/gemma-4-31B-it
+    stage: instruct
+    download: {allow_patterns: ["*.safetensors", "*.json", "tokenizer*", "*.jinja"], gb: 63}
+    vllm: {tensor_parallel_size: 1, max_model_len: 2048, gpu_memory_utilization: 0.9}
+    conditions: [assistant, coinflip, assistant@evil, coinflip@evil]
