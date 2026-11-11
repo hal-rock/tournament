@@ -5193,6 +5193,14 @@ the rule doesn't feel like a preference. Hal's reading:
 
 The three weakenings are tested together here; they can be split up later.
 
+**The coin follows the instructions, though the Assistant's own choice barely does.**
+- **The Assistant's own choice barely changes:** its agreement with the length rules rises by 0.06-0.15, and by nothing for
+  `alpha`, which the models read as "Task A". Only Llama follows `enjoy_less`.
+- **The coin still moves toward every length rule,** in all three models, and moves most under `enjoy_less`. In Llama it turns
+  toward the harmful tasks; in Gemma it loses its preferences.
+- **So the coin isn't simply the Assistant's choice in this turn.** It may track the answer planned for the *next* message
+  (the instruction's subject) or what the user seems to want. This design can't tell which. See Results.
+
 ### Design
 
 - **Prompt** (`prompts.IFASKED_LEAD`, `prompts.IFASKED_RULES`): the user's message opens with the instruction, then a blank line,
@@ -5314,6 +5322,171 @@ A cell with median outcome mass below 0.2 is reported but not interpreted.
 - **For `enjoy_less`,** S = −A_0, so the pull toward the rule itself isn't defined, and the two-pull fit may not be separable.
 - **GLM's default coin is weak** (b_0 0.34 nats per SD), so its pulls are small in absolute terms.
 - **Scope:** one phrasing per rule, final models only, bf16. CIs cover task sampling only.
+
+### Results (2026-11-11)
+
+Runs, group `ifasked`:
+
+| model | runs | pods | cost |
+|---|---|---|---|
+| Llama | `rqp0q1t2` (length), `eg6oh64a` (other) | 1x H200 each | $8.05, $8.23 |
+| Gemma | `5liyicw0` (length), `5gki804q` (other) | 1x H200 each | $5.21 each |
+| GLM | `hwsd0i0d` | 2x H200 | $13.81 |
+
+$40.51 in all. Full output is in `outputs/ifasked/report.txt`, the table in `outputs/ifasked/ifasked.csv`.
+
+**The gate passes:**
+- every pod's re-scored plain coinflip matches the sweep at r = 1.0000, with SD within 0.1%;
+- every new cell has split-half reliability between 0.98 and 0.999;
+- median outcome mass is 1.00, except the coin in Llama (0.85-0.89) and GLM (0.47-0.64; GLM puts mass on " **", as in its
+  sweep).
+
+**Exploratory, added after seeing Gemma's data (not pre-registered):**
+- the Assistant's SD over A_0's;
+- partial r with the rule given A_0, for the instructed Assistant, the instructed coin and the default coin. It is
+  scale-free, so a coin that merely flattens toward agreement 0.5 doesn't move it;
+- the coin's r with log length;
+- the within-source correlations below.
+
+**1. The instructed Assistant barely applies the rules (prediction 1 fails).** Agreement with each rule, default → instructed
+Assistant:
+
+| | shorter | longer | alpha | enjoy_less |
+|---|---|---|---|---|
+| Llama 3.3 70B | 0.46 → 0.61 | 0.54 → 0.63 | 0.47 → 0.48 | 0.00 → 0.65 |
+| Gemma 4 31B | 0.49 → 0.58 | 0.51 → 0.58 | 0.47 → 0.48 | 0.00 → 0.19 |
+| GLM-4.5-Air | 0.45 → 0.55 | 0.55 → 0.61 | 0.48 → 0.49 | 0.00 → 0.26 |
+
+- **Its choices stay close to its default,** only flattened: r(A_k, A_0) is 0.81-0.95, and A_k's SD is 30-95% of A_0's.
+- **The length rules do push the choices the right way, weakly:** partial r with the rule, given A_0, is 0.37-0.62.
+- **`alpha` doesn't, because the models read "comes first in alphabetical order" as Task A.** The prefill puts +11.7 nats
+  (Llama), +6.0 (Gemma) and +1.6 (GLM) on " A". The two orders cancel that, and what's left is unrelated to alphabetical order
+  (partial r 0.03-0.10). So `alpha` mostly became the "Task B"-style label rule that was set aside, in reverse.
+- **Only Llama follows `enjoy_less`** (r(A_k, A_0) −0.49), and it then picks the harmful task: harm gap −3.2, against +17.7 by
+  default. Gemma and GLM keep their order (r 0.86, 0.81).
+- **As the caveat said,** the instruction is about "the next message", while the Assistant's choice is asked in the same
+  message. So these numbers show what the instruction does to the choice in this turn, not how the model would answer the
+  question it was told about.
+
+**2. The coin moves anyway: about as much as the Assistant's own choice, sometimes more.** Agreement with each rule, default →
+instructed coin:
+
+| | shorter | longer | alpha | enjoy_less |
+|---|---|---|---|---|
+| Llama 3.3 70B | 0.42 → 0.53 | 0.58 → 0.67 | 0.48 → 0.51 | 0.12 → 0.69 |
+| Gemma 4 31B | 0.43 → 0.47 | 0.57 → 0.66 | 0.46 → 0.51 | 0.13 → 0.51 |
+| GLM-4.5-Air | 0.52 → 0.55 | 0.48 → 0.51 | 0.48 → 0.50 | 0.17 → 0.26 |
+
+- **Length: the mirrored contrast follows the instruction in all three models (prediction 3 holds).**
+  - Coefficients, in coin nats per SD of log length: Llama 0.147 [0.119, 0.172], Gemma 0.410 [0.332, 0.483], GLM 0.023 [0.016,
+    0.030]. That's 14%, 13% and 7% of each model's default coin slope b_0.
+  - The coin's contrast tracks the Assistant's (r 0.89, 0.77, 0.65).
+  - Exploratory, partial r with the rule given A_0, as default coin → instructed coin (instructed Assistant in brackets):
+
+    | | shorter | longer |
+    |---|---|---|
+    | Llama | −0.39 → +0.17 (+0.51) | +0.39 → +0.61 (+0.62) |
+    | Gemma | −0.41 → −0.21 (+0.37) | +0.41 → +0.66 (+0.52) |
+    | GLM | +0.39 → +0.39 (+0.53) | −0.39 → −0.06 (+0.56) |
+
+    Under `longer`, the coin in Llama and Gemma ends up as aligned with the rule as the Assistant.
+- **`alpha`: a small effect on the rule.**
+  - Coin agreement rises by 0.01-0.06. Partial r goes Llama 0.08 → 0.14, Gemma −0.11 → +0.11, GLM −0.03 → +0.01.
+  - The instruction still reshapes the coin: r(C_k, C_0) is 0.63-0.90, and its SD is 20-63% of C_0's.
+  - The coin follows the reshaped Assistant more than the default one (calls "mix", w 0.61-0.86). So it follows whatever the
+    instruction did to the choices, not the rule.
+  - The Assistant's heavy " A" doesn't show up as heads in the coin. Llama's coin bias goes 1.84 → 1.55 nats toward heads;
+    Gemma's moves further toward tails, −1.20 → −5.25.
+- **`enjoy_less`: the largest coin effects (prediction 5 holds).**
+  - **Llama:** the coin inverts along with the Assistant, and further.
+    - r(C_k, A_0) is −0.64 (the Assistant's −0.49), and agreement 0.69 (the Assistant's 0.65).
+    - Its harm gap goes from +2.13 to −0.25 [−0.28, −0.22]: the coin now leans toward harmful tasks, as the instructed
+      Assistant does.
+    - Within source, the inversion is weaker: mean r with A_0 is −0.23, against the Assistant's −0.43.
+  - **Gemma:** the Assistant's order barely changes (r 0.86 with A_0), but the coin's preferences are gone.
+    - r(C_k, C_0) is 0.13 and r(C_k, A_0) −0.06; within source, r with A_0 is +0.05.
+    - The harm gap goes from 5.74 to −0.12 [−0.31, 0.06].
+    - Agreement is 0.51: no order at all.
+  - **GLM:** both move a little (agreement 0.26 each).
+
+**3. Side effects.** Every instruction flattens the coin, to 13-82% of the default coin's SD (13-21% for Llama's and Gemma's
+`alpha` and `enjoy_less`). In Gemma it also pushes the coin toward tails: the bias goes from −1.20 to between −3.6 and −6.9 nats
+(P(tails) 0.87-0.97). The two orders cancel this, so it doesn't enter the utilities, but it shows the instruction changes how
+the whole coin line is read.
+
+**Pre-registered calls:**
+
+| | shorter | longer | alpha | enjoy_less | length contrast |
+|---|---|---|---|---|---|
+| Llama 3.3 70B | mix, w 0.71 [0.64, 0.77] | not separable (r 0.90): weakened, q 0.50 [0.46, 0.54] | mix, w 0.61 [0.44, 0.78] | neither (a) | follows |
+| Gemma 4 31B | mix, w 0.29 [0.02, 0.56] | not separable (0.94): weakened, q 0.43 [0.39, 0.47] | mix, w 0.73 [0.52, 0.98] | against the instructed choices (b) | follows |
+| GLM-4.5-Air | not separable (0.92): weakened, q 0.78 [0.75, 0.82] | not separable (0.95): weakened, q 0.64 [0.61, 0.67] | mix, w 0.86 [0.71, 1.00] | mix, w 0.59 [0.45, 0.71] | follows |
+
+- **(a)** β_def is −0.09 [−0.11, −0.08], below 0, so the coin now runs against the default Assistant; β_ins is 0.01 [−0.00,
+  0.03]. The rules have no "against the default" category, so the call falls to "neither". The coin's slope on A_0 is q = −0.09
+  of the default's: reversed.
+- **(b)** β_ins is −0.16 [−0.29, −0.01], small. q is −0.01 [−0.04, 0.01]: the coin no longer tracks A_0 at all.
+- **These calls are weak evidence here.** The instructed Assistant stays so close to its default that z(A_0) and z(A_k) are
+  nearly collinear. Four cells crossed the 0.9 separability line, and in the others w measures the coin's pull toward
+  whatever the instruction did to the choices. The agreement and partial-r numbers above are more direct (and exploratory).
+
+**Predictions:**
+1. **Fails.** Agreement for the length rules was 0.55-0.63 (predicted ≥ 0.75), and for `alpha` 0.48-0.49 (predicted 0.6-0.85).
+   For `enjoy_less`, only Llama reversed its order of non-harmful tasks (r −0.43), and it dropped its harm avoidance as well;
+   Gemma and GLM kept both.
+2. **Fails as stated.** β_ins's CI is above 0 in all 9 arbitrary-rule cells, but w is between 0.1 and 0.5 in only 2 (Gemma
+   `shorter` 0.29, GLM `longer` 0.32), and 4 of the 9 aren't separable. Next to roleplay's w_r, w is lower for Gemma `shorter`
+   and `alpha` and Llama `alpha`, and about the same for Llama `shorter` (0.71 against 0.73-0.74).
+3. **Holds** in all three models.
+4. **Holds in Llama and GLM; not in Gemma** (`alpha` 0.056 against `shorter` 0.034).
+5. **Holds in all three,** though Gemma's change is the coin losing its order (agreement 0.51), not following the rule.
+
+**What this means.** By the pre-registered framing, the coin follows the arbitrary rules. Under every length rule in every model
+it moves toward the rule, and `enjoy_less` moves it most. So even a shallow, conditional instruction reaches the coin.
+
+But the Assistant's choice in this turn doesn't explain the coin's movement:
+- the coin moved toward the rule about as far as the Assistant did (Llama and Gemma `longer`, Llama `enjoy_less`);
+- in Gemma's `enjoy_less`, the coin lost its preferences while the Assistant's choice hardly changed.
+
+Two readings fit, and this design can't separate them (both caveats were written down in advance):
+- **The coin tracks the answer planned for the next message.** That's what the instruction is about, and the same-turn choice
+  isn't that answer.
+- **The coin tracks what the user seems to want.** The rule comes from the user, and the coin is the user's own report.
+
+Either way, the coin isn't simply the Assistant's choice in this turn.
+
+**Follow-ups (not run):**
+- **A two-turn manipulation check:** the instruction and tasks in the first user turn, a neutral Assistant reply, then "Which
+  would you prefer?" as the next user turn, with the Assistant's answer read there. If that answer follows the rules closely,
+  the first reading fits. Assistant only, about $15.
+- **Separating the user's wish:** state the rule as one the user doesn't care about (e.g. a colleague's rule, "I don't mind
+  which"), or have a third party set it.
+- **Splitting the three weakenings** (Hal's plan).
+
+![agreement](figures/ifasked_agreement.png)
+
+Each row pair is one rule. Circles are the Assistant's choice and diamonds the coin; hollow means default, filled means under
+the instruction. x is the share of task pairs whose utilities order the tasks the rule's way: 0.5 is no relation, and 0 or 1 is
+perfect against or with the rule. 95% CIs.
+
+![length](figures/ifasked_length.png)
+
+The mirrored length contrast: half the difference between `shorter` and `longer`, for the Assistant (left) and the coin
+(middle), against log task length. Lines are fits within each source. The right panel plots one contrast against the other.
+
+![enjoy_less](figures/ifasked_enjoy_less.png)
+
+`enjoy_less`, one row per model. From left: the instructed Assistant against the rule (−A_0); the instructed coin against the
+instructed and the default Assistant; and the instruction's change in the coin against its change in the Assistant. That last
+r is high partly because both changes include "minus a share of the default" when an instruction flattens the utilities. That's
+why τ and r(C_k − C_0, A_k − A_0) aren't read above.
+
+![pulls](figures/ifasked_pulls.png)
+
+The pre-registered two-pull fit, per rule. Hollow squares are cells whose pulls can't be separated (|r(A_k, A_0)| > 0.9).
+
+The other rules' scatters are in `figures/ifasked_shorter.png`, `_longer.png` and `_alpha.png`. Per-source grids, with one row
+per rule and the instructed coin against the instructed Assistant, are in `figures/ifasked_sources_<model>.png`.
 
 ## Tasks
 

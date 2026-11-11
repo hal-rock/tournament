@@ -33,7 +33,7 @@ import numpy as np
 
 import personas
 import prompts
-from analyze import N_BOOTSTRAP, pearson, read_jsonl
+from analyze import N_BOOTSTRAP, partial_r, pearson, read_jsonl
 from matskit import plotstyle
 from models import MODEL_INFO
 from openers import slope_per_sd, write_csv
@@ -61,7 +61,11 @@ PER = ("b_def", "b_ins", "w", "total",  # primary: C_k on z(A_0), z(A_k)
        "r_dc_da", "tau",  # what the instruction changes: r(C_k - C_0, A_k - A_0), and its slope over the default coin's
        "b_def_fe", "b_ins_fe", "w_fe",  # with source fixed effects (plus log length for alpha and enjoy_less)
        "w_nh",  # non-harmful tasks only
-       "gap_ak", "gap_ck", "r_ck_c0", "r_ck_ak", "r_ck_a0", "sd_ratio")
+       "gap_ak", "gap_ck", "r_ck_c0", "r_ck_ak", "r_ck_a0", "sd_ratio",
+       # Exploratory, added after Gemma's data (not pre-registered): the Assistant's shrinkage; partial r with the rule given
+       # A_0 for the instructed Assistant, the instructed coin and the default coin (scale-free, and not moved by a coin that
+       # merely flattens toward agreement 0.5); the coin's r with log length.
+       "sd_ratio_a", "pr_as", "pr_cs", "pr_c0s", "r_ck_len")
 LENGTH = ("b_dc", "b_da", "r_dcda", "agree_dc")  # the mirrored length contrast
 CONTROL = ("b0", "gap_a0", "gap_c0", "r_a0_len", "r_c0_len")
 STATS = tuple(f"{k}:{s}" for k in RULES for s in PER) + tuple(f"len:{s}" for s in LENGTH) + CONTROL
@@ -114,7 +118,11 @@ def stats(V, S, benign, loglen, origins):
                 pearson(dc, da), personas.slope(da, dc) / personas.slope(a0, c0),
                 b_def_fe, b_ins_fe, w_fe,
                 pulls(ck[benign], a0[benign], ak[benign])[2],
-                gap(ak), gap(ck), pearson(ck, c0), pearson(ck, ak), pearson(ck, a0), ck.std() / c0.std()]
+                gap(ak), gap(ck), pearson(ck, c0), pearson(ck, ak), pearson(ck, a0), ck.std() / c0.std(),
+                ak.std() / a0.std(),
+                *((partial_r(ak, s, a0), partial_r(ck, s, a0), partial_r(c0, s, a0)) if k != "enjoy_less"
+                  else (np.nan,) * 3),
+                pearson(ck, loglen)]
     dc = (V["C_shorter"] - V["C_longer"]) / 2
     da = (V["A_shorter"] - V["A_longer"]) / 2
     out += [fe_coef(dc, -loglen, sources), fe_coef(da, -loglen, sources), pearson(dc, da), agreement(dc, -loglen)]
@@ -195,8 +203,11 @@ def plot_pulls(cells, labels, path):
         top, bottom = 0.0, 0.0
         for i, rule in enumerate(RULES):
             x, y = K[f"{rule}:b_ins"], K[f"{rule}:b_def"]
+            color = plotstyle.SERIES[i]
+            hollow = abs(est[K[f"{rule}:r_ak_a0"]]) > SEPARABLE  # not separable: drawn, but not read
             ax.errorbar(est[x], est[y], xerr=[[est[x] - lo[x]], [hi[x] - est[x]]], yerr=[[est[y] - lo[y]], [hi[y] - est[y]]],
-                        color=plotstyle.SERIES[i], marker="s", ms=8, lw=0, elinewidth=1.5, mec="white", mew=0.8, zorder=3,
+                        color=color, marker="s", ms=8, lw=0, elinewidth=1.5, mfc="white" if hollow else color,
+                        mec=color if hollow else "white", mew=1.4 if hollow else 0.8, zorder=3,
                         label=RULE_LABEL[rule] if ax is axes[0, 0] else None)
             top, bottom = max(top, hi[x], hi[y]), min(bottom, lo[x], lo[y])
         b0 = K["b0"]
@@ -214,7 +225,8 @@ def plot_pulls(cells, labels, path):
         ax.set_title(labels[family], color=INK, fontsize=10)
         style(ax)
     fig.legend(frameon=False, fontsize=9, loc="lower center", ncol=5)
-    fig.suptitle("The coin's two pulls under each instruction", color=INK)
+    fig.suptitle("The coin's two pulls under each instruction (hollow: |r(A_k, A_0)| > 0.9, the pulls can't be separated)",
+                 color=INK)
     fig.tight_layout(rect=(0, 0.07, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
@@ -260,6 +272,8 @@ def plot_length(data, loglen, origins, labels, path):
                  "Coin's contrast\nvs the Assistant's"))):
             ax = axes[i, j]
             origin_scatter(ax, x, y, origins, fit_lines=j < 2)
+            if j < 2:  # log length is far from 0, where origin_scatter draws its axis line
+                ax.set_xlim(x.min() - 0.2, x.max() + 0.2)
             r = f"r = {pearson(x, y):+.2f}"
             ax.set_title(f"{title}\n{r}" if i == 0 else r, fontsize=10, color=INK)
             ax.set_xlabel(xlabel, color=INK_2, fontsize=9)
