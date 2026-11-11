@@ -85,6 +85,10 @@ uv run python rollouts.py configs/rollouts/<model>.yaml   # GPU: the Assistant's
 uv run python rollouts_page.py outputs/rollouts/<model>/<run>/rows.jsonl   # pages and a summary (W&B group "rollouts")
 uv run python predict_user.py                            # the Assistant's prediction of the user's choice vs the user's own (W&B group "predict_user")
 uv run python persona_readouts.py                        # the persona as the user's self-description: A, C, U, P (W&B group "persona_readouts")
+bash scripts/node_setup.sh                               # replication node: vLLM 0.33 in /root/vllm-env (PLAN_replication.md)
+/root/vllm-env/bin/python score_replication.py configs/replication/<key>.yaml --stage instruct  # vLLM scoring, all conditions
+uv run python replication_runner.py replication/jobs.yaml # replication node: every model's jobs in order, downloads ahead
+uv run python scripts/compare_engines.py <new.csv.gz> <reference.csv.gz>  # two scorings of a condition: the re-scoring gate
 ```
 
 Raw per-prompt results go to `outputs/<run_id>/results/<stage>__<condition>.csv.gz`,
@@ -4555,6 +4559,121 @@ turns read " up", and how strongly. OLMo is dropped: its coinflip effect looks w
   - GLM: short preference "land on" bold, the guess bold.
   - Gemma: the guess bold; the short preference with "the coin to land on" bold (0.38, the only Gemma prefill above 0.2).
 - Gemma's bold answers also put 0.07-0.28 on "He" and "T" (capitalized "Heads" / "Tails" or "Task"), which the readout leaves out.
+
+## Replication across larger models
+
+Most of the findings above rest on Gemma 4 31B and Llama 3.3 70B. Hal's question (2026-11-10): which of them hold on larger,
+newer models? Six model pairs, each with a released base: Kimi K2, Llama 3.1 405B, DeepSeek V3, DeepSeek V4 Flash, Trinity
+Large and Nemotron-4 340B. Four personas: evil, slacker, contrarian and strategist, all from Gilg et al. The plan, Hal's
+decisions and the costs are in `PLAN_replication.md`.
+
+### Design (written 2026-11-10, before any data)
+
+- **Models** (final / base; `configs/replication/<key>.yaml`):
+  - `moonshotai/Kimi-K2-Instruct` (0711) / `Kimi-K2-Base`;
+  - `meta-llama/Llama-3.1-405B-Instruct` / `Llama-3.1-405B` (Meta released no 3.3 405B);
+  - `deepseek-ai/DeepSeek-V3` / `DeepSeek-V3-Base`;
+  - `deepseek-ai/DeepSeek-V4-Flash` / `-Base`;
+  - `arcee-ai/Trinity-Large-Thinking` / `Trinity-Large-TrueBase`, read after an empty think block as for OLMo 3.1 Think;
+  - Nemotron-4 340B Instruct / Base, through `mgoin/`'s HF conversions, with NVIDIA's documented prompt format.
+
+  Each model's template choices, base-model chat-marker embedding norms and load checks are in
+  `replication/onboarding/<key>.md`.
+- **Personas** (`prompts.PERSONAS`): evil and slacker as before, plus contrarian and strategist, verbatim from the same
+  appendix of Gilg et al. Each also has a first-person version (self-description) and a third-person one (roleplay), made
+  by pronoun swaps only.
+- **Conditions** (`replication.py`):
+  - Base: the four plain readouts. These are the Assistant's choice A (`assistant`), the coin C (`coinflip`), the user's
+    choice U (`user_choice`) and the Assistant's prediction of the user's choice P (`predict_user`).
+  - Final: the same four, then for each persona p:
+    - the system prompt (`assistant@p`, `coinflip@p`);
+    - the user's instruction (`assistant@p+user`, `coinflip@p+user`);
+    - the user's self-description (A, C, U and P `@p+self`);
+    - the roleplay framing (`assistant@p+roleplay`, `coinflip@p+roleplay`).
+
+  That is 44 final conditions per model. Every prompt is exactly as in the earlier sections.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders, in every condition.
+- **Engine:** vLLM 0.33 (`score_replication.py`). Each prompt is one request, which returns the raw full-vocabulary log-probs
+  of the two outcome tokens; prefix caching is on. The earlier sections used HF transformers, which on 8 GPUs runs one GPU
+  at a time.
+  - **Gate before any replication data:** Gemma 4 31B-it in vLLM against its HF scorings on the same GPU type (H100 SXM),
+    in nine conditions covering all four readouts and the user and self placements. Every one must reach utilities
+    r ≥ 0.99 with SD within 2% and identical prompt token counts (`scripts/compare_engines.py`).
+  - DeepSeek V4 Flash's plain A and C are compared with the sweep's HF run (`lszrxqyq`) in the same way.
+- **Hardware:** one 8-GPU vast.ai node (8x B200, else 8x H200) for every model. Base and final always run on the same node,
+  and the jobs follow `replication/jobs.yaml` (`replication_runner.py`).
+- **Finding 8, the " up" patching:** in HF on the same node, finals only, after findings 1-7. It uses the "Shorter
+  questions" design:
+  - the reported preference without "heads or tails" (`coin_report_short_land` / `_coin`);
+  - the guess (`coin_predict_think_bold`).
+
+  Each model's wording is chosen by `scripts/report_wording_check.py` before its run, by that section's rule.
+
+### Pre-registered before any data (2026-11-10)
+
+**Conventions:**
+- CIs are 95% task bootstraps within origin, with one set of resamples per model, so differences are paired.
+- The persona fits are those of the persona sections: X = c + b_def · z(A_0) + b_per · z(A_p), with w = b_per / (b_def +
+  b_per). A_0 is the default Assistant and A_p the system-prompt persona Assistant (`assistant@p`), unless stated otherwise.
+- "Separable" means |r(A_p, A_0)| < 0.9, as there.
+- Each finding is reported over all 300 tasks, within origin, and over the benign sources together (MATH, Alpaca,
+  WildChat), with the magnitudes (SDs, slopes, harm gaps) beside it. The calls use all 300 tasks.
+
+**Each finding's call, per model** (and per persona for 4-7):
+
+1. **The coin tracks the Assistant after post-training, much less at base.** Replicates if all three hold:
+   - r(A_f, C_f)'s CI is above 0;
+   - r(A_f, C_f) − r(A_b, C_b) > 0, with its CI above 0;
+   - the r shift, r(A_f − A_b, C_f − C_b), is at least 0.2, with its CI above 0.
+2. **The user's choice becomes more Assistant-like.** Replicates if the user-choice section's call is "more
+   Assistant-like": d = r(A_f, U_f) − r(A_f, U_b) ≥ 0.05 with its CI above 0, and an aligned shift. r(A_f, U_f) is reported
+   beside it.
+3. **The Assistant's prediction of the user is Assistant-like.** Replicates if r(A_f, P_f) ≥ 0.5 and d_P = r(A_f, P_f) −
+   r(A_f, P_b) has its CI above 0. Reported: the predict-user section's Δ = r(U_f, P_f) − r(U_f, A_f) and its call.
+4. **The coin follows a persona the user instructs.**
+   - Replicates if the fit of `coinflip@p+user` has b_per's CI above 0.
+   - Not called unless both the system-prompt and the user-instruction persona Assistants are separable.
+   - Reported: ρ_user = b_per(user) / b_per(system), the placement call, and the system-prompt fit itself (the original
+     persona finding).
+5. **The coin doesn't follow a user's self-description (as much).**
+   - Replicates if ρ_self − ρ_user < 0 with its paired CI below 0.
+   - Secondary: the persona-readouts section's Δ_C = r(C_self, P_self) − r(C_self, A_self). It is called only where
+     r(A_self, P_self) < 0.9, and "Assistant" agrees with the finding.
+6. **The coin follows a persona framed as roleplay.** Replicates if the fit of `coinflip@p+roleplay` on z(A_0) and the
+   roleplay Assistant z(A_r) gets the roleplay section's call "persona" or "mix" (b_per's CI above 0), with A_r separable.
+   Δw = w_r − w_s is reported beside it.
+7. **The Assistant's prediction follows a user's self-description more than its own choice does.**
+   - Replicates if w(P_self) − w(A_self) > 0, with its paired CI above 0.
+   - A cell whose b_def + b_per CI includes 0 for either readout is "unstable" and not called.
+   - Reported: the same for U_self.
+8. **Swapping " up" moves the Assistant's answer a little.** Replicates per question (short preference, guess) if the swap
+   share is above 0 with κ's CI above 0. Reported: share, r(d, c), κ, the late/early split, and the Task A/B question's
+   null.
+
+**Gates:**
+- **Every cell:** split-half reliability ≥ 0.9. A cell with median outcome mass below 0.2 is reported but gets no call.
+- **The engine gates above.**
+- **Each model at load:** a pinned sanity prompt ("... the capital of Germany is" → " Berlin").
+- **Before each model's full run:** a 24-pair pilot of all its conditions, for outcome mass and top tokens only.
+
+**Output:**
+- one figure directory per model, `figures/<key>/`;
+- a matrix of findings × models, `figures/replication_matrix.png`, each cell "replicates", "doesn't", "not separable",
+  "unstable" or "not interpretable" with its key number;
+- results in this section, model by model.
+
+**Predictions** (mine, before any data; they rest on the four earlier models):
+1. Finding 1 replicates in at least 4 of the 5 non-thinking models. The coin is weakest, or absent, in Trinity-Large-Thinking,
+   as in OLMo 3.1 Think. Some base r is high (V4 Flash base: 0.53 in the sweep), so the base-to-final rise is the part
+   most likely to fail.
+2. Finding 2 replicates in at least 4 of 6.
+3. Finding 3 replicates in at least 5 of 6.
+4. Finding 4 replicates for evil in every model where it is separable, and in at least half of the other separable
+   persona cells.
+5. Finding 5 replicates in at least half of the separable cells. It was clear in Llama and weaker in Gemma.
+6. Finding 6 replicates in at least two thirds of the separable cells.
+7. Finding 7 replicates for evil in at least 4 of 6.
+8. Finding 8 replicates for the guess in at most half of the models. The effect is small and depends on the wording.
 
 ## Tasks
 
