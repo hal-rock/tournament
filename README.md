@@ -4932,6 +4932,35 @@ block-scaled weights at about 350 MB/s, against ~2 GB/s for Llama's bf16. Every 
 - **On finding 3's secondary measure, V3's user's choice follows the Assistant's own choice more than its prediction**
   (Δ -0.12, "own choice"), like Gemma 4 31B in the predict-user section.
 
+### Results: Kimi K2 (2026-11-11)
+
+**Run.** 8x B200: the base took 64 minutes and the final 97, each with a ~1-hour load (1 TB of FP8). Every cell passes the
+gates. The final coin puts a median 0.33 of its probability on " heads" / " tails"; most of the rest goes to " **" (it
+bolds its answer, as GLM and Qwen did in the sweep). That is above the 0.2 floor. Results are in
+`outputs/replication/kimi-k2/`.
+
+![Kimi K2 calls](figures/kimi-k2/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant | replicates: r(A_f, C_f) 0.96; base 0.60; r shift 0.95 | | | |
+| 2. user's choice more Assistant-like | replicates: d +0.12, r(A_f, U_f) 0.93 | | | |
+| 3. prediction of the user Assistant-like | replicates: r(A_f, P_f) 0.90, d_P +0.32; Δ -0.04 ("similar") | | | |
+| 4. coin follows a user instruction | replicates (ρ_user 0.92) | replicates (1.90) | doesn't (b_per -0.04) | replicates (1.00) |
+| 5. self-description less than instruction | **doesn't** (+0.40: ρ_self 1.32 > ρ_user 0.92) | replicates (-0.12) | doesn't (ratio undefined) | replicates (-0.15) |
+| 6. coin follows roleplay | replicates (w_r 0.66) | replicates (0.39) | doesn't (b_per -0.18) | replicates (0.70) |
+| 7. prediction follows self-description more | unstable | replicates | unstable | replicates |
+
+**First observations:**
+- **Kimi's coin tracks its Assistant the most closely of any model so far** (0.96). Its base already shows a good part of it
+  (0.60), like Gemma's and V4 Flash's bases in the sweep.
+- **Evil's self-description pulls Kimi's coin more than the instruction does** (ρ_self 1.32 vs 0.92). Kimi is the first
+  replication model where finding 5 fails for evil. A user describing themselves as Damien Kross moves this coin more than
+  a user telling the AI to be him.
+- **Contrarian barely moves Kimi's coin even from the system prompt.** So its ρ ratios have no denominator, and its call
+  on finding 5 says nothing.
+- **Finding 7's evil cell is unstable:** P's b_def + b_per CI includes 0.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
