@@ -1,0 +1,24 @@
+# Finding 8 of the replication (README, "Replication across larger models"): report_patch.py's design (the 1,000 pilot
+# pairs outside the sweep, every arm) on Nemotron-4 340B Instruct (mgoin's HF conversion), in HF on the replication node
+# (8x B200) after findings 1-7. Run once per report wording (--report), chosen from the vLLM wording check of the model's
+# pilot.
+# - Model and prompt format from the replication config (model_from): NeMo's turn markers (turn_format, with the leading
+#   "▁"), no BOS, the Instruct's tokenizer; the load check feeds that config's pinned SentencePiece ids (`sanity`). Run
+#   tests/test_replication_nemotron4_340b.py in the same environment first: the ids depend on how transformers converts
+#   the tokenizer.
+# - Native NemotronForCausalLM, bf16, sdpa (head_dim 192, partial rotary 0.5, squared ReLU, LayerNorm1P).
+# - Memory: 682 GB, ~85 GB per GPU over 8 (largest block 6.9 GB); the 150 GiB cap leaves >= 29 GiB of each B200 (179 GiB)
+#   for activations. Batch 64: the largest transients are the MLP's (64 x ~160 tokens x 73,728 in bf16, ~1.5 GB, twice).
+#   Captures stay on the CPU: 96 blocks x 13 line tokens x 18,432 in bf16, ~46 MB per prompt and source, ~12 GB per chunk.
+family: nemotron4-340b
+run_name: coin-report-nemotron4-340b
+tags: [nemotron4-340b, replication, finding8]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 64
+chunk_pairs: 64
+model_from: {config: configs/replication/nemotron4-340b.yaml, stage: instruct}
+model:
+  max_memory: {0: 150GiB, 1: 150GiB, 2: 150GiB, 3: 150GiB, 4: 150GiB, 5: 150GiB, 6: 150GiB, 7: 150GiB}

@@ -1,0 +1,23 @@
+# Finding 8 of the replication (README, "Replication across larger models"): report_patch.py's design (the 1,000 pilot
+# pairs outside the sweep, every arm) on Llama 3.1 405B Instruct, in HF on the replication node (8x B200) after findings
+# 1-7. Run once per report wording (--report), chosen from the vLLM wording check of the model's pilot.
+# - Model and prompt format from the replication config (model_from): its template with the default date block stripped,
+#   as in the earlier Llama 3.3 70B report runs.
+# - Native LlamaForCausalLM, bf16, sdpa (the default, as in the 70B runs).
+# - Memory: 812 GB of bf16 weights, ~101 GB per GPU over 8 (largest block 6.4 GB); the 150 GiB cap leaves >= 29 GiB of
+#   each B200 (179 GiB) for activations. Batch 64: the largest transients are the MLP projections (64 x ~150 tokens x
+#   53,248 in bf16, ~1 GB each).
+#   Captures stay on the CPU: 126 blocks x 12 line tokens x 16,384 in bf16, ~50 MB per prompt and source, ~13 GB per
+#   chunk of 64 pairs.
+family: llama-405b
+run_name: coin-report-llama-405b
+tags: [llama-405b, replication, finding8]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 64
+chunk_pairs: 64
+model_from: {config: configs/replication/llama-405b.yaml, stage: instruct}
+model:
+  max_memory: {0: 150GiB, 1: 150GiB, 2: 150GiB, 3: 150GiB, 4: 150GiB, 5: 150GiB, 6: 150GiB, 7: 150GiB}

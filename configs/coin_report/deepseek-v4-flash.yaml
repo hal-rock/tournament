@@ -1,0 +1,30 @@
+# Finding 8 of the replication (README, "Replication across larger models"): report_patch.py's design (the 1,000 pilot
+# pairs outside the sweep, every arm) on DeepSeek V4 Flash, in HF on the replication node (8x B200) after findings 1-7.
+# Run once per report wording (--report), chosen from the vLLM wording check of the model's pilot.
+# - Model and prompt format from the replication config (model_from): the literal turn markers (turn_format), as in the
+#   sweep's HF run (configs/models/deepseek-v4-flash.yaml, lszrxqyq) and the vLLM runs.
+# - Native DeepseekV4ForCausalLM, loaded as the sweep's run was: FP8 linears and MXFP4 experts kept as stored (the gpu
+#   group's `kernels` package, 0.16 with transformers 5.17), and eager attention, the only kind its HF code supports.
+# - Four residual streams per position ([B, T, 4, D]): report_patch.replace_streams patches all of them at once.
+# - In HF, V4 gives a position different log-probs depending on how many tokens follow it (CLAUDE.md, median 0.10 nats):
+#   the coin is read at " up" inside the report prompt, as for every model, so it can differ from a bare coinflip prompt's.
+# - Memory: 156 GB as loaded (the MTP layer skipped), so two GPUs are enough (~78 GB each; the 140 GiB caps leave
+#   >= 39 GiB of each B200 for activations). The other six can run another model's patching at the same time (with
+#   CUDA_VISIBLE_DEVICES split, and that model's max_memory cut to six GPUs). Batch 32, as in the sweep's HF run (eager
+#   attention materializes [B, 64 heads, T, T] scores per block).
+# - HF casts the hyper-connection, sink, compressor and router-bias parameters to bf16 (float32 in the checkpoint;
+#   scripts/patch_load_check.py lists them), as in the sweep's HF run. Every arm uses the same model, so the patching
+#   compares like with like.
+family: deepseek-v4-flash
+run_name: coin-report-deepseek-v4-flash
+tags: [deepseek-v4-flash, replication, finding8]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 32
+chunk_pairs: 64
+model_from: {config: configs/replication/deepseek-v4-flash.yaml, stage: instruct}
+model:
+  attn_implementation: eager
+  max_memory: {0: 140GiB, 1: 140GiB}

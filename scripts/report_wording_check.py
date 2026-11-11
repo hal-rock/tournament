@@ -1,6 +1,8 @@
 """Outcome mass and top next tokens of report conditions (prompts.py), on the first pilot pairs, to choose which wordings to
-run in full (report_patch.py). The prompts are built exactly as report_patch.py builds them. Reports only mass and top tokens,
-nothing about how the answers relate to the coin or the tasks.
+run in full (report_patch.py). The prompts are built exactly as report_patch.py builds them, from the same config (a
+`model`, or a replication model through `model_from`). Reports only mass and top tokens, nothing about how the answers
+relate to the coin or the tasks. (The replication's models get this check in vLLM instead, during their pilot:
+replication.WORDING_CHECK.)
 
 Usage: uv run python scripts/report_wording_check.py configs/coin_report/<model>.yaml [--n 24] [--conditions a b ...]
 """
@@ -11,12 +13,11 @@ from pathlib import Path
 
 import torch
 import yaml
-from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from analyze import read_jsonl  # noqa: E402
 from prompts import CONDITIONS, build_prompt, outcome_token_ids  # noqa: E402
-from report_patch import pilot_pairs  # noqa: E402
+from report_patch import load_tokenizers, pilot_pairs, prompt_format, resolve_model  # noqa: E402
 from tournament import load_model, select_pairs  # noqa: E402
 
 DEFAULT = ["coin_report_bold", "coin_report_short", "coin_report_short_bold",
@@ -40,9 +41,11 @@ def main():
         print(f"try{k}: {base} with prefill {prefill!r}")
         a.conditions += [f"try{k}", f"try{k}_bold"]
     cfg = yaml.safe_load(open(a.config))
-    m = cfg["model"]
-    tok = AutoTokenizer.from_pretrained(m["name"])
-    model = load_model(m["name"], "cuda", torch.bfloat16, max_memory=m.get("max_memory"))
+    m = resolve_model(cfg)  # `model`, or a replication config's entry (`model_from`), as report_patch.py reads it
+    tok, template_tok = load_tokenizers(m)
+    fmt = prompt_format(m)
+    model = load_model(m["name"], "cuda", torch.bfloat16, revision=m.get("revision"), max_memory=m.get("max_memory"),
+                       loader=m.get("loader"), attn_implementation=m.get("attn_implementation"))
     tasks = read_jsonl(cfg["tasks_file"])
     pairs = pilot_pairs(len(tasks), cfg["n_pairs"], select_pairs(len(tasks), 15000, 0), cfg.get("seed", 0))[:a.n]
     print(f"{cfg['family']}: {len(pairs)} pilot pairs, order 0", flush=True)
@@ -50,7 +53,7 @@ def main():
         out_ids = outcome_token_ids(name, tok)
         masses, tops = [], {}
         for i, j in pairs:
-            text = build_prompt(name, tasks[i]["prompt"], tasks[j]["prompt"], tok)
+            text = build_prompt(name, tasks[i]["prompt"], tasks[j]["prompt"], template_tok, **fmt)
             ids = tok(text, add_special_tokens=False, return_tensors="pt").input_ids.to(model.device)
             with torch.no_grad():
                 lp = torch.log_softmax(model(ids, use_cache=False).logits[0, -1].float(), -1)
@@ -62,7 +65,7 @@ def main():
         print(f"{name:24} median mass {masses[len(masses) // 2]:.2f} (min {masses[0]:.2f})  top: "
               + "  ".join(f"{tok.decode([t])!r} {p:.2f}" for t, p in top), flush=True)
     for name in a.conditions:  # placeholder tasks: the log stays free of task text
-        print(f"\n{name}:\n" + build_prompt(name, "<task A>", "<task B>", tok)[-160:])
+        print(f"\n{name}:\n" + build_prompt(name, "<task A>", "<task B>", template_tok, **fmt)[-160:])
 
 
 if __name__ == "__main__":

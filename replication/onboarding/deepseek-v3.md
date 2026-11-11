@@ -116,4 +116,6 @@ Settings: `tensor_parallel_size: 8`, `max_model_len: 1024`, `gpu_memory_utilizat
 
 - vLLM on this transformers version. Nothing here needs remote code.
 - **Finding 8.** HF patching with V3's FP8 weights in transformers 5.17 (native `DeepseekV3ForCausalLM` with the `fp8`
-  quantization config) is untested.
+  quantization config) has not run. Without weights, `scripts/patch_load_check.py` found every key and shape in place
+  (the MTP layer 61 skipped by the class's own rule) and HF's yarn RoPE and attention scale equal to the remote code's
+  (`replication/patch_load_check.md`). Config: `configs/coin_report/deepseek-v3.yaml`.

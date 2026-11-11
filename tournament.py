@@ -25,7 +25,8 @@ import torch
 import wandb
 import yaml
 from torch import nn
-from transformers import ApertusConfig, ApertusForCausalLM, AutoModelForCausalLM, AutoTokenizer
+from transformers import (ApertusConfig, ApertusForCausalLM, AutoModelForCausalLM, AutoTokenizer, DeepseekV3Config,
+                          DeepseekV3ForCausalLM)
 from transformers.utils import cached_file
 
 from analyze import analyze, log_to_wandb, read_jsonl
@@ -172,8 +173,49 @@ def load_apertus1p5_text(name, revision, dtype, device_map, max_memory=None):
     return model
 
 
+# Kimi K2's config.json fields that transformers' DeepseekV3 doesn't read, with the values its code assumes (sigmoid
+# scores, top-k by score plus the correction bias, every layer from first_k_dense_replace on an MoE, no attention bias,
+# no multi-token-prediction layer). The remote modeling_deepseek.py reads them; asserting them makes the two agree.
+KIMI_FIXED = {"scoring_func": "sigmoid", "topk_method": "noaux_tc", "moe_layer_freq": 1, "attention_bias": False,
+              "num_nextn_predict_layers": 0}
+
+
+def kimi_k2_config(name, revision):
+    """Kimi K2's config.json as transformers' native DeepseekV3Config. Its `model_type: kimi_k2` maps to remote code
+    (configuration_deepseek.py, modeling_deepseek.py) written for transformers 4.48, which 5.17 doesn't know; the
+    architecture is DeepseekV3ForCausalLM's (the config names it), with Kimi's sizes: 384 routed experts, 64 heads, one
+    expert group, the first layer dense, yarn RoPE (factor 32, theta 50,000). The FP8 block quantization config is kept, so
+    the weights load as stored (transformers' finegrained FP8). `rope_scaling` becomes rope_parameters as for DeepSeek V3's
+    own config; scripts/patch_load_check.py checks the keys and shapes against the checkpoint without weights, and the
+    resulting rotary frequencies and attention scale against the remote code's formulas (replication/patch_load_check.md).
+    The checkpoint's per-layer rotary_emb.inv_freq buffers are a stale default (plain RoPE over hidden / heads = 112
+    dimensions) that neither implementation uses; transformers skips them."""
+    raw = json.load(open(cached_file(name, "config.json", revision=revision)))
+    assert raw["model_type"] == "kimi_k2" and raw["architectures"] == ["DeepseekV3ForCausalLM"], raw.get("model_type")
+    fixed = {k: raw.get(k) for k in KIMI_FIXED}
+    assert fixed == KIMI_FIXED, fixed
+    drop = ("model_type", "architectures", "auto_map", "transformers_version", "torch_dtype")
+    config = DeepseekV3Config(**{k: v for k, v in raw.items() if k not in drop})
+    assert config.rope_parameters["rope_type"] == "yarn" and config.quantization_config["quant_method"] == "fp8"
+    return config
+
+
+def load_kimi_k2(name, revision, dtype, device_map, max_memory=None, attn_implementation=None):
+    """Kimi K2 as transformers' native DeepseekV3ForCausalLM (kimi_k2_config), failing on any weight missing or
+    misshapen and on any skipped weight but the per-layer rotary inv_freq buffers the checkpoint carries (the native model
+    computes its own, from the config)."""
+    attn = {"attn_implementation": attn_implementation} if attn_implementation else {}
+    model, info = DeepseekV3ForCausalLM.from_pretrained(
+        name, revision=revision, config=kimi_k2_config(name, revision), dtype=dtype, device_map=device_map,
+        max_memory=max_memory, output_loading_info=True, **attn)
+    assert not info["missing_keys"] and not info["mismatched_keys"], (info["missing_keys"], info["mismatched_keys"])
+    skipped = {k for k in info["unexpected_keys"] if not k.endswith(".self_attn.rotary_emb.inv_freq")}
+    assert not skipped, sorted(skipped)[:10]
+    return model
+
+
 # `loader` in a model's config, for checkpoints AutoModelForCausalLM can't read.
-LOADERS = {"apertus1p5_text": load_apertus1p5_text}
+LOADERS = {"apertus1p5_text": load_apertus1p5_text, "kimi_k2": load_kimi_k2}
 
 
 def load_model(name, device, dtype, revision=None, max_memory=None, loader=None, attn_implementation=None):
@@ -183,7 +225,7 @@ def load_model(name, device, dtype, revision=None, max_memory=None, loader=None,
     attn_implementation: e.g. "eager", where the attention weights are needed (rollouts.py)."""
     attn = {"attn_implementation": attn_implementation} if attn_implementation else {}
     if loader is not None:
-        load = lambda device_map: LOADERS[loader](name, revision, dtype, device_map, max_memory).eval()
+        load = lambda device_map: LOADERS[loader](name, revision, dtype, device_map, max_memory, **attn).eval()
     else:
         load = lambda device_map: AutoModelForCausalLM.from_pretrained(
             name, revision=revision, dtype=dtype, device_map=device_map, max_memory=max_memory, **attn).eval()

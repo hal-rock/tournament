@@ -1,0 +1,27 @@
+# Finding 8 of the replication (README, "Replication across larger models"): report_patch.py's design (the 1,000 pilot
+# pairs outside the sweep, every arm) on Kimi K2 Instruct, in HF on the replication node (8x B200) after findings 1-7. Run
+# once per report wording (--report), chosen from the wording check that ran in vLLM during the model's pilot.
+# - The model and its prompt format come from the replication config (model_from): the same repo, revision, template
+#   (the default system block stripped), and Kimi's tiktoken tokenizer (remote code), so the prompts are token for token
+#   score_replication.py's. A slow tokenizer has no character offsets: report_patch.line_positions finds the coin line by
+#   its token prefix instead.
+# - transformers 5.17 doesn't know model_type kimi_k2: the `kimi_k2` loader (tournament.load_kimi_k2) reads it as the
+#   native DeepseekV3ForCausalLM with its FP8 block quantization (needs the gpu group's `kernels` package; FP8 over several
+#   GPUs runs the Triton kernels, not DeepGEMM). scripts/patch_load_check.py checked the keys and shapes on the meta device.
+# - Memory: 1,029 GB of FP8 weights as loaded, ~129 GB per GPU over 8 (largest block 17.1 GB), so the 150 GiB cap per
+#   GPU leaves >= 29 GiB of each B200 (179 GiB) for activations. Batch 64 (~150-token prompts): the largest transients are
+#   a few GB; captures stay on the CPU (61 blocks x 12 line tokens x 7,168 in bf16, ~10 MB per prompt and source, ~3 GB per
+#   chunk of 64 pairs).
+family: kimi-k2
+run_name: coin-report-kimi-k2
+tags: [kimi-k2, replication, finding8]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 64
+chunk_pairs: 64
+model_from: {config: configs/replication/kimi-k2.yaml, stage: instruct}
+model:
+  loader: kimi_k2
+  max_memory: {0: 150GiB, 1: 150GiB, 2: 150GiB, 3: 150GiB, 4: 150GiB, 5: 150GiB, 6: 150GiB, 7: 150GiB}

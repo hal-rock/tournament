@@ -1,0 +1,23 @@
+# Finding 8 of the replication (README, "Replication across larger models"): report_patch.py's design (the 1,000 pilot
+# pairs outside the sweep, every arm) on DeepSeek V3 (the original release), in HF on the replication node (8x B200)
+# after findings 1-7. Run once per report wording (--report), chosen from the vLLM wording check of the model's pilot.
+# - Model and prompt format from the replication config (model_from): repo, pinned revision, template (BOS first, no
+#   default system prompt), tokenizer.
+# - Native DeepseekV3ForCausalLM with its FP8 block quantization (the gpu group's `kernels` package; FP8 over several GPUs
+#   runs the Triton kernels, not DeepGEMM). The multi-token-prediction layer (model.layers.61) is in the checkpoint and
+#   skipped by transformers (scripts/patch_load_check.py).
+# - Memory: 673 GB as loaded (the MTP layer skipped), ~84 GB per GPU over 8 (largest block 11.5 GB); the 150 GiB cap
+#   leaves >= 29 GiB of each B200 (179 GiB) for activations. Batch 64 (~150-token prompts): the largest transients are a
+#   few GB; captures stay on the CPU (61 blocks x 12 line tokens x 7,168 in bf16, ~10 MB per prompt and source).
+family: deepseek-v3
+run_name: coin-report-deepseek-v3
+tags: [deepseek-v3, replication, finding8]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 64
+chunk_pairs: 64
+model_from: {config: configs/replication/deepseek-v3.yaml, stage: instruct}
+model:
+  max_memory: {0: 150GiB, 1: 150GiB, 2: 150GiB, 3: 150GiB, 4: 150GiB, 5: 150GiB, 6: 150GiB, 7: 150GiB}

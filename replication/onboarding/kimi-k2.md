@@ -165,5 +165,9 @@ Settings: `tensor_parallel_size: 8`, `max_model_len: 1024`, `gpu_memory_utilizat
   splits out the added tokens and tiktoken encodes the rest. Check 2 above closes this.
 - **vLLM with transformers 5.17 and Kimi's remote `configuration_deepseek.py`** (written for 4.48) is untested.
 - **Finding 8 (HF patching).** transformers 5.17 has no `kimi_k2` model, and the remote `modeling_deepseek.py` targets
-  4.48. Loading the weights as the native `DeepseekV3ForCausalLM` (overriding `model_type`) is the likely route;
-  untested.
+  4.48. The `kimi_k2` loader (`tournament.load_kimi_k2`) reads the weights as the native `DeepseekV3ForCausalLM` with a
+  `DeepseekV3Config` built from config.json, FP8 kept. Without weights, `scripts/patch_load_check.py` found every key and
+  shape in place, only the checkpoint's stale per-layer `rotary_emb.inv_freq` buffers skipped, and HF's yarn RoPE and
+  attention scale equal to the remote code's (`replication/patch_load_check.md`). It hasn't run on a GPU. Config:
+  `configs/coin_report/kimi-k2.yaml`; its tokenizer is slow (remote code), so report_patch finds the coin line by token
+  prefix (`line_positions`).
