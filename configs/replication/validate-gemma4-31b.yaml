@@ -1,7 +1,11 @@
 # Engine check before the replication (PLAN_replication.md, "Engine"): Gemma 4 31B-it scored by vLLM (score_replication.py)
-# on one H200, against its HF scorings on H200: the sweep's `assistant` (jrl62npf), the persona runs' re-scored `coinflip`
-# (mgldkcxm) and `assistant@evil` / `coinflip@evil` (z9v16lk3). Compare with scripts/compare_engines.py; the bar across
-# engines is utilities r >= 0.99 with SD within 2%.
+# on one H100 SXM, against its HF scorings on H100 SXM (no H200 on CUDA-13 hosts on 2026-11-10):
+#   assistant, user_choice, predict_user                 predict_user run wgtt5s6v
+#   coinflip, coinflip@evil+user, assistant@evil+user    persona placement run 3k3rfilv
+#   coinflip@evil+self, predict_user@evil+self           persona readouts run 2id90q0w
+#   user_choice@evil (system prompt)                     persona readouts run flh8j1gb
+# Compare with scripts/compare_engines.py; the bar across engines is utilities r >= 0.99 with SD within 2% and the same
+# prompt token counts.
 wandb_project: tournament
 group: replication-validate
 run_name: validate-gemma4-31b
@@ -14,5 +18,6 @@ models:
   - name: google/gemma-4-31B-it
     stage: instruct
     download: {allow_patterns: ["*.safetensors", "*.json", "tokenizer*", "*.jinja"], gb: 63}
-    vllm: {tensor_parallel_size: 1, max_model_len: 2048, gpu_memory_utilization: 0.9}
-    conditions: [assistant, coinflip, assistant@evil, coinflip@evil]
+    vllm: {tensor_parallel_size: 1, max_model_len: 1024, gpu_memory_utilization: 0.92}
+    conditions: [assistant, coinflip, user_choice, predict_user, coinflip@evil+user, assistant@evil+user, coinflip@evil+self,
+                 predict_user@evil+self, user_choice@evil]
