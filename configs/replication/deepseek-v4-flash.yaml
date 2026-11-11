@@ -1,0 +1,47 @@
+# DeepSeek V4 Flash (~284B MoE), base vs. instruct (PLAN_replication.md; notes in
+# replication/onboarding/deepseek-v4-flash.md). The sweep scored assistant and coinflip in HF on 4x H200
+# (configs/models/deepseek-v4-flash.yaml, W&B lszrxqyq); this rescores all 48 conditions in vLLM, and the plain
+# assistant / coinflip prompts are token for token the sweep's (same markers, tasks and pairs), so they double as the
+# vLLM-vs-HF gate.
+# - No Jinja template: literal markers from the repo's encoder (encoding/encoding_dsv4.py), chat mode. A system message
+#   is plain text right after BOS: "<｜begin▁of▁sentence｜>{system}<｜User｜>{user}<｜Assistant｜></think>{reply}".
+# - Released formats, read natively by vLLM 0.33 (vllm/models/deepseek_v4, DeepseekV4FP8Config): FP8 128x128 block
+#   linears in both; routed experts MXFP4 in the instruct (expert_dtype fp4), FP8 block in the base (expert_dtype fp8).
+#   The quantization method is picked from config.json (no `quantization` key needed). The KV cache is DeepSeek's
+#   fp8_ds_mla format on the default FlashMLA path (H200 and B200).
+# - TP 4 for both stages, so base and instruct run at once on 4 + 4 GPUs of one node (instruct ~40 GB/GPU of weights,
+#   base ~74 GB/GPU). Both stages on the same TP, GPU type and engine.
+# Checked by tests/test_replication_deepseek-v4-flash.py.
+wandb_project: tournament
+group: replication
+run_name: deepseek-v4-flash
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+
+models:
+  - name: deepseek-ai/DeepSeek-V4-Flash-Base
+    stage: base
+    turn_format: &dsv4
+      user: "<｜begin▁of▁sentence｜><｜User｜>"
+      reply: "<｜Assistant｜></think>"
+      system: "<｜begin▁of▁sentence｜>{system}<｜User｜>"
+    download:
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "tokenizer.json",
+                       "tokenizer_config.json"]
+      gb: 294.7
+    # Longest prompt over the 4 base conditions and the real tasks: 386 tokens (all 48: 557).
+    vllm: {tensor_parallel_size: 4, dtype: bfloat16, max_model_len: 1024, gpu_memory_utilization: 0.9}
+    conditions: base
+  - name: deepseek-ai/DeepSeek-V4-Flash
+    stage: instruct
+    turn_format: *dsv4
+    download:
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "generation_config.json",
+                       "tokenizer.json", "tokenizer_config.json"]
+      gb: 159.6
+    # Longest prompt: 557 tokens (coinflip@evil+roleplay and coinflip@contrarian+roleplay on the two longest tasks).
+    vllm: {tensor_parallel_size: 4, dtype: bfloat16, max_model_len: 1024, gpu_memory_utilization: 0.9}
+    conditions: final

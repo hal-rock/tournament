@@ -1,0 +1,47 @@
+# Trinity Large (398B MoE, ~13B active), base vs. Thinking (PLAN_replication.md; notes in
+# replication/onboarding/trinity-large.md). Both bf16, 797 GB each: TP 8 over the whole node.
+# - Thinking's template opens every reply with "<think>" and has no non-thinking mode. The Assistant is read after an
+#   empty think block (close_think, Hal 2026-11-10): "...<|im_start|>assistant\n<think></think>\n" + prefill, which is
+#   how the template renders a past turn with empty reasoning, byte for byte. No system block unless tools are passed.
+# - TrueBase's own template is just "{{ bos_token }}" + contents, so it borrows Thinking's. Its tokenizer has no
+#   <think> / </think> (ids 13 / 14 are <|reserved_special_0|> / <|reserved_special_1|> there, and it would split
+#   "<think>" into 3 BPE pieces), so it also borrows Thinking's tokenizer and reads the same ids as the final. Those two
+#   rows are at their initialization in TrueBase (scripts/replication_embed_rows_trinity-large.py).
+# - TrueBase is a 10T-token pre-anneal branch; Thinking was post-trained from Trinity-Large-Base (17T, annealed). The
+#   notes give the numbers; switching is a one-line change here (the tests read this file).
+# Checked by tests/test_replication_trinity-large.py.
+wandb_project: tournament
+group: replication
+run_name: trinity-large
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+
+models:
+  - name: arcee-ai/Trinity-Large-TrueBase
+    stage: base
+    chat_template_from: arcee-ai/Trinity-Large-Thinking
+    tokenizer_from: arcee-ai/Trinity-Large-Thinking
+    close_think: true
+    download:
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "tokenizer.json",
+                       "tokenizer_config.json", "chat_template.jinja"]
+      gb: 797.3
+    # AfmoeForCausalLM is native in vLLM 0.33 (model_executor/models/afmoe.py) and transformers >= 5.16, so no remote
+    # code. Longest prompt over the 4 base conditions and the real tasks: 362 tokens (all 48: 530). vLLM's own
+    # tokenizer only detokenizes (ids come from tokenizer_from); Thinking's names ids 13/14 the way the prompts mean them.
+    vllm: {tensor_parallel_size: 8, dtype: bfloat16, max_model_len: 1024, gpu_memory_utilization: 0.9,
+           tokenizer: arcee-ai/Trinity-Large-Thinking}
+    conditions: base
+  - name: arcee-ai/Trinity-Large-Thinking
+    stage: instruct
+    close_think: true
+    download:
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "generation_config.json",
+                       "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "chat_template.jinja"]
+      gb: 797.3
+    # Longest prompt: 530 tokens (coinflip@contrarian+roleplay on the two longest tasks).
+    vllm: {tensor_parallel_size: 8, dtype: bfloat16, max_model_len: 1024, gpu_memory_utilization: 0.9}
+    conditions: final
