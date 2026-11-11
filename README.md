@@ -4662,6 +4662,17 @@ decisions and the costs are in `PLAN_replication.md`.
   "unstable" or "not interpretable" with its key number;
 - results in this section, model by model.
 
+**Clarifications, before any replication data (2026-11-11).** These came from implementing the calls
+(`replication_analysis.py`), which reproduces the earlier sections' numbers on their Llama 70B and Gemma 31B runs (245 values;
+`replication/legacy_check.md`):
+- Findings 5 and 7 are called only where the system-prompt persona is separable (|r(A_p, A_0)| < 0.9), as in the persona
+  sections. Both rest on the fit against A_p.
+- A cell that fails a gate (split-half below 0.9, or median outcome mass below 0.2) is "not interpretable", with the reason
+  given.
+- "Within origin" for the persona fits means source fixed effects, without the log length the earlier sections added as
+  a second variant.
+- The mass gate uses the median, as written. The user-choice and predict-user sections used the mean.
+
 **Predictions** (mine, before any data; they rest on the four earlier models):
 1. Finding 1 replicates in at least 4 of the 5 non-thinking models. The coin is weakest, or absent, in Trinity-Large-Thinking,
    as in OLMo 3.1 Think. Some base r is high (V4 Flash base: 0.53 in the sweep), so the base-to-final rise is the part
