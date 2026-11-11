@@ -5175,6 +5175,47 @@ A cell with median outcome mass below 0.2 is reported but not interpreted.
 - **GLM's default coin is weak** (b_0 0.34 nats per SD), so its pulls are small in absolute terms.
 - **Scope:** one phrasing per rule, final models only, bf16. CIs cover task sampling only.
 
+### Results: finding 8, the " up" patching (2026-11-11)
+
+**Run.** HF transformers on the same 8x B200 node, with the scope above: five finals, three questions, the unpatched pass
+plus self / swap / ctrl, and 1,000 pilot pairs in both orders. Per model (all three questions, one load):
+
+| model | time | notes |
+|---|---|---|
+| Llama 405B | 78 min | |
+| Nemotron-4 | 66 min | |
+| DeepSeek V3 | 48 min | |
+| Kimi K2 | 45 min | loaded as DeepSeek V3, `tournament.LOADERS["kimi_k2"]` |
+| DeepSeek V4 Flash | 10 min | three questions side by side on 2-GPU pairs |
+
+- The self-patch changed no answer (exactly 0) in any model or question.
+- Each model's load check matched its vLLM one.
+- Table: `outputs/replication/patching_summary.csv` (`scripts/replication_patch_summary.py`). Per-run figures:
+  `figures/<key>/patch_<question>.png`.
+
+![finding 8](figures/replication_patching.png)
+
+| model | short preference: share, κ [95% CI] | guess: share, κ | Task A/B control: share, κ |
+|---|---|---|---|
+| Llama 3.1 405B | 1.7%, 0.077 [0.072, 0.081] | 5.8%, 0.166 [0.155, 0.177] | 0.0%, -0.002 [-0.004, 0.000] |
+| Nemotron-4 340B | 0.1%, 0.008 [0.002, 0.014] | 0.8%, 0.058 [0.050, 0.066] | 0.0%, -0.003 [-0.010, 0.004] |
+| DeepSeek V3 | 1.2%, 0.016 [0.007, 0.025] | 3.0%, 0.039 [0.028, 0.049] | -0.1%, -0.021 [-0.034, -0.007] |
+| Kimi K2 | 2.6%, 0.040 [0.036, 0.044] | 9.0%, 0.094 [0.089, 0.100] | 0.3% [0.1, 0.6], -0.001 [-0.006, 0.004] |
+| DeepSeek V4 Flash | 1.5%, 0.040 [0.020, 0.059] | 5.4%, 0.079 [0.060, 0.097] | 0.1%, -0.005 [-0.023, 0.014] |
+
+**Finding 8 replicates in all five models, for both questions.** The swap moves the answer against the coin, with κ's CI
+above 0 and the share above 0.
+- **The size varies a lot.** Nemotron's short preference barely reads " up" (share 0.1%, r(d, coin) -0.12). Llama 405B's
+  guess reads it almost deterministically (r -0.91).
+- **The guess reads " up" more than the preference in every model:** shares 0.8-9.0% against 0.1-2.6%. The "Shorter
+  questions" section found the same in the earlier models.
+- **The `ctrl` patch** (the "OK, " prompt's " up": the same mapping, a foreign activation) moves no answer, with shares
+  between -0.2% and +0.3%. So the swap's effect follows the coin's content at " up", not the disruption of patching.
+- **The Task A/B control stays at or near null,** as in the earlier models. Two small exceptions:
+  - Kimi's swap share is 0.3% with a CI just above 0 (r(d, coin) -0.08).
+  - DeepSeek V3's κ is slightly negative (-0.021, CI below 0) though its share is 0.0%.
+- **Not reported:** the early/late layer split (dropped before the run; see "Finding 8: scope").
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
