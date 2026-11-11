@@ -55,3 +55,22 @@ def expand_conditions(spec):
     if spec == "final":
         return list(FINAL_CONDITIONS)
     return list(spec)
+
+
+# Finding 8's wording check (README, "Shorter questions", its wording check): outcome mass and top tokens of the candidate
+# report questions on the first 24 of report_patch.py's pilot pairs, scored in vLLM during each final model's pilot
+# (score_replication.py --with-pilot). The short preference without "heads or tails" with its two outcome-naming prefills,
+# the guess, each plain and bold, and the Task A/B question (the patching's control).
+WORDING_CHECK = ["coin_report_short_land", "coin_report_short_land_bold", "coin_report_short_coin",
+                 "coin_report_short_coin_bold", "coin_predict_think", "coin_predict_think_bold", "coin_report_ab"]
+
+
+def report_pilot_pairs(n_tasks, n, seed=0, max_pairs=15000):
+    """report_patch.pilot_pairs: n unordered pairs outside the sweep's max_pairs, copied here so score_replication.py
+    needn't import report_patch's HF stack (tests/test_score_replication.py checks the two agree)."""
+    import itertools
+    import random
+    pairs = list(itertools.combinations(range(n_tasks), 2))
+    taken = set(sorted(random.Random(f"pairs/{seed}").sample(pairs, max_pairs)))
+    rest = [q for q in pairs if q not in taken]
+    return sorted(random.Random(f"coin_report_pilot/{seed}").sample(rest, n))

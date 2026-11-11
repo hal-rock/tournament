@@ -63,7 +63,7 @@ def test_pilot_rows_and_resume(tmp_path, monkeypatch):
     monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
     conds = ["assistant", "coinflip@contrarian+self"]
     cfg = _config(tmp_path, conds)
-    sr.main([str(cfg), "--stage", "instruct", "--pilot", "3", "--no-wandb"])
+    sr.main([str(cfg), "--stage", "instruct", "--pilot", "3", "--no-wandb", "--wording", "0"])
 
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained(TOK)
@@ -85,7 +85,7 @@ def test_pilot_rows_and_resume(tmp_path, monkeypatch):
 
     # A second launch finds every file and loads nothing.
     FakeEngine.calls = 0
-    sr.main([str(cfg), "--stage", "instruct", "--pilot", "3", "--no-wandb"])
+    sr.main([str(cfg), "--stage", "instruct", "--pilot", "3", "--no-wandb", "--wording", "0"])
     assert FakeEngine.calls == 0
 
 
@@ -110,7 +110,7 @@ def test_with_pilot_scores_the_pilot_then_everything_in_one_load(tmp_path, monke
     loads = []
     monkeypatch.setattr(FakeEngine, "__init__", lambda self, m, k: loads.append(m["name"]))
     cfg = _config(tmp_path, ["coinflip", "assistant@strategist+roleplay"])
-    sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--with-pilot", "4"])
+    sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--with-pilot", "4", "--wording", "0"])
     out = tmp_path / "out" / "fake"
     assert len(loads) == 1
     for c in ("coinflip", "assistant@strategist+roleplay"):
@@ -118,3 +118,32 @@ def test_with_pilot_scores_the_pilot_then_everything_in_one_load(tmp_path, monke
         assert len(_rows(out / "results" / f"instruct__{c}.csv.gz")) == 30000
     progress = [json.loads(l) for l in open(out / "progress.jsonl")]
     assert [p["pilot"] for p in progress] == [True, True, False, False]
+
+
+def test_report_pilot_pairs_match_report_patch():
+    import report_patch
+    from replication import report_pilot_pairs
+    assert report_pilot_pairs(300, 1000, 0) == report_patch.pilot_pairs(300, 1000, tournament.select_pairs(300, 15000, 0), 0)
+
+
+def test_final_pilot_adds_the_wording_check(tmp_path, monkeypatch):
+    from replication import WORDING_CHECK, report_pilot_pairs
+    monkeypatch.setattr(sr, "OUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(sr, "VllmEngine", FakeEngine)
+    monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
+    cfg = _config(tmp_path, ["coinflip"])
+    sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--with-pilot", "3"])
+    out = tmp_path / "out" / "fake"
+    tasks = sr.read_jsonl("data/tasks_n300_max500_seed0.jsonl")
+    i, j = report_pilot_pairs(300, 1000, 0)[0]
+    for c in WORDING_CHECK:
+        rows = _rows(out / "pilot" / f"instruct__wording__{c}.csv.gz")
+        assert len(rows) == 6 and (rows[0]["first"], rows[0]["second"]) == (tasks[i]["id"], tasks[j]["id"])
+    progress = [json.loads(l) for l in open(out / "progress.jsonl")]
+    # the pilot, then the wording check, then the full run
+    assert [(p["pilot"], p["wording"]) for p in progress] == ([(True, False)] + [(True, True)] * len(WORDING_CHECK)
+                                                              + [(False, False)])
+    # a base stage gets none; --wording-only runs only the check
+    FakeEngine.calls = 0
+    sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--wording", "3", "--wording-only"])
+    assert FakeEngine.calls == 0  # all done already

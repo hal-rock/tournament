@@ -51,7 +51,7 @@ if (_cu13 / "bin" / "nvcc").exists():
     os.environ["CUDA_HOME"] = str(_cu13)
 
 from prompts import build_prompt, outcome_token_ids
-from replication import expand_conditions
+from replication import WORDING_CHECK, expand_conditions, report_pilot_pairs
 
 OUT_ROOT = Path("outputs/replication")
 SANITY = ("The capital of France is Paris, and the capital of Germany is", "Berlin")
@@ -199,6 +199,10 @@ def main(argv=None):
     ap.add_argument("--pilot", type=int, help="score only this many pairs per condition (both orders), into pilot/")
     ap.add_argument("--with-pilot", type=int, help="first a --pilot of this many pairs for every condition, then the full "
                     "run, in one model load")
+    ap.add_argument("--wording", type=int, help="finding 8's wording check (replication.WORDING_CHECK) on this many of "
+                    "report_patch's pilot pairs, into pilot/<stage>__wording__<condition>; default with a pilot of a "
+                    "final (instruct) stage: the pilot's size")
+    ap.add_argument("--wording-only", action="store_true", help="only the wording check (with --wording)")
     ap.add_argument("--engine", choices=["vllm", "hf"], default="vllm")
     ap.add_argument("--chunk", type=int, default=10000, help="prompts per generate() call (progress lines)")
     ap.add_argument("--top-sample", type=int, default=600, help="prompts per condition that get the top-k pass")
@@ -217,16 +221,26 @@ def main(argv=None):
         unknown = set(a.conditions) - set(conditions)
         assert not unknown, f"not in this stage's conditions: {sorted(unknown)}"
         conditions = [c for c in conditions if c in a.conditions]
-    # Each pass: (pairs, results dir, is a pilot, conditions still to do there).
+    # Each pass: (pairs, results dir, is a pilot, conditions still to do there, file name prefix).
     passes = []
-    for n in ([a.pilot] if a.pilot else ([a.with_pilot] if a.with_pilot else []) + [None]):
+    for n in ([] if a.wording_only else [a.pilot] if a.pilot else ([a.with_pilot] if a.with_pilot else []) + [None]):
         pairs = all_pairs[:n] if n else all_pairs
         res_dir = out / ("pilot" if n else "results")
         todo = [c for c in conditions if not (res_dir / f"{a.stage}__{c}.csv.gz").exists()]
         print(f"{key}/{a.stage}{' pilot' if n else ''}: {len(tasks)} tasks, {len(pairs)} pairs, {2 * len(pairs)} prompts "
               f"per condition; {len(todo)} of {len(conditions)} conditions to do", flush=True)
         if todo:
-            passes.append((pairs, res_dir, bool(n), todo))
+            passes.append((pairs, res_dir, bool(n), todo, f"{a.stage}__"))
+    n_wording = (a.wording if a.wording is not None  # --wording 0: none
+                 else a.pilot or a.with_pilot if a.stage == "instruct" and not a.conditions else None)
+    if n_wording:  # before the full run, so the wordings are known early
+        todo = [c for c in WORDING_CHECK if not (out / "pilot" / f"{a.stage}__wording__{c}.csv.gz").exists()]
+        print(f"{key}/{a.stage} wording check: {n_wording} report pilot pairs, {len(todo)} of {len(WORDING_CHECK)} "
+              f"conditions to do", flush=True)
+        if todo:
+            passes.insert(1 if passes and passes[0][2] else 0,
+                          (report_pilot_pairs(len(tasks), 1000, cfg.get("seed", 0))[:n_wording], out / "pilot", True, todo,
+                           f"{a.stage}__wording__"))
     if not passes:
         return
 
@@ -237,12 +251,12 @@ def main(argv=None):
     template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]), trust_remote_code=trc,
                                                        revision=revision_of(cfg, m.get("chat_template_from", m["name"])))
     system_prompt = cfg.get("system_prompt", "none")
-    outcome_ids = {c: tuple(outcome_token_ids(c, tokenizer)) for c in conditions}
+    outcome_ids = {c: tuple(outcome_token_ids(c, tokenizer)) for _, _, _, todo, _ in passes for c in todo}
     probe_ids, _ = render_condition("assistant", m, tasks, all_pairs[:1], template_tokenizer, tokenizer, system_prompt)
     uses_bos = tokenizer.bos_token_id is not None and probe_ids[0][0] == tokenizer.bos_token_id
 
     run = None
-    if any(not is_pilot for _, _, is_pilot, _ in passes) and not a.no_wandb:
+    if any(not is_pilot for _, _, is_pilot, _, _ in passes) and not a.no_wandb:
         import wandb
         from matskit.io import provenance
         id_file = out / f"{a.stage}.wandb_id"
@@ -260,7 +274,7 @@ def main(argv=None):
     print(f"loaded {m['name']} in {(time.time() - t_load) / 60:.1f} min", flush=True)
     sanity_check(engine, tokenizer, m, uses_bos)
 
-    for pairs, res_dir, is_pilot, todo in passes:
+    for pairs, res_dir, is_pilot, todo, prefix in passes:
         ordered = pairs + [(j, i) for i, j in pairs]
         for condition in todo:
             ids, example = render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt)
@@ -289,10 +303,11 @@ def main(argv=None):
                     prompt_tokens=len(ids[k]),
                     top_tokens=json.dumps([[tokenizer.decode([t]), round(math.exp(v), 4)] for t, v in top]),
                 ))
-            path = res_dir / f"{a.stage}__{condition}.csv.gz"
+            path = res_dir / f"{prefix}{condition}.csv.gz"
             write_csv_gz(path, rows)
             n_tokens = sum(map(len, ids))
-            summary = dict(stage=a.stage, condition=condition, prompts=len(ids), seconds=round(seconds, 1),
+            summary = dict(stage=a.stage, condition=condition, wording=prefix.endswith("wording__"), prompts=len(ids),
+                           seconds=round(seconds, 1),
                            prompt_tokens_per_s=round(n_tokens / seconds), mean_prompt_tokens=round(n_tokens / len(ids), 1),
                            median_mass=round(statistics.median(r["outcome_mass"] for r in rows), 4),
                            top=json.loads(rows[0]["top_tokens"])[:3], pilot=is_pilot, engine=a.engine,
