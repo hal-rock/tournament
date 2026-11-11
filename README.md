@@ -4779,6 +4779,29 @@ decisions and the costs are in `PLAN_replication.md`.
   "unstable" or "not interpretable" with its key number;
 - results in this section, model by model.
 
+**Engine gate (2026-11-11): passed.** vLLM 0.33 scored Gemma 4 31B-it on one H100 SXM (RunPod, $4.81;
+`configs/replication/validate-gemma4-31b.yaml`, W&B group `replication-validate`), compared with its HF runs on H100 SXM
+(`scripts/compare_engines.py`):
+
+| condition | HF run | utilities r | SD ratio | per-prompt log-odds: r, median \|diff\| |
+|---|---|---|---|---|
+| assistant | `wgtt5s6v` | 1.0000 | 0.999 | 0.9999, 0.09 |
+| user_choice | `wgtt5s6v` | 1.0000 | 1.003 | 0.9989, 0.13 |
+| predict_user | `wgtt5s6v` | 1.0000 | 1.001 | 0.9997, 0.13 |
+| coinflip | `3k3rfilv` | 0.9999 | 1.003 | 0.9977, 0.13 |
+| coinflip@evil+user | `3k3rfilv` | 0.9995 | 1.001 | 0.9963, 0.13 |
+| assistant@evil+user | `3k3rfilv` | 1.0000 | 0.999 | 0.9993, 0.13 |
+| coinflip@evil+self | `2id90q0w` | 0.9998 | 1.002 | 0.9972, 0.13 |
+| predict_user@evil+self | `2id90q0w` | 0.9999 | 0.999 | 0.9979, 0.13 |
+| user_choice@evil | `flh8j1gb` | 0.9998 | 1.004 | 0.9962, 0.13 |
+
+- Every prompt had the same token count in both, so both engines read the same ids.
+- Per prompt, the log-odds differ by bf16 rounding (median ~0.1 nats, rare single prompts up to 18), the same scale as HF's
+  batched vs unbatched scores.
+- All nine clear even the same-engine bar (r ≥ 0.999).
+- Each 30,000-prompt condition took ~4 minutes. Persona conditions (~270 tokens) took no longer than plain ones (~120),
+  because prefix caching computes the shared persona text once.
+
 **Clarifications, before any replication data (2026-11-11).** These came from implementing the calls
 (`replication_analysis.py`), which reproduces the earlier sections' numbers on their Llama 70B and Gemma 31B runs (245 values;
 `replication/legacy_check.md`):
