@@ -1,0 +1,50 @@
+# Nemotron-4 340B: base vs. Instruct. NVIDIA released only NeMo checkpoints; these are mgoin's HF conversions (Instruct
+# from the v1.0 .nemo, Base from v1.2). Notes and sources: replication/onboarding/nemotron4-340b.md; checked by
+# tests/test_replication_nemotron4_340b.py, which should also pass on the node before scoring (it pins the tokenizer).
+# - turn_format: NeMo's SFT chat format (gpt_sft_chat_dataset.py, NeMo v1.22.0 / v2.0.0rc0), which is NVIDIA's model card
+#   format: "<extra_id_0>System\n{system}\n<extra_id_1>User\n{prompt}\n<extra_id_1>Assistant\n", the system empty by
+#   default (no system prompt) and the persona there for the persona conditions. mgoin's chat template differs (lowercase
+#   roles, other newlines) and is not used.
+# - No BOS: NeMo's SFT config has add_bos: false, NeMo-Aligner's DPO adds none, the card's example sets add_BOS=False, and
+#   <s>'s input-embedding row is ~0 in both checkpoints (never an input).
+# - The leading "▁" (SentencePiece's whitespace symbol) is NeMo's token 252303. NeMo tokenizes the whole string with
+#   raw SentencePiece (sentencepiece_legacy: false), whose dummy prefix puts that piece before the first <extra_id_0>.
+#   mgoin's Instruct tokenizer adds no dummy prefix, and is otherwise identical to SentencePiece on every prompt here.
+# - tokenizer_from: the base uses the Instruct's tokenizer. Both repos (and NVIDIA's) hold the same SentencePiece model,
+#   but the base's tokenizer.json puts a "▁" after every special token ("<extra_id_1>", "▁User") and turns
+#   " heads" into two tokens.
+# - bf16, 682 GB per model; max_position_embeddings 4096, partial rotary 0.5, squared ReLU, LayerNorm1P.
+wandb_project: tournament
+group: replication
+run_name: nemotron4-340b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+
+models:
+  - name: mgoin/Nemotron-4-340B-Base-hf
+    stage: base
+    tokenizer_from: mgoin/Nemotron-4-340B-Instruct-hf
+    turn_format: &nemotron
+      user: "▁<extra_id_0>System\n\n<extra_id_1>User\n"
+      system: "▁<extra_id_0>System\n{system}\n<extra_id_1>User\n"
+      reply: "\n<extra_id_1>Assistant\n"
+    download:
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "generation_config.json",
+                       "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]
+      gb: 682.1
+    # The longest prompt over the 48 conditions is 600 tokens (coinflip@contrarian+roleplay on the two longest tasks).
+    vllm: &vllm {tensor_parallel_size: 8, dtype: bfloat16, max_model_len: 1024, gpu_memory_utilization: 0.9,
+                 enable_prefix_caching: true}
+    conditions: base
+  - name: mgoin/Nemotron-4-340B-Instruct-hf
+    stage: instruct
+    turn_format: *nemotron
+    download:
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "generation_config.json",
+                       "tokenizer.model", "tokenizer_config.json", "special_tokens_map.json"]
+      gb: 682.1
+    vllm: *vllm
+    conditions: final

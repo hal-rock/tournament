@@ -1,0 +1,35 @@
+# Llama 3.1 405B: base vs. Instruct, the same release (unlike the sweep's 70B pair, 3.1 base vs. 3.3 Instruct; there is
+# no 3.3 405B). Notes: replication/onboarding/llama-405b.md; checked by tests/test_replication_llama_405b.py.
+# - The Instruct's chat template is byte-identical to the 3.3 70B Instruct's the sweep used. It always writes a system
+#   block with two date lines ("Cutting Knowledge Date: December 2023", "Today Date: 26 Jul 2024": a fixed default, no
+#   clock). system_prompt: none strips that block; a persona's system block keeps the date lines, as in the earlier
+#   persona runs.
+# - The base borrows that template. Its tokenizer.json is identical to the Instruct's.
+# - Gated repos (HF_TOKEN). Only the top-level HF safetensors: original/ holds Meta's consolidated weights twice (mp8, mp16).
+# - bf16, 811.7 GB per model: TP 8 leaves ~100 GB of weights per GPU (B200 180 GB, H200 141 GB).
+wandb_project: tournament
+group: replication
+run_name: llama-405b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+
+models:
+  - name: meta-llama/Llama-3.1-405B
+    stage: base
+    chat_template_from: meta-llama/Llama-3.1-405B-Instruct
+    download: &download
+      allow_patterns: ["model-*.safetensors", "model.safetensors.index.json", "config.json", "generation_config.json",
+                       "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]
+      gb: 811.7
+    # The longest prompt over the 48 conditions is 576 tokens (coinflip@contrarian+roleplay on the two longest tasks).
+    vllm: &vllm {tensor_parallel_size: 8, dtype: bfloat16, max_model_len: 1024, gpu_memory_utilization: 0.9,
+                 enable_prefix_caching: true}
+    conditions: base
+  - name: meta-llama/Llama-3.1-405B-Instruct
+    stage: instruct
+    download: *download
+    vllm: *vllm
+    conditions: final
