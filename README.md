@@ -4486,6 +4486,14 @@ refusals of harmful tasks either. So the next step is to go back to narrow reado
 turns read " up", and how strongly. OLMo is dropped: its coinflip effect looks weird and non-robust. The models are Gemma 4
 31B-it, Llama 3.3 70B and GLM-4.5-Air.
 
+**Three findings.**
+- **The preference names a task:** asked which outcome it would have preferred without "heads or tails", every model answers with a
+  task ("Task A").
+- **The guess follows the preference:** asked to guess the withheld outcome, the Assistant picks the one that gives it its preferred
+  task, nearly as reliably as it states the preference (r 0.88-0.91 with its utilities; 91-94% of clear pairs).
+- **Every answer reads " up", a little more than before:** swapping it moves every answer against the coin, reversing up to 7%
+  (Gemma), against up to 3.6% for "heads or tails?". The guess reads more than that question in all three models. See "Results".
+
 ### Design (written 2026-11-10, before any data)
 
 - **Two new questions.** Both keep the report prompt (the coinflip word for word through "it came up", then ". But before I tell
@@ -4559,6 +4567,115 @@ turns read " up", and how strongly. OLMo is dropped: its coinflip effect looks w
   - GLM: short preference "land on" bold, the guess bold.
   - Gemma: the guess bold; the short preference with "the coin to land on" bold (0.38, the only Gemma prefill above 0.2).
 - Gemma's bold answers also put 0.07-0.28 on "He" and "T" (capitalized "Heads" / "Tails" or "Task"), which the readout leaves out.
+
+### Results (2026-11-11)
+
+Runs, W&B group `coin_report`, same 1,000 pilot pairs and arms as the earlier report runs:
+- Gemma: guess `7vblk8tv`, short preference `jtlbqu7f` (1x H100, $4.35);
+- Llama: short preference "it to land on" bold `o3jwywnx` and plain `s34sqmpc`, the original short question bold `89o0izw8`, guess
+  bold `ly2ng7l0` and plain `t9pw6yn1` (two 1x H200 pods, $15.96);
+- GLM: short preference bold `zu4wux9u`, guess bold `or7e7o6a` (2x H200, $7.62).
+
+$27.93 in all, wording checks included. The "heads or tails?" rows reuse the earlier runs (`fb5mlfde`, `8eod0l7e`, `3y2ncefl`; same GPU types).
+Full output in `outputs/coin_report/questions.txt`, table in `outputs/coin_report/questions.csv` (`coin_questions.py`).
+
+**Checks.** The self-patch changes nothing (exactly 0) in every run. Batch shape moves single prompts by at most 0.5 nats, the same in every arm.
+Over all 2,000 prompts the median heads/tails mass is lower than in the 24-pair check for two runs. Gemma's short preference is at 0.31,
+GLM's at 0.49, and Llama's original short question (bold) drops to 0.12, below the 0.2 bar, so that run is reported but not interpreted.
+
+![three questions](figures/coin_report_questions.png)
+
+| model | question (prefill) | mass | r(answer, A_i - A_j) | r(answer, coin) | slope on coin | swap " up": r(d, c) | share [95% CI] | κ [95% CI] | r(d, c) early / late half | whole line: share |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Gemma 4 31B | preferred, "heads or tails?" (bold) | 0.99 | 0.91 | 0.82 | 1.58 | -0.97 | 3.6% [3.4, 3.7] | 0.057 [0.056, 0.058] | -0.01 / -0.98 | 10.7% |
+| | preferred, short ("the coin to land on **") | **0.31** | 0.91 | 0.83 | 1.49 | -0.93 | **7.2%** [6.8, 7.6] | 0.111 [0.107, 0.115] | -0.01 / -0.93 | 13.5% |
+| | guess (bold) | 0.92 | 0.90 | 0.82 | 1.06 | -0.96 | **6.6%** [6.3, 6.8] | 0.068 [0.067, 0.070] | +0.02 / -0.96 | 17.5% |
+| Llama 3.3 70B | preferred, "heads or tails?" (bold) | 1.00 | 0.93 | 0.86 | 4.03 | -0.40 | 0.3% [0.3, 0.4] | 0.014 [0.012, 0.017] | -0.43 / -0.44 | 5.4% |
+| | preferred, short ("it to land on **") | 0.92 | 0.92 | 0.85 | 3.33 | -0.63 | 0.8% [0.8, 0.9] | 0.030 [0.028, 0.033] | -0.64 / -0.54 | 8.3% |
+| | guess (bold) | 1.00 | 0.91 | **0.94** | 3.28 | -0.75 | 1.4% [1.3, 1.5] | 0.045 [0.042, 0.048] | -0.76 / -0.65 | **22.8%** |
+| GLM-4.5-Air | preferred, "heads or tails?" (bold) | 0.97 | 0.88 | 0.83 | 3.59 | -0.42 | 1.6% [1.4, 1.9] | 0.050 [0.040, 0.059] | -0.21 / -0.68 | 7.8% |
+| | preferred, short ("it to land on **") | **0.49** | 0.85 | 0.80 | 2.60 | -0.19 | 0.9% [0.6, 1.3] | 0.005 [-0.006, 0.016] | -0.12 / -0.32 | 9.9% |
+| | guess (bold) | 0.95 | 0.88 | 0.85 | 1.97 | -0.45 | **3.6%** [3.1, 4.2] | 0.046 [0.034, 0.058] | -0.35 / -0.54 | 15.6% |
+
+Llama's other prefills, for the wording question:
+- Short preference, "it to land on" plain (mass 0.65): no read of " up" (r(d, c) +0.05, share 0.0%).
+- Guess, plain (mass 0.47): reads it (r(d, c) -0.56, share 0.8%).
+- The original short question, bold (mass 0.12, not interpreted): r(d, c) -0.70, share 1.8%.
+
+**The guess without patching** (Hal's second question). A_i - A_j is the Assistant's sweep utilities, c the coin at " up":
+
+![guess bias](figures/coin_report_guess_bias.png)
+
+| model | r(guess, A_i - A_j) | guess favors the Assistant's preferred task (pairs with \|A_i - A_j\| > 2) | mean \|guess\| (nats, pair effect) | partial r(answer, c \| A): guess / "heads or tails?" preference | partial r(answer, A \| c): guess / preference |
+|---|---|---|---|---|---|
+| Gemma 4 31B | 0.90 | 92% | 4.8 (preference 8.2) | 0.22 / 0.17 | 0.65 / 0.70 |
+| Llama 3.3 70B | 0.91 | 91% | 5.1 (preference 6.5) | **0.66** / 0.20 | 0.46 / 0.68 |
+| GLM-4.5-Air | 0.88 | 94% | 1.0 (preference 1.8) | 0.34 / 0.29 | 0.54 / 0.56 |
+
+**Predictions:**
+1. The short preference question still tracks the Assistant, r >= 0.8: **yes** (0.91, 0.92, 0.85), though only with the prefills
+   added after the wording check.
+2. It reads " up" more without "heads or tails" in at least two models, and stays below 10%: **yes**. Gemma reads 7.2% against 3.6%, and
+   Llama 0.8% against 0.3%. GLM goes the other way: 0.9% against 1.6%, with κ's CI including 0. All are below 10%.
+3. The guess leans toward the Assistant's preference with r > 0.3 in all three: **yes, strongly** (0.88-0.91). Its slope on the coin
+   is smaller than the short preference answer's: **yes in Gemma and GLM** (1.06 vs 1.49, 1.97 vs 2.60); **in Llama they're equal**
+   (3.28 vs 3.33, CIs overlap).
+4. The guess reads " up" more than the short preference does: **two of three**. Llama (1.4% vs 0.8%) and GLM (3.6% vs 0.9%) yes;
+   Gemma no (6.6% vs 7.2%). Against the "heads or tails?" preference, the guess reads more in all three.
+5. Wording: the bold prefill has the higher mass in Gemma and GLM for both questions: **yes**. Llama's plain prefill reaches 0.5:
+   **only for the short preference** (0.65); the plain guess is at 0.47.
+
+### Findings
+
+1. **Asked which outcome it would have preferred, without "heads or tails", every model names a task** ("I would have preferred
+   **Task A**"). For the Assistant, the outcome it prefers is the task it brings. Only a prefill asking where the coin should land
+   gets heads/tails answers, and Gemma and GLM still put half or more of their probability on "Task" even then.
+2. **The Assistant's guess at an outcome it can't know follows its preference about as closely as its stated preference does**
+   (r 0.88-0.91 against 0.88-0.93). Where the Assistant clearly prefers one task, the guess favors the outcome that assigns that task
+   in 91-94% of pairs. The guesses are confident: half a pair's log-odds difference averages 4.8 nats in Gemma and 5.1 in Llama.
+   They are somewhat less extreme than the stated preference (Gemma 4.8 vs 8.2 nats), but in the same direction. So the
+   same lean as the coin's, toward the outcome that gives the Assistant the task it would prefer, appears when the Assistant
+   predicts the outcome in its own voice.
+3. **Llama's guess is closer to its own coin than to its preference.** Holding the Assistant's preference fixed, it still tracks
+   the coin at " up" (partial r 0.66, against 0.20 for its preference answer). Swapping the whole coin line reverses 22.8% of it.
+   Gemma's and GLM's guesses look like their preference answers (partial r 0.22 and 0.34).
+4. **Every new answer reads " up", in heads/tails code, and it's still small.** The swap moves every primary answer against the coin
+   (r(d, c) -0.19 to -0.96). It reverses at most 7.2% (Gemma), against at most 3.6% for the "heads or tails?" question.
+   - The guess reads more than the "heads or tails?" preference in all three: 6.6% vs 3.6%, 1.4% vs 0.3%, 3.6% vs 1.6%.
+   - The short preference reads more in Gemma and Llama, and less in GLM.
+5. **Per nat of coin swapped in (κ), Gemma's and GLM's guesses read " up" about as much as their "heads or tails?" preference**
+   (0.068 vs 0.057; 0.046 vs 0.050). Their larger share comes from a guess with a smaller coin-aligned part overall (slope 1.06 vs 1.58,
+   1.97 vs 3.59), not from reading " up" harder. Llama's guess does read it harder: 0.045 vs 0.014, three times as much.
+6. **The guess leans on the coin line as a whole more than the preference does.** Swapping the whole line reverses 15.6-22.8% of
+   the guess, against 5.4-10.7% of the "heads or tails?" preference.
+7. **Llama's " up" path depends on the prefill again.** The plain "it to land on" answer (mass 0.65) doesn't read " up" (+0.05),
+   while the bold one does (-0.63). The same happened with "heads or tails?" (+0.13 vs -0.40). The plain guess does read it (-0.56).
+8. **Depth:** as before, only the late blocks carry it in Gemma; both halves in Llama; more the late half in GLM.
+
+### What this says
+
+- **Hal's first idea** was that dropping "heads or tails" from the question makes the answer rely more on " up". It's partly
+  supported, but the clean version can't be read. Without "heads or tails" the models answer with a task. With a prefill that asks
+  for the face, Gemma and Llama read " up" about twice as much, while GLM doesn't.
+- **The guess reads " up"** more than the "heads or tails?" preference does in all three models, and the whole coin line much more.
+  That fits " up"'s state being, in part, a prediction of the outcome word, which a later question about the outcome reuses. But
+  it's still a small part (1.4-6.6%).
+- **The striking result is the unpatched guess.** Asked to guess a fair coin it can't see, the Assistant guesses the outcome that
+  gives it the task it prefers, nearly as reliably as it states that preference. This is the coinflip effect's lean, in the
+  Assistant's own voice and as an explicit prediction. So the coin's bias is not something that appears only when the model
+  predicts the user's text. A prediction about an outcome tracks the Assistant's preference wherever it is asked.
+- In Llama the guess also carries the coin's own prediction beyond that preference. In Gemma and GLM it looks like the preference
+  itself.
+
+### Caveats (from the results)
+
+- The short preference uses different prefills by model ("the coin to land on" for Gemma, "it to land on" for Llama and GLM).
+  Its heads/tails mass is low in Gemma (0.31) and GLM (0.49); the rest is mostly "Task".
+- Bold answers are read at "heads" / "tails". Gemma also puts 0.07-0.28 on "He" / "T", which could be capitalized faces or "Task".
+- A_i - A_j is a fitted utility, less specific to each pair than the coin measured on these prompts. That favors the coin in the
+  partial correlations, but comparisons between questions within a model use the same A and c.
+- The guess may be read by the model partly as "which would you pick"; nothing here separates that from a belief about the coin.
+- 1,000 pilot pairs; exploratory beyond the five predictions.
 
 ## Replication across larger models
 

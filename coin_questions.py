@@ -9,6 +9,7 @@ Each run goes through coin_report.analyze_run (full per-run report and scatter),
   figures/coin_report_guess_bias.png    per model: the unpatched guess against the Assistant's preference, pair by pair
 
 Usage: uv run python coin_questions.py outputs/coin_report/<model>/<run>/rows.jsonl [...]
+       uv run python coin_questions.py --plot-only   (redraw the summary figure from questions.csv)
 """
 
 from __future__ import annotations
@@ -64,15 +65,20 @@ def plot_summary(rows, path):
                     continue
                 (r,) = sel
                 e, lo, hi = scale * r[stat], scale * r[stat + "_lo"], scale * r[stat + "_hi"]
+                low = r["mass"] < 0.5  # hollow: most of the answer's probability isn't on heads / tails
                 ax.errorbar(i + (k - (len(groups) - 1) / 2) * 0.22, e, yerr=[[e - lo], [hi - e]], color=plotstyle.SERIES[k],
-                            marker="os^"[k], ms=7, lw=0, elinewidth=1.5, mec="white", mew=0.8,
+                            marker="os^"[k], ms=7, lw=0, elinewidth=1.5, mec=plotstyle.SERIES[k] if low else "white",
+                            mfc="white" if low else plotstyle.SERIES[k], mew=1.5 if low else 0.8,
                             label=SERIES_NAME[g] if i == 0 else None)
         ax.axhline(0, color=RULE, lw=0.8)
         ax.set_xticks(range(len(families)), [LABEL[f] for f in families], fontsize=9)
         ax.set_title(title, color=INK, fontsize=10)
         style(ax)
-    handles, names = axes[0].get_legend_handles_labels()
-    fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(groups))
+    from matplotlib.lines import Line2D  # filled proxies: the first model's marker may be hollow
+    handles = [Line2D([], [], color=plotstyle.SERIES[k], marker="os^"[k], ms=7, lw=0, mec="white", mew=0.8)
+               for k in range(len(groups))]
+    fig.legend(handles, [SERIES_NAME[g] for g in groups], frameon=False, fontsize=9, loc="lower center", ncol=len(groups))
+    fig.text(0.99, 0.01, "hollow: median heads/tails mass below 0.5", ha="right", va="bottom", fontsize=8, color=INK_2)
     fig.suptitle("Which Assistant answers read the coin's \" up\": three questions (primary wording per model)", color=INK)
     fig.tight_layout(rect=(0, 0.07, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
@@ -102,6 +108,12 @@ def plot_guess_bias(results, path):
 
 def main():
     plotstyle.setup()
+    if sys.argv[1:] == ["--plot-only"]:  # redraw the summary figure from questions.csv
+        import csv
+        rows = [{k: (v == "True" if k == "primary" else v if k in ("family", "report", "question", "prefill") else float(v))
+                 for k, v in r.items()} for r in csv.DictReader(open("outputs/coin_report/questions.csv"))]
+        plot_summary(rows, Path("figures/coin_report_questions.png"))
+        return
     results = [analyze_run(Path(p)) for p in sys.argv[1:]]
     rows = []
     for family, report, D, est, lo, hi in results:
