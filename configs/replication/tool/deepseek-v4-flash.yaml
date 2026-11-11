@@ -1,7 +1,7 @@
 # The coin as a tool call (README, "The coin as a tool call"; toolframe.py) on deepseek-ai/DeepSeek-V4-Flash: the instruct entry of
 # configs/replication/deepseek-v4-flash.yaml (see its notes) plus tool_family, and the tool run's 15 conditions. Its Assistant
 # (A_0, A_p) and user-turn coin come from that run (outputs/replication/deepseek-v4-flash/).
-# - DeepSeek V4's reference encoder (encoding/encoding_dsv4.py, chat mode); the user-turn conditions' turn_format writes the same markers, with the tool declaration here in the system slot.
+# - DeepSeek V4's reference encoder (encoding/encoding_dsv4.py, chat mode), with the tool declaration in the system slot; turn_format (the same markers) is kept for the scorer's plain BOS probe, unused by tool conditions.
 # - Longest prompt: 719 tokens (coinflip_tool@evil+user, on-policy generation incl. 64 new tokens, on the three longest tasks).
 wandb_project: tournament
 group: replication
@@ -14,6 +14,10 @@ top_k_tokens: 5
 models:
 - name: deepseek-ai/DeepSeek-V4-Flash
   stage: instruct
+  turn_format:
+    user: <｜begin▁of▁sentence｜><｜User｜>
+    reply: <｜Assistant｜></think>
+    system: <｜begin▁of▁sentence｜>{system}<｜User｜>
   download:
     allow_patterns:
     - model-*.safetensors
