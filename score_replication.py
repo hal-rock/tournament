@@ -18,7 +18,9 @@ Outputs, under outputs/replication/<run_name>/:
 - progress.jsonl: one line per finished condition (prompts, seconds, prompt tokens per second, median outcome mass);
 - <stage>.wandb_id: the stage's W&B run (group `replication`), resumed after a restart. Each results file is uploaded to it as
   soon as its condition finishes;
-- pilot/<stage>__<condition>.csv.gz: --pilot runs (no W&B), with the top tokens of every prompt.
+- pilot/<stage>__<condition>.csv.gz: --pilot runs (no W&B), with the top tokens of every prompt;
+- onpolicy/<stage>__<condition>.jsonl: --onpolicy, for tool-call conditions (toolframe.py): the Assistant's own greedy reply
+  where the prompt prefills the call, and whether it calls the tool (one line per prompt, then a summary in progress.jsonl).
 
 Conditions whose results file exists are skipped, so a crashed stage resumes where it stopped.
 """
@@ -50,7 +52,7 @@ _cu13 = Path(sysconfig.get_paths()["purelib"]) / "nvidia" / "cu13"
 if (_cu13 / "bin" / "nvcc").exists():
     os.environ["CUDA_HOME"] = str(_cu13)
 
-from prompts import build_prompt, outcome_token_ids
+from prompts import CONDITIONS, build_prompt, outcome_token_ids, split_condition
 from replication import WORDING_CHECK, expand_conditions, report_pilot_pairs
 
 OUT_ROOT = Path("outputs/replication")
@@ -120,6 +122,14 @@ class VllmEngine:
         return [sorted(((t, v.logprob) for t, v in out.outputs[0].logprobs[0].items()), key=lambda x: -x[1])[:k]
                 for out in outs]
 
+    def generate(self, prompts, max_tokens):
+        """Greedy continuations of each prompt, as token ids."""
+        from vllm import SamplingParams
+        from vllm.inputs import TokensPrompt
+        params = SamplingParams(max_tokens=max_tokens, temperature=0, detokenize=False)
+        outs = self.llm.generate([TokensPrompt(prompt_token_ids=ids) for ids in prompts], params, use_tqdm=False)
+        return [list(out.outputs[0].token_ids) for out in outs]
+
 
 class HfEngine:
     """transformers, split over the visible GPUs as tournament.py does (one GPU busy at a time: a fallback, and the
@@ -159,11 +169,12 @@ def revision_of(cfg, repo):
     return revs.get(repo)
 
 
-def render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt):
+def render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt, prefill=True):
     """Token ids of every ordered pair's prompt, and the first prompt's text (for the log)."""
-    texts = [build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
+    texts = [build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt, prefill,
                           turn_format=m.get("turn_format"), close_think=m.get("close_think", False),
-                          strip_think=m.get("strip_think", False)) for a, b in ordered]
+                          strip_think=m.get("strip_think", False), tool_family=m.get("tool_family"),
+                          tool_repo=m.get("tool_repo", m["name"])) for a, b in ordered]
     ids = tokenizer(texts, add_special_tokens=False).input_ids
     return ids, texts[0]
 
@@ -191,6 +202,31 @@ def sanity_check(engine, tokenizer, m, uses_bos):
         raise SystemExit(f"{m['name']}: non-finite log-probs in the sanity check")
 
 
+def onpolicy_check(engine, conditions, m, tasks, pairs, template_tokenizer, tokenizer, system_prompt, a, out):
+    """The tool-call conditions prefill the Assistant's call to flip_coin. Is that what it does on its own? Its greedy reply
+    to the same user turn (thinking off, as read), and whether it calls the tool (toolframe.calls_tool)."""
+    import toolframe
+    for condition in conditions:
+        ids, example = render_condition(condition, m, tasks, pairs, template_tokenizer, tokenizer, system_prompt,
+                                        prefill=False)
+        replies = engine.generate(ids, a.onpolicy_tokens)
+        rows = []
+        for (i, j), reply in zip(pairs, replies):
+            text = tokenizer.decode(reply, skip_special_tokens=False)
+            rows.append(dict(condition=condition, first=tasks[i]["id"], second=tasks[j]["id"], reply=text,
+                             calls=toolframe.calls_tool(m["tool_family"], text),
+                             call_first=toolframe.calls_tool(m["tool_family"], text, first=True)))
+        path = out / "onpolicy" / f"{a.stage}__{condition}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        summary = dict(stage=a.stage, condition=condition, onpolicy=len(rows), calls=sum(r["calls"] for r in rows),
+                       call_first=sum(r["call_first"] for r in rows), example=rows[0]["reply"][:200],
+                       time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        print(f"  onpolicy: {json.dumps(summary)}", flush=True)
+        with open(out / "progress.jsonl", "a") as f:
+            f.write(json.dumps(summary) + "\n")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("config")
@@ -203,6 +239,9 @@ def main(argv=None):
                     "report_patch's pilot pairs, into pilot/<stage>__wording__<condition>; default with a pilot of a "
                     "final (instruct) stage: the pilot's size")
     ap.add_argument("--wording-only", action="store_true", help="only the wording check (with --wording)")
+    ap.add_argument("--onpolicy", type=int, help="for each tool-call condition, the Assistant's own greedy reply on this many "
+                    "of the sweep's pairs, into onpolicy/ (does it call the tool?), before the scoring")
+    ap.add_argument("--onpolicy-tokens", type=int, default=64)
     ap.add_argument("--engine", choices=["vllm", "hf"], default="vllm")
     ap.add_argument("--chunk", type=int, default=10000, help="prompts per generate() call (progress lines)")
     ap.add_argument("--top-sample", type=int, default=600, help="prompts per condition that get the top-k pass")
@@ -241,7 +280,9 @@ def main(argv=None):
             passes.insert(1 if passes and passes[0][2] else 0,
                           (report_pilot_pairs(len(tasks), 1000, cfg.get("seed", 0))[:n_wording], out / "pilot", True, todo,
                            f"{a.stage}__wording__"))
-    if not passes:
+    onpolicy = [c for c in conditions if CONDITIONS[split_condition(c)[0]].get("tool") == "call"
+                and not (out / "onpolicy" / f"{a.stage}__{c}.jsonl").exists()] if a.onpolicy else []
+    if not passes and not onpolicy:
         return
 
     from transformers import AutoTokenizer
@@ -273,6 +314,9 @@ def main(argv=None):
     engine = (VllmEngine if a.engine == "vllm" else HfEngine)(m, top_k)
     print(f"loaded {m['name']} in {(time.time() - t_load) / 60:.1f} min", flush=True)
     sanity_check(engine, tokenizer, m, uses_bos)
+    if onpolicy:
+        onpolicy_check(engine, onpolicy, m, tasks, all_pairs[:a.onpolicy], template_tokenizer, tokenizer, system_prompt,
+                       a, out)
 
     for pairs, res_dir, is_pilot, todo, prefix in passes:
         ordered = pairs + [(j, i) for i, j in pairs]

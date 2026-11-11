@@ -1,0 +1,49 @@
+# The coin as a tool call (README, "The coin as a tool call"; toolframe.py) on meta-llama/Llama-3.1-405B-Instruct: the instruct entry of
+# configs/replication/llama-405b.yaml (see its notes) plus tool_family, and the tool run's 15 conditions. Its Assistant
+# (A_0, A_p) and user-turn coin come from that run (outputs/replication/llama-405b/).
+# - Llama 3.1's template: the tool in the first user message, and the system block its template writes for tools (Environment: ipython, the knowledge-cutoff and date lines) kept; the user-turn conditions dropped it.
+# - Longest prompt: 602 tokens (coinflip_tool@contrarian, on-policy generation incl. 64 new tokens, on the three longest tasks).
+wandb_project: tournament
+group: replication
+run_name: tool-llama-405b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: meta-llama/Llama-3.1-405B-Instruct
+  stage: instruct
+  download:
+    allow_patterns:
+    - model-*.safetensors
+    - model.safetensors.index.json
+    - config.json
+    - generation_config.json
+    - tokenizer.json
+    - tokenizer_config.json
+    - special_tokens_map.json
+    gb: 811.7
+  vllm:
+    tensor_parallel_size: 8
+    dtype: bfloat16
+    max_model_len: 1024
+    gpu_memory_utilization: 0.9
+    enable_prefix_caching: true
+  conditions:
+  - coinflip_tool
+  - coinflip_tools_declared
+  - assistant_tools_declared
+  - coinflip_tool@evil
+  - coinflip_tool@evil+user
+  - coinflip_tool@evil+self
+  - coinflip_tool@slacker
+  - coinflip_tool@slacker+user
+  - coinflip_tool@slacker+self
+  - coinflip_tool@contrarian
+  - coinflip_tool@contrarian+user
+  - coinflip_tool@contrarian+self
+  - coinflip_tool@strategist
+  - coinflip_tool@strategist+user
+  - coinflip_tool@strategist+self
+  tool_family: llama

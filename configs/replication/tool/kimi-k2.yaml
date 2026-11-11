@@ -1,0 +1,53 @@
+# The coin as a tool call (README, "The coin as a tool call"; toolframe.py) on moonshotai/Kimi-K2-Instruct: the instruct entry of
+# configs/replication/kimi-k2.yaml (see its notes) plus tool_family, and the tool run's 15 conditions. Its Assistant
+# (A_0, A_p) and user-turn coin come from that run (outputs/replication/kimi-k2/).
+# - Kimi K2's own tool format (tool_declare turn, call id functions.flip_coin:0); its default identity block is stripped, as in every other condition.
+# - Longest prompt: 507 tokens (coinflip_tool@evil, on-policy generation incl. 64 new tokens, on the three longest tasks).
+wandb_project: tournament
+group: replication
+run_name: tool-kimi-k2
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: moonshotai/Kimi-K2-Instruct
+  stage: instruct
+  revision: fd1984e2b7a3350dbf7305fe73a4ede25c14de50
+  trust_remote_code: true
+  download:
+    allow_patterns:
+    - '*.safetensors'
+    - model.safetensors.index.json
+    - config.json
+    - generation_config.json
+    - tokenizer_config.json
+    - tiktoken.model
+    - tokenization_kimi.py
+    - configuration_deepseek.py
+    - modeling_deepseek.py
+    - chat_template.jinja
+    gb: 1029.2
+  vllm:
+    tensor_parallel_size: 8
+    max_model_len: 1024
+    gpu_memory_utilization: 0.9
+    enable_prefix_caching: true
+  conditions:
+  - coinflip_tool
+  - coinflip_tools_declared
+  - assistant_tools_declared
+  - coinflip_tool@evil
+  - coinflip_tool@evil+user
+  - coinflip_tool@evil+self
+  - coinflip_tool@slacker
+  - coinflip_tool@slacker+user
+  - coinflip_tool@slacker+self
+  - coinflip_tool@contrarian
+  - coinflip_tool@contrarian+user
+  - coinflip_tool@contrarian+self
+  - coinflip_tool@strategist
+  - coinflip_tool@strategist+user
+  - coinflip_tool@strategist+self
+  tool_family: kimi

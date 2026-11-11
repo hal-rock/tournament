@@ -147,3 +147,50 @@ def test_final_pilot_adds_the_wording_check(tmp_path, monkeypatch):
     FakeEngine.calls = 0
     sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--wording", "3", "--wording-only"])
     assert FakeEngine.calls == 0  # all done already
+
+
+def test_onpolicy_generates_on_the_open_turn_of_call_conditions_only(tmp_path, monkeypatch):
+    """--onpolicy: each tool-call condition's Assistant turn left open (build_prompt prefill=False), a greedy reply per pair,
+    read by toolframe.calls_tool; the scoring then runs on the prefilled prompts as usual."""
+    from transformers import AutoTokenizer
+    llama = "meta-llama/Llama-3.1-405B-Instruct"
+    tok = AutoTokenizer.from_pretrained(llama)
+    call = tok('<|python_tag|>{"name": "flip_coin", "parameters": {}}<|eom_id|>', add_special_tokens=False).input_ids
+    seen = []
+
+    class Gen(FakeEngine):
+        def generate(self, prompts, max_tokens):
+            seen.extend(prompts)
+            return [call if k % 2 == 0 else tok("No.", add_special_tokens=False).input_ids for k in range(len(prompts))]
+
+    monkeypatch.setattr(sr, "OUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(sr, "VllmEngine", Gen)
+    monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
+    conds = ["coinflip_tool", "coinflip_tool@evil+user", "assistant_tools_declared"]
+    cfg = dict(wandb_project="tournament", group="replication", run_name="fake", tasks_file="data/tasks_n300_max500_seed0.jsonl",
+               seed=0, max_pairs=15000, system_prompt="none", top_k_tokens=2,
+               models=[dict(name=llama, stage="instruct", tool_family="llama", conditions=conds)])
+    path = tmp_path / "fake.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    sr.main([str(path), "--stage", "instruct", "--pilot", "2", "--onpolicy", "3", "--no-wandb", "--wording", "0"])
+
+    tasks = sr.read_jsonl("data/tasks_n300_max500_seed0.jsonl")
+    pairs = sr.select_pairs(300, 15000, 0)[:3]
+    out = tmp_path / "out" / "fake"
+    assert sorted(p.name for p in (out / "onpolicy").iterdir()) == ["instruct__coinflip_tool.jsonl",
+                                                                   "instruct__coinflip_tool@evil+user.jsonl"]
+    expected = [tok(build_prompt(c, tasks[i]["prompt"], tasks[j]["prompt"], tok, prefill=False, tool_family="llama",
+                                 tool_repo=llama), add_special_tokens=False).input_ids
+                for c in conds[:2] for i, j in pairs]
+    assert seen == expected
+    rows = [json.loads(l) for l in open(out / "onpolicy" / "instruct__coinflip_tool.jsonl")]
+    assert [r["calls"] for r in rows] == [True, False, True] == [r["call_first"] for r in rows]
+    assert [(r["first"], r["second"]) for r in rows] == [(tasks[i]["id"], tasks[j]["id"]) for i, j in pairs]
+    progress = [json.loads(l) for l in open(out / "progress.jsonl")]
+    assert [p.get("calls") for p in progress[:2]] == [2, 2] and len(progress) == 5
+    # the scoring that follows reads the prefilled call's result
+    r = _rows(out / "pilot" / "instruct__coinflip_tool.csv.gz")[0]
+    i, j = sr.select_pairs(300, 15000, 0)[0]
+    assert int(r["prompt_tokens"]) == len(tok(build_prompt("coinflip_tool", tasks[i]["prompt"], tasks[j]["prompt"], tok,
+                                                           tool_family="llama", tool_repo=llama),
+                                              add_special_tokens=False).input_ids)

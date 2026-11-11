@@ -1,0 +1,50 @@
+# The coin as a tool call (README, "The coin as a tool call"; toolframe.py) on arcee-ai/Trinity-Large-Thinking: the instruct entry of
+# configs/replication/trinity-large.yaml (see its notes) plus tool_family, and the tool run's 15 conditions. Its Assistant
+# (A_0, A_p) and user-turn coin come from that run (outputs/replication/trinity-large/).
+# - Trinity's template, which writes its default identity line and the tool instructions as a system block whenever tools are declared; the call follows an empty think block (close_think), as every Assistant turn.
+# - Longest prompt: 679 tokens (coinflip_tool@contrarian+user, on-policy generation incl. 64 new tokens, on the three longest tasks).
+wandb_project: tournament
+group: replication
+run_name: tool-trinity-large
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: arcee-ai/Trinity-Large-Thinking
+  stage: instruct
+  close_think: true
+  download:
+    allow_patterns:
+    - model-*.safetensors
+    - model.safetensors.index.json
+    - config.json
+    - generation_config.json
+    - tokenizer.json
+    - tokenizer_config.json
+    - special_tokens_map.json
+    - chat_template.jinja
+    gb: 797.3
+  vllm:
+    tensor_parallel_size: 8
+    dtype: bfloat16
+    max_model_len: 1024
+    gpu_memory_utilization: 0.9
+  conditions:
+  - coinflip_tool
+  - coinflip_tools_declared
+  - assistant_tools_declared
+  - coinflip_tool@evil
+  - coinflip_tool@evil+user
+  - coinflip_tool@evil+self
+  - coinflip_tool@slacker
+  - coinflip_tool@slacker+user
+  - coinflip_tool@slacker+self
+  - coinflip_tool@contrarian
+  - coinflip_tool@contrarian+user
+  - coinflip_tool@contrarian+self
+  - coinflip_tool@strategist
+  - coinflip_tool@strategist+user
+  - coinflip_tool@strategist+self
+  tool_family: trinity

@@ -1,0 +1,20 @@
+# The coin as a tool call (README, "The coin as a tool call") on the replication node: the five non-Nemotron finals, 15
+# conditions each (configs/replication/tool/<key>.yaml), one load per model. Each job first generates the Assistant's own
+# replies to the tool user turn (--onpolicy: 50 pairs per call condition, 64 tokens), then pilots every condition on 24
+# pairs, then scores the 15,000 pairs. No wording check (--wording 0). DeepSeek V4 Flash first: small, and it runs while the
+# larger repos finish downloading.
+gpus: 8
+disk_budget_gb: 3600
+max_downloads: 2
+score_python: /root/vllm-env/bin/python
+jobs:
+  - {name: tool-deepseek-v4-flash, config: configs/replication/tool/deepseek-v4-flash.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: tool-llama-405b, config: configs/replication/tool/llama-405b.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: tool-trinity-large, config: configs/replication/tool/trinity-large.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: tool-deepseek-v3, config: configs/replication/tool/deepseek-v3.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: tool-kimi-k2, config: configs/replication/tool/kimi-k2.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}

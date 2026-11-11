@@ -1,0 +1,47 @@
+# The coin as a tool call (README, "The coin as a tool call"; toolframe.py) on deepseek-ai/DeepSeek-V4-Flash: the instruct entry of
+# configs/replication/deepseek-v4-flash.yaml (see its notes) plus tool_family, and the tool run's 15 conditions. Its Assistant
+# (A_0, A_p) and user-turn coin come from that run (outputs/replication/deepseek-v4-flash/).
+# - DeepSeek V4's reference encoder (encoding/encoding_dsv4.py, chat mode); the user-turn conditions' turn_format writes the same markers, with the tool declaration here in the system slot.
+# - Longest prompt: 719 tokens (coinflip_tool@evil+user, on-policy generation incl. 64 new tokens, on the three longest tasks).
+wandb_project: tournament
+group: replication
+run_name: tool-deepseek-v4-flash
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: deepseek-ai/DeepSeek-V4-Flash
+  stage: instruct
+  download:
+    allow_patterns:
+    - model-*.safetensors
+    - model.safetensors.index.json
+    - config.json
+    - generation_config.json
+    - tokenizer.json
+    - tokenizer_config.json
+    gb: 159.6
+  vllm:
+    tensor_parallel_size: 4
+    dtype: bfloat16
+    max_model_len: 1024
+    gpu_memory_utilization: 0.9
+  conditions:
+  - coinflip_tool
+  - coinflip_tools_declared
+  - assistant_tools_declared
+  - coinflip_tool@evil
+  - coinflip_tool@evil+user
+  - coinflip_tool@evil+self
+  - coinflip_tool@slacker
+  - coinflip_tool@slacker+user
+  - coinflip_tool@slacker+self
+  - coinflip_tool@contrarian
+  - coinflip_tool@contrarian+user
+  - coinflip_tool@contrarian+self
+  - coinflip_tool@strategist
+  - coinflip_tool@strategist+user
+  - coinflip_tool@strategist+self
+  tool_family: deepseek4

@@ -56,7 +56,8 @@ REPLY_HEADER = {
 DOC_PREFIX = {OLMO3: "<|endoftext|>", OLMO3_BASE: "<|endoftext|>", GEMMA: "<bos>", GEMMA_BASE: "<bos>",
               LLAMA: "<|begin_of_text|>", LLAMA_BASE: "<|begin_of_text|>", GLM: "[gMASK]<sop>", GLM_BASE: "[gMASK]<sop>",
               DEEPSEEK: "<｜begin▁of▁sentence｜>", DEEPSEEK_BASE: "<｜begin▁of▁sentence｜>"}
-CHAT_CONDITIONS = [c for c in CONDITIONS if not CONDITIONS[c].get("raw")]
+# Tool conditions render each family's tool format and are checked in tests/test_toolframe.py.
+CHAT_CONDITIONS = [c for c in CONDITIONS if not CONDITIONS[c].get("raw") and not CONDITIONS[c].get("tool")]
 # Language conditions run only on some families (configs/languages/): Chinese only where 正面 and 反面 are single tokens.
 LANG_TOKENIZERS = {"zh": {GLM, GLM_BASE, DEEPSEEK, DEEPSEEK_BASE}}
 

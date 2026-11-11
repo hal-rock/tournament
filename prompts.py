@@ -135,6 +135,16 @@ for _name, (_question, _prefill) in _SHORT_QUESTIONS.items():
     CONDITIONS[_name] = dict(body=CONDITIONS["coinflip"]["body"] + _ASK + _question, prefill=_prefill,
                              outcomes=(" heads", " tails"))
     CONDITIONS[_name + "_bold"] = dict(body=CONDITIONS[_name]["body"], prefill=_prefill + " **", outcomes=("heads", "tails"))
+# The coin as a tool call (README, "The coin as a tool call"; toolframe.py), after ../coinflip's `tool` frame: the user asks
+# the Assistant to flip the coin with a declared `flip_coin` tool, the Assistant's turn is the prefilled call, and the tool's
+# result is read at its first token (`heads` / `tails`, no leading space). The user turn is the coinflip's, word for word,
+# except its last line. The "declared" conditions are the user-reported coin and the Assistant's own choice with the same tool
+# declared but unused: the controls for the tool block. A condition with "tool" is rendered by toolframe.build_tool_prompt.
+CONDITIONS["coinflip_tool"] = dict(
+    body=CONDITIONS["coinflip"]["body"].replace("Okay, I'm flipping the coin now ... it came up", "Okay, please flip the coin now."),
+    prefill=None, outcomes=("heads", "tails"), tool="call")
+CONDITIONS["coinflip_tools_declared"] = {**CONDITIONS["coinflip"], "tool": "declared"}
+CONDITIONS["assistant_tools_declared"] = {**CONDITIONS["assistant"], "tool": "declared"}
 # Rollouts with " up" swapped (README, "Rollouts with the coin's ' up' swapped"): the coin decides and the user asks for that
 # task, and the Assistant writes its reply (no prefill). The coinflip prompt word for word through "it came up", then the outcome.
 for _outcome, _task in (("heads", "A"), ("tails", "B")):
@@ -439,7 +449,8 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
 
 
 def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
-                 turn_format=None, close_think=False, strip_think=False, doc_prefix=None):
+                 turn_format=None, close_think=False, strip_think=False, doc_prefix=None, tool_family=None,
+                 tool_repo=None):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
@@ -451,6 +462,8 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     prefill; without it the prefill is the first words of the reasoning.
     strip_think: drop that "<think>" instead, so the reply has no think block at all.
     doc_prefix: the model's document-start token(s), which open a raw-text condition (no template).
+    tool_family, tool_repo: for a tool condition (CONDITIONS[...]["tool"]), the family's tool format and, for DeepSeek V4,
+    the repo of its reference encoder (toolframe.py).
     A condition "<condition>@<persona>[+placement]" adds the persona (see PLACEMENTS); as the system prompt, it replaces
     system_prompt (which must then be "none").
     """
@@ -471,6 +484,18 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
         assert doc_prefix is not None, f"{condition} is raw text and needs the model's doc_prefix"
         assert system_prompt == "none", "raw-text conditions have no system prompt"
         return doc_prefix + body
+    if spec.get("tool"):
+        import toolframe
+        assert tool_family is not None, f"{condition} is a tool condition and needs the model's tool_family"
+        assert system_prompt not in ("default",), "tool conditions render the template's own blocks"
+        if spec["tool"] == "call" and not prefill:  # the Assistant's turn left open: does it call the tool on its own?
+            return toolframe.generation_prompt(tool_family, template_tokenizer, body,
+                                               system=None if system_prompt == "none" else system_prompt,
+                                               close_think=close_think, ds_repo=tool_repo)
+        return toolframe.build_tool_prompt(spec["tool"], condition, body, template_tokenizer, tool_family,
+                                           system=None if system_prompt == "none" else system_prompt,
+                                           prefill=spec["prefill"] if prefill else None, close_think=close_think,
+                                           ds_repo=tool_repo)
     has_reply = spec["prefill"] is not None
     rendered = _render([{"role": "user", "content": body + SENTINEL}], template_tokenizer, has_reply,
                        system_prompt, turn_format, close_think, strip_think)
