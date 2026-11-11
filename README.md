@@ -4905,6 +4905,33 @@ are in `outputs/replication/llama-405b/`. No earlier HF run of this model exists
 - **Evil under roleplay:** the coin keeps a large pull toward the default Assistant (b_def 0.57, w_r 0.33). The 70B's
   w_r was 0.73.
 
+### Results: DeepSeek V3 (2026-11-11)
+
+**Run.** 8x B200: the base took 41 minutes and the final 68, each with a ~35-minute load. vLLM processes the FP8
+block-scaled weights at about 350 MB/s, against ~2 GB/s for Llama's bf16. Every cell passes the gates. Results are in
+`outputs/replication/deepseek-v3/`.
+
+![DeepSeek V3 calls](figures/deepseek-v3/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant | replicates: r(A_f, C_f) 0.93; base -0.07; r shift 0.93 | | | |
+| 2. user's choice more Assistant-like | replicates: d +0.18, r(A_f, U_f) 0.80 | | | |
+| 3. prediction of the user Assistant-like | replicates: r(A_f, P_f) 0.78, d_P +0.36; Δ -0.12 ("own choice") | | | |
+| 4. coin follows a user instruction | replicates (ρ_user 0.42) | replicates (0.45) | replicates (0.73) | not separable |
+| 5. self-description less than instruction | replicates (Δρ -0.36) | replicates (-0.49) | **doesn't** (+0.08) | not separable |
+| 6. coin follows roleplay | replicates (w_r 0.56) | replicates (0.75) | replicates (0.46) | replicates (0.64) |
+| 7. prediction follows self-description more | replicates | replicates | replicates | not separable |
+
+**First observations:**
+- **V3's coin tracks its Assistant as closely as Llama's** (0.93), and its base shows none of it (-0.07).
+- **Contrarian is again the exception on finding 5,** as in V4 Flash and Llama 405B: its self-description pulls the coin
+  at least as much as its instruction (ρ_self 0.81, ρ_user 0.73).
+- **Strategist barely moves V3's Assistant** under the system prompt (r 0.94 with its default), so findings 4, 5 and 7
+  can't be called for it.
+- **On finding 3's secondary measure, V3's user's choice follows the Assistant's own choice more than its prediction**
+  (Δ -0.12, "own choice"), like Gemma 4 31B in the predict-user section.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
