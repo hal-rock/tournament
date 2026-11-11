@@ -4989,9 +4989,10 @@ lowest of any cell so far, 0.93. Results are in `outputs/replication/trinity-lar
   showed it in the sweep, though the effect is larger here.
 - **With a coin this small, the persona pulls are tiny** (b 0.02-0.08 nats per SD). Several w and ρ ratios are
   undefined or unstable, so most persona calls here say little either way.
-- **Not run: the check that reading after an empty think block agrees with reading inside the reasoning** (OLMo Think:
-  r 0.99). It would take a ~25-minute reload and a minute of scoring. The coin, a user turn, doesn't depend on it; the
-  Assistant-turn readouts do.
+- **Reading after an empty think block agrees with reading inside the reasoning** (2026-11-11,
+  `configs/replication/validate-trinity-inreasoning.yaml`, prefill "<think>I'll choose Task"). The utilities agree at
+  r 0.992 for the Assistant's choice (SD ratio 1.02) and 0.990 for its prediction of the user (SD ratio 0.91). OLMo 3.1
+  Think gave r 0.99. So Trinity's Assistant-turn readouts don't depend on which reading is used.
 
 ### Results: Nemotron-4 340B (2026-11-11)
 
