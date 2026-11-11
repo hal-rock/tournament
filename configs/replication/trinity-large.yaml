@@ -3,12 +3,10 @@
 # - Thinking's template opens every reply with "<think>" and has no non-thinking mode. The Assistant is read after an
 #   empty think block (close_think, Hal 2026-11-10): "...<|im_start|>assistant\n<think></think>\n" + prefill, which is
 #   how the template renders a past turn with empty reasoning, byte for byte. No system block unless tools are passed.
-# - TrueBase's own template is just "{{ bos_token }}" + contents, so it borrows Thinking's. Its tokenizer has no
-#   <think> / </think> (ids 13 / 14 are <|reserved_special_0|> / <|reserved_special_1|> there, and it would split
-#   "<think>" into 3 BPE pieces), so it also borrows Thinking's tokenizer and reads the same ids as the final. Those two
-#   rows are at their initialization in TrueBase (scripts/replication_embed_rows_trinity-large.py).
-# - TrueBase is a 10T-token pre-anneal branch; Thinking was post-trained from Trinity-Large-Base (17T, annealed). The
-#   notes give the numbers; switching is a one-line change here (the tests read this file).
+# - The base is arcee-ai/Trinity-Large-Base, Thinking's actual parent (17T tokens, annealed; its card names it), not the
+#   10T pre-anneal TrueBase first listed (Hal, 2026-11-11; replication/onboarding/trinity-large.md has the numbers). Its own
+#   template is just "{{ bos_token }}" + contents, so it borrows Thinking's; it also reads with Thinking's tokenizer (ids 13
+#   / 14 are <think> / </think> in both, but the two vocabularies name ids 4-11 differently, which no prompt uses).
 # Checked by tests/test_replication_trinity_large.py.
 wandb_project: tournament
 group: replication
@@ -20,7 +18,7 @@ system_prompt: none
 top_k_tokens: 5
 
 models:
-  - name: arcee-ai/Trinity-Large-TrueBase
+  - name: arcee-ai/Trinity-Large-Base
     stage: base
     chat_template_from: arcee-ai/Trinity-Large-Thinking
     tokenizer_from: arcee-ai/Trinity-Large-Thinking

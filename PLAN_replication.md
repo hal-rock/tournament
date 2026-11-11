@@ -39,7 +39,7 @@ Sizes are from the Hugging Face API, 2026-11-10.
 | Llama 3.1 405B | `meta-llama/Llama-3.1-405B-Instruct` / `Llama-3.1-405B` | 811 GB bf16 | 8x H200 or 8x B200 | **There is no Llama 3.3 405B**, so this is 3.1. Base and final are the same release, unlike the 70B pair. Gated; Hal's token has access (checked). Download only `*.safetensors`, because the repos also hold `original/` weights (3–4.7 TB per repo in all). The base's header and eot rows are ~0.01 norm (top-level CLAUDE.md). Pin the date block, as in the sweep. |
 | DeepSeek V3 | `deepseek-ai/DeepSeek-V3` / `DeepSeek-V3-Base` | 689 GB FP8 | 8x H200 | V3-0324 is another post-train of the same base; the original V3 is the default. |
 | DeepSeek V4 Flash | `DeepSeek-V4-Flash` / `-Base` | 160 / 295 GB | 4x H200 (the sweep's setup) | A and C are already in the sweep (`lszrxqyq`, HF). vLLM support for `DeepseekV4ForCausalLM` is unchecked; if it's missing, it stays on HF with 4 GPUs. |
-| Trinity Large | `arcee-ai/Trinity-Large-Thinking` / `Trinity-Large-TrueBase` | 797 GB bf16 | 8x H200 | A thinking model. Read the Assistant after an empty think block, as for OLMo 3.1 Think, and check on the pilot pairs that this agrees with reading inside the reasoning. OLMo Think had no bleedthrough at all, so this model may test something different. TrueBase trained ChatML (CLAUDE.md). |
+| Trinity Large | `arcee-ai/Trinity-Large-Thinking` / `Trinity-Large-Base` (was TrueBase; switched 2026-11-11) | 797 GB bf16 | 8x H200 | A thinking model. Read the Assistant after an empty think block, as for OLMo 3.1 Think, and check on the pilot pairs that this agrees with reading inside the reasoning. OLMo Think had no bleedthrough at all, so this model may test something different. TrueBase trained ChatML (CLAUDE.md). |
 | Nemotron-4 340B | `mgoin/Nemotron-4-340B-Instruct-hf` / `mgoin/Nemotron-4-340B-Base-hf` | 682 GB bf16 | 8x H200 | NVIDIA released only NeMo checkpoints. These are community HF conversions (mgoin, a vLLM maintainer). Validate them at load with a pinned sanity prompt. The template always writes an `<extra_id_0>System` block. Check whether the base trained the `<extra_id_*>` rows. |
 
 Every model is onboarded the same way, mostly locally and with no GPU:
@@ -303,7 +303,7 @@ check-in.
 4. Fetch results as each model finishes, analyse (`replication_analysis.py <key>`), and commit figures and README results
    model by model.
 
-**Open question for Hal: the Trinity base.** Trinity-Large-Thinking's card names `arcee-ai/Trinity-Large-Base` as its base
+**Resolved (Hal, 2026-11-11): Trinity-Large-Base.** The question was: Trinity-Large-Thinking's card names `arcee-ai/Trinity-Large-Base` as its base
 (17T tokens, annealed; ordinary embedding rows cosine 0.9995 with Thinking). TrueBase is a 10T pre-anneal branch (cosine
 0.82). With TrueBase, finding 1's base-to-final change also includes 7T more pretraining tokens and the anneals. The
 options:

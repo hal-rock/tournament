@@ -71,6 +71,9 @@ Okay, I'm flipping the coin now ... it came up
 
 ## Which base: TrueBase is not Thinking's parent
 
+**Decided (Hal, 2026-11-11): the config now uses Trinity-Large-Base.** The rest of this section is the evidence as it
+was written.
+
 TrueBase is "a 10T-token pre-anneal checkpoint" that branches from the main run. Thinking's card says
 `base_model: arcee-ai/Trinity-Large-Base`. That checkpoint is 17T tokens, with mid-training anneals and context
 extension, and "Instruction data: None". It is the same size (797.3 GB) and was released the same day as TrueBase.

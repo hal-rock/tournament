@@ -4691,7 +4691,10 @@ decisions and the costs are in `PLAN_replication.md`.
   - `meta-llama/Llama-3.1-405B-Instruct` / `Llama-3.1-405B` (Meta released no 3.3 405B);
   - `deepseek-ai/DeepSeek-V3` / `DeepSeek-V3-Base`;
   - `deepseek-ai/DeepSeek-V4-Flash` / `-Base`;
-  - `arcee-ai/Trinity-Large-Thinking` / `Trinity-Large-TrueBase`, read after an empty think block as for OLMo 3.1 Think;
+  - `arcee-ai/Trinity-Large-Thinking` / `Trinity-Large-Base`, read after an empty think block as for OLMo 3.1 Think. The
+    base was first listed as `Trinity-Large-TrueBase`. Hal switched it on 2026-11-11, before any data, because
+    Thinking's card names Trinity-Large-Base (17T tokens, annealed) as its parent, while TrueBase is a 10T pre-anneal
+    branch;
   - Nemotron-4 340B Instruct / Base, through `mgoin/`'s HF conversions, with NVIDIA's documented prompt format.
 
   Each model's template choices, base-model chat-marker embedding norms and load checks are in
