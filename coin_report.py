@@ -46,6 +46,11 @@ def sweep_rows(family):
     """utilities.csv rows of the model's sweep (the default Assistant and coin, final stage)."""
     if family in FAMILIES:
         return load_sweep(family)[0]
+    replication = Path("outputs/replication") / family / "analysis" / "utilities.csv"
+    if replication.exists():  # a replication model (README, "Replication across larger models"): its own vLLM utilities
+        import csv
+        with open(replication, newline="") as fh:
+            return list(csv.DictReader(fh))
     assert family == "glm-4.5-air", family
     import csv
     import wandb
