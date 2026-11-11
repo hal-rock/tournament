@@ -68,3 +68,15 @@ def test_scoring_jobs_resolve_from_configs(tmp_path):
         rr.load_jobs(bad)
     assert j["cmd"].endswith(f"score_replication.py {tmp_path / 'x.yaml'} --stage base")
     assert str(j["results"][0]) == "outputs/replication/x/results/base__assistant.csv.gz"
+
+
+def test_existing_repo_directories_are_not_taken_as_downloaded(tmp_path, monkeypatch):
+    """A directory left by a tokenizer download must not count as the weights (or against the budget)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    for r in ("org/big1", "org/big2"):
+        rr.repo_dir(r).mkdir(parents=True)
+    jobs = [_job("first", 4, ["org/first"]), _job("big1", 8, ["org/big1"]), _job("big2", 8, ["org/big2"])]
+    assert rr.main([_jobs(tmp_path, jobs, budget=2000), "--fake", "--poll", "0.05"]) == 0
+    ev = _events(tmp_path)
+    assert ["DOWNLOAD_START", "org/first"] in ev and ["DOWNLOAD_START", "org/big1"] in ev

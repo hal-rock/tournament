@@ -158,9 +158,9 @@ def main(argv=None):
         if job_done(j):
             j["status"] = "done"
             log(f"JOB_SKIP {j['name']} (results exist)")
-    for r in sizes:  # weights already on disk from an earlier launch
-        if repo_dir(r).exists() and not a.fake:
-            dl.state[r] = "done"
+    # Every repo goes through snapshot_download, even one already on disk from an earlier launch: it returns at once for
+    # files it has. A repo directory alone proves nothing: tokenizer tests leave tiny ones (replication node, 2026-11-11,
+    # where four such directories counted 3.4 TB against the budget and stalled the queue).
     free, running = set(range(n_gpus)), {}
     Path("logs").mkdir(exist_ok=True)
 
