@@ -1,0 +1,52 @@
+# Kimi K2 (Moonshot AI; 1T-parameter MoE, 32B active, DeepSeek V3 architecture): base vs. the original Instruct
+# release (0711), for the cross-model replication (PLAN_replication.md). Onboarding notes:
+# replication/onboarding/kimi-k2.md; tests/test_replication_kimi_k2.py checks this file.
+# - Template: the Instruct's chat_template.jinja, read at the Instruct's pinned revision (also for the base's
+#   chat_template_from). "none" strips its default system block ("You are Kimi, an AI assistant created by Moonshot
+#   AI.") with the newline the template writes after it. No BOS anywhere: the template writes none and the tokenizer
+#   adds none. The 0711 release template renders every one of our prompts identically (tested).
+# - Tokenizer: tiktoken, through remote code (tokenization_kimi.py), hence trust_remote_code. Base and Instruct ship
+#   the same tiktoken.model and added tokens. Tokenize with tokenizer(text, add_special_tokens=False): the base's older
+#   tokenization_kimi.py turns "<|im_user|>" etc. into plain characters when encode() is called with no arguments.
+# - Revisions are pinned to what the tests checked: since release, the Instruct's template and tokenization_kimi.py
+#   have each had 7 versions, the last on 2026-01-30.
+# - Weights: FP8 e4m3 with 128x128 block scales (embeddings and LM head BF16), 1029.2 GB each, ~120.5 GiB per GPU at
+#   TP 8. Kimi-K2-Base reports 2.06 TB of storage on the Hub: that is git history (a 63-shard upload deleted by the
+#   2025-07-10 "clean repo" commit); the pinned revision holds only the 61 current shards.
+# - gpu_memory_utilization 0.9 suits 8x B200 (179 GiB each). On 8x H200 (140 GiB) it leaves ~6 GiB per GPU for
+#   activations and KV cache: raise it to 0.95 there.
+# - The base never trained the chat markers: their input rows are 0.0023x an ordinary row (reserved ids: the same).
+wandb_project: tournament
+group: replication
+run_name: kimi-k2
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+
+models:
+  - name: moonshotai/Kimi-K2-Base
+    stage: base
+    revision: ce72df012259dcc55d945e890f815fe7ef69159c
+    chat_template_from: moonshotai/Kimi-K2-Instruct
+    trust_remote_code: true
+    download:
+      allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, generation_config.json,
+                       tokenizer_config.json, tiktoken.model, tokenization_kimi.py, configuration_deepseek.py,
+                       modeling_deepseek.py]
+      gb: 1029.2
+    # The longest prompt over the 48 conditions is 554 tokens (coinflip@evil+roleplay with the two longest tasks).
+    vllm: &vllm {tensor_parallel_size: 8, max_model_len: 1024, gpu_memory_utilization: 0.9, enable_prefix_caching: true}
+    conditions: base
+  - name: moonshotai/Kimi-K2-Instruct
+    stage: instruct
+    revision: fd1984e2b7a3350dbf7305fe73a4ede25c14de50
+    trust_remote_code: true
+    download:
+      allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, generation_config.json,
+                       tokenizer_config.json, tiktoken.model, tokenization_kimi.py, configuration_deepseek.py,
+                       modeling_deepseek.py, chat_template.jinja]
+      gb: 1029.2
+    vllm: *vllm
+    conditions: final

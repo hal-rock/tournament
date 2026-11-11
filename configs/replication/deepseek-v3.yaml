@@ -1,0 +1,42 @@
+# DeepSeek V3 (671B MoE, 37B active): base vs. the original post-trained release (not V3-0324), for the
+# cross-model replication (PLAN_replication.md). Onboarding notes: replication/onboarding/deepseek-v3.md;
+# tests/test_replication_deepseek_v3.py checks this file.
+# - Template: the final's Jinja template (tokenizer_config.json), read at the final's pinned revision (also for the
+#   base's chat_template_from). It opens with BOS (<｜begin▁of▁sentence｜>), has no default system prompt, and writes a
+#   system message as bare text right after BOS (no marker). The user turn has no closing marker: the next turn's
+#   <｜Assistant｜> closes it. V3 has no thinking mode, so the generation prompt is just <｜Assistant｜>.
+# - Base and final ship byte-identical tokenizer.json and tokenizer_config.json. No remote code is needed
+#   (deepseek_v3 is native in transformers and vLLM).
+# - Weights: FP8 e4m3 with 128x128 block scales (embeddings and LM head BF16), 688.6 GB each, ~80 GiB per GPU at TP 8.
+#   That includes the multi-token-prediction module (layer 61; 15.2 GB in 3 shards of its own plus part of a 4th),
+#   which vLLM skips; it is downloaded anyway because HF's loader (the patching runs) opens every shard in the index.
+# - The base never trained <｜User｜> or <｜Assistant｜>: their input rows sit at the initialization scale (0.156x an
+#   ordinary row, like the padding rows past the tokenizer), and post-training left them there.
+wandb_project: tournament
+group: replication
+run_name: deepseek-v3
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+
+models:
+  - name: deepseek-ai/DeepSeek-V3-Base
+    stage: base
+    revision: afb92e1fa402c2be2a9eb085312bb02e0384d6c7
+    chat_template_from: deepseek-ai/DeepSeek-V3
+    download:
+      allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, tokenizer.json, tokenizer_config.json]
+      gb: 688.6
+    # The longest prompt over the 48 conditions is 557 tokens (coinflip@evil+roleplay with the two longest tasks).
+    vllm: &vllm {tensor_parallel_size: 8, max_model_len: 1024, gpu_memory_utilization: 0.9, enable_prefix_caching: true}
+    conditions: base
+  - name: deepseek-ai/DeepSeek-V3
+    stage: instruct
+    revision: e815299b0bcbac849fa540c768ef21845365c9eb
+    download:
+      allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, tokenizer.json, tokenizer_config.json]
+      gb: 688.6
+    vllm: *vllm
+    conditions: final
