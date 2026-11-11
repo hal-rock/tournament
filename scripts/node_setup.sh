@@ -16,6 +16,11 @@ uv pip install --python "$VENV/bin/python" "vllm==0.33.0" "transformers==5.17.0"
 # nvcc/crt/nvvm/cccl must match the 13.0 runtime headers torch pulls in; unpinned they resolve to newer ones (user-models).
 uv pip install --python "$VENV/bin/python" "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-crt==13.0.*" "nvidia-nvvm==13.0.*" \
     "nvidia-cuda-cccl==13.0.*"
+# FlashInfer's JIT links with -L$CUDA_HOME/lib64 -lcudart, but the pip CUDA tree has lib/ with only libcudart.so.13:
+# "ld: cannot find -lcudart" building fp4_quantization for B200 (DeepSeek V4 Flash, replication node 2026-11-11).
+CU13=$("$VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/nvidia/cu13
+[ -e "$CU13/lib64" ] || ln -s lib "$CU13/lib64"
+[ -e "$CU13/lib/libcudart.so" ] || ln -s libcudart.so.13 "$CU13/lib/libcudart.so"
 "$VENV/bin/python" - <<'EOF'
 import torch, transformers, vllm
 print(f"VLLM_ENV ok: vllm {vllm.__version__} torch {torch.__version__} (cuda {torch.version.cuda}) "
