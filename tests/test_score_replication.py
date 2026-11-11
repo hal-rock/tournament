@@ -1,0 +1,103 @@
+"""score_replication.py's bookkeeping, with a fake engine (no model): the pairs, the rows, resuming, the pilot files."""
+
+import gzip
+import csv
+import json
+import math
+
+import yaml
+
+import score_replication as sr
+import tournament
+from prompts import build_prompt, outcome_token_ids
+from replication import FINAL_CONDITIONS, BASE_CONDITIONS, expand_conditions
+
+TOK = "allenai/OLMo-2-0425-1B-Instruct"  # small tokenizer, already used by test_prompts
+
+
+def test_select_pairs_matches_tournament():
+    for n, k in ((300, 15000), (300, None), (10, 7)):
+        assert sr.select_pairs(n, k, 0) == tournament.select_pairs(n, k, 0)
+
+
+def test_condition_sets():
+    assert len(BASE_CONDITIONS) == 4 and len(FINAL_CONDITIONS) == 44 == len(set(FINAL_CONDITIONS))
+    assert expand_conditions("final") == FINAL_CONDITIONS and expand_conditions(["coinflip"]) == ["coinflip"]
+    for p in ("evil", "slacker", "contrarian", "strategist"):
+        for c in (f"coinflip@{p}", f"coinflip@{p}+user", f"predict_user@{p}+self", f"assistant@{p}+roleplay"):
+            assert c in FINAL_CONDITIONS
+
+
+class FakeEngine:
+    """log P(first) = -1 - (len(prompt) % 7) / 10, log P(second) = -2; the top token is the first outcome."""
+    calls = 0
+
+    def __init__(self, m, top_k):
+        pass
+
+    def score(self, prompts, outcome_ids):
+        FakeEngine.calls += 1
+        return [(-1 - (len(p) % 7) / 10, -2.0, outcome_ids[0], -1.0) for p in prompts]
+
+    def top_tokens(self, prompts, k):
+        return [[(42, -0.5), (43, -1.5)][:k] for _ in prompts]
+
+
+def _config(tmp_path, conditions):
+    cfg = dict(wandb_project="tournament", group="replication", run_name="fake", tasks_file="data/tasks_n300_max500_seed0.jsonl",
+               seed=0, max_pairs=15000, system_prompt="none", top_k_tokens=2,
+               models=[dict(name=TOK, stage="instruct", conditions=conditions)])
+    path = tmp_path / "fake.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    return path
+
+
+def _rows(path):
+    with gzip.open(path, "rt") as f:
+        return list(csv.DictReader(f))
+
+
+def test_pilot_rows_and_resume(tmp_path, monkeypatch):
+    monkeypatch.setattr(sr, "OUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(sr, "VllmEngine", FakeEngine)
+    monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
+    conds = ["assistant", "coinflip@contrarian+self"]
+    cfg = _config(tmp_path, conds)
+    sr.main([str(cfg), "--stage", "instruct", "--pilot", "3", "--no-wandb"])
+
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(TOK)
+    tasks = sr.read_jsonl("data/tasks_n300_max500_seed0.jsonl")
+    pairs = sr.select_pairs(300, 15000, 0)[:3]
+    ordered = pairs + [(j, i) for i, j in pairs]
+    for c in conds:
+        rows = _rows(tmp_path / "out" / "fake" / "pilot" / f"instruct__{c}.csv.gz")
+        assert len(rows) == 6
+        for (i, j), r in zip(ordered, rows):
+            assert (r["first"], r["second"]) == (tasks[i]["id"], tasks[j]["id"]) and r["condition"] == c
+            ids = tok(build_prompt(c, tasks[i]["prompt"], tasks[j]["prompt"], tok), add_special_tokens=False).input_ids
+            assert int(r["prompt_tokens"]) == len(ids)
+            assert math.isclose(float(r["log_odds"]), -1 - (len(ids) % 7) / 10 + 2)
+            assert math.isclose(float(r["outcome_mass"]), math.exp(float(r["logp_first"])) + math.exp(-2))
+            assert len(json.loads(r["top_tokens"])) == 2  # pilot rows all get the top-k pass
+    progress = [json.loads(l) for l in open(tmp_path / "out" / "fake" / "progress.jsonl")]
+    assert [p["condition"] for p in progress] == conds and all(p["pilot"] for p in progress)
+
+    # A second launch finds every file and loads nothing.
+    FakeEngine.calls = 0
+    sr.main([str(cfg), "--stage", "instruct", "--pilot", "3", "--no-wandb"])
+    assert FakeEngine.calls == 0
+
+
+def test_full_run_keeps_top_k_only_on_the_sample(tmp_path, monkeypatch):
+    monkeypatch.setattr(sr, "OUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(sr, "VllmEngine", FakeEngine)
+    monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
+    cfg = _config(tmp_path, ["coinflip"])
+    sr.main([str(cfg), "--stage", "instruct", "--no-wandb", "--top-sample", "5", "--chunk", "7000"])
+    rows = _rows(tmp_path / "out" / "fake" / "results" / "instruct__coinflip.csv.gz")
+    assert len(rows) == 30000
+    assert [len(json.loads(r["top_tokens"])) for r in rows[:6]] == [2] * 5 + [1]
+    from transformers import AutoTokenizer
+    heads, tails = outcome_token_ids("coinflip", AutoTokenizer.from_pretrained(TOK))
+    assert json.loads(rows[10]["top_tokens"])[0][0] == AutoTokenizer.from_pretrained(TOK).decode([heads])
