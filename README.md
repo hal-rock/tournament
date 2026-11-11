@@ -4961,6 +4961,38 @@ bolds its answer, as GLM and Qwen did in the sweep). That is above the 0.2 floor
   on finding 5 says nothing.
 - **Finding 7's evil cell is unstable:** P's b_def + b_per CI includes 0.
 
+### Results: Trinity Large Thinking (2026-11-11)
+
+**Run.** 8x B200: the base took 40 minutes and the final 35, with loads of 39 and 22 minutes. Scoring is fast here (~14 s
+per condition, ~13B parameters active). Every cell passes the gates; the final coin's split-half reliability is the
+lowest of any cell so far, 0.93. Results are in `outputs/replication/trinity-large/`.
+
+![Trinity calls](figures/trinity-large/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant | **doesn't**: r(A_f, C_f) 0.45, below the base's 0.76; r shift 0.25 | | | |
+| 2. user's choice more Assistant-like | replicates: d +0.08, r(A_f, U_f) 0.88 | | | |
+| 3. prediction of the user Assistant-like | replicates: r(A_f, P_f) 0.75, d_P +0.13 | | | |
+| 4. coin follows a user instruction | replicates (b_per +0.02) | doesn't | doesn't | doesn't |
+| 5. self-description less than instruction | replicates (Δρ -0.31) | doesn't (ratio undefined) | doesn't (ratio undefined) | doesn't (-0.13, CI includes 0) |
+| 6. coin follows roleplay | replicates (b_per +0.07) | doesn't | replicates (+0.07) | replicates (+0.04) |
+| 7. prediction follows self-description more | **doesn't** (-3.64) | replicates | **doesn't** (-6.33) | unstable |
+
+**First observations:**
+- **The thinking model's coin barely tracks its Assistant.** The final coin's SD is 0.20 nats against the Assistant's 2.41
+  (OLMo 3.1 Think: 0.17 and 3.02). It correlates less with the Assistant than the base's coin does. This is what OLMo 3.1
+  Think showed, and what I predicted for Trinity. Finding 1 fails on the drop from base (r shift 0.25 still clears its
+  bar).
+- **Trinity-Large-Base, the annealed base, is already Assistant-like:** Assistant-format SD 2.20, and its coin tracks it at
+  r 0.76. Its card says it had no instruction data. It joins Gemma 4, Qwen 3.5 35B-A3B and V4 Flash, whose bases already
+  showed it in the sweep, though the effect is larger here.
+- **With a coin this small, the persona pulls are tiny** (b 0.02-0.08 nats per SD). Several w and ρ ratios are
+  undefined or unstable, so most persona calls here say little either way.
+- **Not run: the check that reading after an empty think block agrees with reading inside the reasoning** (OLMo Think:
+  r 0.99). It would take a ~25-minute reload and a minute of scoring. The coin, a user turn, doesn't depend on it; the
+  Assistant-turn readouts do.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
