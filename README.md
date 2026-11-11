@@ -5209,8 +5209,10 @@ above 0 and the share above 0.
   guess reads it almost deterministically (r -0.91).
 - **The guess reads " up" more than the preference in every model:** shares 0.8-9.0% against 0.1-2.6%. The "Shorter
   questions" section found the same in the earlier models.
-- **The `ctrl` patch** (the "OK, " prompt's " up": the same mapping, a foreign activation) moves no answer, with shares
-  between -0.2% and +0.3%. So the swap's effect follows the coin's content at " up", not the disruption of patching.
+- **The `ctrl` patch** (the "OK, " prompt's " up": the same mapping, a foreign activation) moves the answers little.
+  - Its shares are -0.2% to +0.3%, except V4 Flash's guess at 1.1% (against that cell's swap share of 5.4%; V4 runs in HF
+    with batch-shape differences up to ~1.75 nats).
+  - So the swap's effect follows the coin's content at " up", not the disruption of patching.
 - **The Task A/B control stays at or near null,** as in the earlier models. Two small exceptions:
   - Kimi's swap share is 0.3% with a CI just above 0 (r(d, coin) -0.08).
   - DeepSeek V3's κ is slightly negative (-0.021, CI below 0) though its share is 0.0%.
