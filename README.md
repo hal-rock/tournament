@@ -4879,6 +4879,32 @@ decisions and the costs are in `PLAN_replication.md`.
 - **Slacker's coin goes against the persona** under the user instruction and the roleplay framing (b_per -0.19 to -0.30),
   and follows the default Assistant (b_def +0.26). That is the opposite of Llama and Gemma's slacker coins.
 
+### Results: Llama 3.1 405B (2026-11-11)
+
+**Run.** 8x B200: the base took 18 minutes, the final 134, each with a ~6.5-minute load. Every cell passes the gates. Results
+are in `outputs/replication/llama-405b/`. No earlier HF run of this model exists, so there's no engine comparison.
+
+![Llama 405B calls](figures/llama-405b/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant | replicates: r(A_f, C_f) 0.91; base -0.07; r shift 0.91 | | | |
+| 2. user's choice more Assistant-like | replicates: d +0.49, r(A_f, U_f) 0.93 | | | |
+| 3. prediction of the user Assistant-like | replicates: r(A_f, P_f) 0.87, d_P +0.52; Δ +0.00 ("similar") | | | |
+| 4. coin follows a user instruction | replicates (ρ_user 1.16) | replicates (0.48) | replicates (0.52) | replicates (0.50) |
+| 5. self-description less than instruction | replicates (Δρ -0.38) | replicates (-0.40) | **doesn't** (+0.28: ρ_self 0.80 > ρ_user 0.52) | replicates (-0.12) |
+| 6. coin follows roleplay | replicates (w_r 0.33) | replicates (0.74) | replicates (1.19) | replicates (0.82) |
+| 7. prediction follows self-description more | replicates | replicates | replicates | replicates |
+
+**First observations** (descriptive):
+- **Llama 405B looks like Llama 3.3 70B.** In the earlier sections the 70B had r(A_f, C_f) 0.92, roleplay w_r 0.73-0.74, and
+  ρ_user 0.74 for evil. All 25 calls but one replicate.
+- **The exception is contrarian's self-description.** It pulls the coin more than the instruction does (ρ_self 0.80 vs
+  ρ_user 0.52). A user who says they're drawn to unpopular choices moves the coin toward contrarian picks more than a
+  request for the AI to be contrarian does.
+- **Evil under roleplay:** the coin keeps a large pull toward the default Assistant (b_def 0.57, w_r 0.33). The 70B's
+  w_r was 0.73.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
