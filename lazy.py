@@ -20,6 +20,7 @@ CIs are 95% task bootstraps within origin, one set of resamples for every model 
   outputs/lazy/<family>/gate/<run>/ each pod's re-scored plain coinflip, fit on its own
   outputs/lazy/lazy.csv             one row per model, persona and phrasing: every statistic with its CI, and the calls
   outputs/lazy/pooled.csv           one row per model: the phrasing contrasts over personas
+  outputs/lazy/cross.csv            exploratory (added after the data): matched vs mismatched personas, persona-specific transfer
   outputs/lazy/report.txt           (written by redirecting stdout)
   figures/lazy_*.png
 
@@ -129,6 +130,57 @@ def stats(V, noise, origins, benign):
         out += [*means, means[0] - means[1]]
     out += [b0, pearson(a0, c0), gap(V["A0"]), gap(V["C0"])]
     return np.array(out, float)
+
+
+# Exploratory, added after all four models' data (not pre-registered): the personas' changes in the Assistant are largely
+# shared (r(dA_p, dA_q) 0.5-0.8), so rho could come from a generic "any character" shift rather than each persona's own tastes.
+# Per phrasing: the mean rho over matched personas (the diagonal of r(dC_p, dA_q)), over mismatched ones (off-diagonal), their
+# difference, the mean r(dA_p, dA_q) over pairs, and the persona-specific transfer: r(dC_p - mean of the other four dC,
+# dA_p - mean of the other four dA), per persona and averaged.
+CROSS = ("matched", "mismatched", "matched_minus", "shared_a", "specific", *(f"specific_{p}" for p in PERSONAS))
+XSTATS = tuple(f"{f}:{s}" for f in PHRASINGS for s in CROSS)
+XK = {name: j for j, name in enumerate(XSTATS)}
+
+
+def cross_stats(V, origins):
+    """XSTATS over arrays of the same (possibly resampled) tasks."""
+    arb = np.isin(origins, ARB)
+    a0, c0 = V["A0"][arb], V["C0"][arb]
+    off = ~np.eye(len(PERSONAS), dtype=bool)
+    out = []
+    for f in PHRASINGS:
+        dA = [resid(V[f"A:{p}:{f}"][arb], a0) for p in PERSONAS]
+        dC = [resid((V[f"C:{p}:{f}"] - V["C0"])[arb], a0) for p in PERSONAS]
+        R = np.array([[pearson(c, a) for a in dA] for c in dC])
+        AA = np.array([[pearson(a, b) for b in dA] for a in dA])
+        others = lambda d, i: d[i] - np.mean([d[j] for j in range(len(d)) if j != i], axis=0)
+        spec = [pearson(others(dC, i), others(dA, i)) for i in range(len(PERSONAS))]
+        out += [np.diag(R).mean(), R[off].mean(), np.diag(R).mean() - R[off].mean(), AA[off].mean(), np.mean(spec), *spec]
+    return np.array(out, float)
+
+
+def plot_specific(xcells, labels, path):
+    """Per model: matched, mismatched and persona-specific transfer for each phrasing (exploratory)."""
+    fig, axes = plt.subplots(1, len(xcells), figsize=(3.9 * len(xcells), 3.6), sharey=True, squeeze=False)
+    kinds = (("matched", "same persona"), ("mismatched", "other personas"), ("specific", "persona-specific parts"))
+    for ax, (family, cell) in zip(axes[0], xcells.items()):
+        est, (lo, hi) = cell["est"], ci(cell["boot"])
+        for i, (k, _) in enumerate(kinds):
+            for f in PHRASINGS:
+                _mark(ax, i + OFFSET[f], est, lo, hi, XK[f"{f}:{k}"], plotstyle.SERIES[i], FILL[f])
+        ax.axhline(0, color=RULE, ls="--", lw=1, zorder=1)
+        ax.set_xticks(range(len(kinds)), [name for _, name in kinds], color=INK, fontsize=8.5)
+        ax.set_title(labels[family], color=INK, fontsize=10)
+        style(ax)
+    axes[0, 0].set_ylabel("r(coin's change, Assistant's change)\nmean over personas", color=INK, fontsize=9)
+    handles = [plt.Line2D([], [], color=INK_2, marker="o", lw=0, ms=7, mfc=INK_2 if FILL[f] else "white", mec=INK_2,
+                          mew=1.4, label=PHRASING_LABEL[f]) for f in PHRASINGS]
+    fig.legend(handles=handles, frameon=False, fontsize=9, loc="lower center", ncol=2)
+    fig.suptitle("Exploratory: does the coin follow each persona's own change, or a change all lazy personas share?\n"
+                 "(the coin's change against the same persona's Assistant, other personas' Assistants, and each persona's "
+                 "change minus the other four's mean; 95% CIs)", color=INK, fontsize=10.5)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    plotstyle.save(fig, path.stem, path.parent)
 
 
 def cell_call(est, lo, hi, p, f):
@@ -253,7 +305,7 @@ def main():
     out = Path("outputs/lazy")
     out.mkdir(parents=True, exist_ok=True)
     runs = personas.collect_runs("lazy")
-    data, cells, labels, gates, tops, passed = {}, {}, {}, [], {}, {}
+    data, cells, xcells, labels, gates, tops, passed = {}, {}, {}, {}, [], {}, {}
     ids0 = resamples = None
     for family in args.models:
         labels[family] = label = MODEL_INFO[MODELS[family]][0]
@@ -294,6 +346,8 @@ def main():
                     V[f"{who}:{p}:{f}"] = N[f"instruct/{c}"]
                     noise[f"{who}:{p}:{f}"] = (1 - summary[f"instruct/{c}/reliability"]) * N[f"instruct/{c}"].var()
         data[family] = V
+        xcells[family] = dict(est=cross_stats(V, origins),
+                              boot=np.array([cross_stats({k: v[i] for k, v in V.items()}, origins[i]) for i in resamples]))
         cells[family] = dict(est=stats(V, noise, origins, benign),
                              boot=np.array([stats({k: v[i] for k, v in V.items()}, noise, origins[i], benign[i])
                                             for i in resamples]))
@@ -328,6 +382,20 @@ def main():
             row |= {s: est[K[s]], f"{s}_lo": lo[K[s]], f"{s}_hi": hi[K[s]]}
         pooled.append(row)
 
+    print("\nExploratory, added after the data: matched vs mismatched personas, and the persona-specific transfer")
+    xtable = []
+    for family, cell in xcells.items():
+        est, (lo, hi) = cell["est"], ci(cell["boot"])
+        for f in PHRASINGS:
+            row = dict(model=labels[family], phrasing=f)
+            print(f"  {labels[family]:14} {f:9} " + "  ".join(
+                f"{s} {est[XK[f'{f}:{s}']]:+.2f} [{lo[XK[f'{f}:{s}']]:+.2f}, {hi[XK[f'{f}:{s}']]:+.2f}]" for s in CROSS[:5]))
+            print(f"  {'':14} {'':9} specific by persona: " + "  ".join(
+                f"{p} {est[XK[f'{f}:specific_{p}']]:+.2f}" for p in PERSONAS))
+            for s in CROSS:
+                row |= {s: est[XK[f"{f}:{s}"]], f"{s}_lo": lo[XK[f"{f}:{s}"]], f"{s}_hi": hi[XK[f"{f}:{s}"]]}
+            xtable.append(row)
+
     print("\nExploratory, where the probability goes (mean over prompts, tokens logged in each top 5):")
     for family, by_cell in tops.items():
         for c, top in by_cell.items():
@@ -335,6 +403,8 @@ def main():
 
     write_csv(out / "lazy.csv", table)
     write_csv(out / "pooled.csv", pooled)
+    write_csv(out / "cross.csv", xtable)
+    plot_specific(xcells, labels, Path("figures/lazy_specific.png"))
     plot_overview(cells, labels, Path("figures/lazy_overview.png"))
     plot_shifts(cells, labels, Path("figures/lazy_shifts.png"))
     origins = task_arrays(rows)[1]

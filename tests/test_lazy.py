@@ -136,3 +136,27 @@ def test_phrasing_call():
     lo, hi = np.percentile(boot, 2.5, axis=0), np.percentile(boot, 97.5, axis=0)
     assert lazy.phrasing_call(lo, hi, "ma") == '"you are" moves it more'
     assert lazy.phrasing_call(lo, hi, "mc") == '"you are" moves it more'
+
+
+def test_cross_stats_separates_shared_from_specific():
+    """Exploratory cross-persona statistic: a change every persona shares gives matched = mismatched and no persona-specific
+    transfer; independent changes per persona give matched > mismatched and specific transfer."""
+    import lazy
+    rng = np.random.default_rng(3)
+    n = 300
+    origins = np.array(["ALPACA", "MATH", "WILDCHAT", "STRESS_TEST", "BAILBENCH"] * (n // 5))
+    a = rng.normal(size=n)
+    e = lambda: 0.05 * rng.normal(size=n)
+    for shared in (True, False):
+        V = {"A0": a + e(), "C0": 0.8 * a + e()}
+        common = rng.normal(size=n)
+        for p in lazy.PERSONAS:
+            P = common if shared else rng.normal(size=n)
+            for f in lazy.PHRASINGS:
+                V[f"A:{p}:{f}"], V[f"C:{p}:{f}"] = a + P + e(), 0.8 * a + 0.4 * P + e()
+        x = lazy.cross_stats(V, origins)
+        g = lambda s: x[lazy.XK[f"youare:{s}"]]
+        if shared:
+            assert abs(g("matched") - g("mismatched")) < 0.05 and abs(g("specific")) < 0.3
+        else:
+            assert g("matched") > 0.9 and abs(g("mismatched")) < 0.15 and g("specific") > 0.9

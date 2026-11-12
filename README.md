@@ -5957,6 +5957,17 @@ coinflip? And does it matter whether they're given as an identity ("You are ..."
 ("In your next message, answer as ...", the "if asked" lead without "if asked what you prefer")? Hal is mostly interested in
 the WildChat, Alpaca and MATH tasks, the most arbitrary of the five sources.
 
+**One word is enough, in three of four models.**
+- **The Assistant:** every lazy persona moves its choices, in every model and phrasing. The toddler moves them most, and nearly
+  every persona moves it away from MATH.
+- **The coin:** it follows the persona-prompted Assistant in Llama, Gemma and GLM. That's 29 of 40 cells, at roughly the strength
+  it follows the trained-in preferences in Llama and Gemma. Part of that is a change all personas share, and part is each
+  persona's own.
+- **The phrasings:** "In your next message, answer as" works at least as well as "You are", for both the Assistant and the coin.
+- **OLMo** is the exception: its coin moves, but not the way its Assistant does.
+
+See Results.
+
 ### Design (written 2026-11-12, before any data)
 
 - **Prompt** (`prompts.LAZY_LEADS`, `prompts.LAZY_PERSONAS`): the user's message opens with the lead, then a blank line,
@@ -6096,6 +6107,176 @@ GPU) and cat, wizard and toddler on a 1x RTX PRO 6000 (its persona runs matched 
 applies to each pod separately, as written. Llama and GLM wait for H200 or H100 stock. If either ends up on B200s (Blackwell),
 one of its pods also re-scores the plain Assistant there; if that model's gate then fails, A_0 and C_0 come from the
 same-GPU re-scores.
+
+### Results (2026-11-12)
+
+Runs, group `lazy` (one per model and persona):
+
+| model | runs | pods | cost |
+|---|---|---|---|
+| OLMo | `sx92bwso` (pirate), `e4x0y8m7` (ghost); `17yf09nt` (cat), `j4y6721i` (wizard), `vo2h8j1q` (toddler) | 1x A100; 1x RTX PRO 6000 | $6.59, $8.57 |
+| Llama | `lqu8tgaj` (pirate), `a94yjjk1` (ghost), `9ht410dx` (cat); `tm52evz2` (wizard), `1k61b0ry` (toddler) | 1x H200 each | $23.77, $15.60 |
+| Gemma | `9cnnw0de` (pirate), `kq36syrb` (cat), `40svaa07` (toddler); `phbzt1es` (ghost), `mcx7n9y9` (wizard) | 1x H100 each | $11.54, $7.85 |
+| GLM | `w75dbhss`, `64uq2rja`, `di0h39yq`, `q9zvzn5o`, `fz6fnl8q` (pirate to toddler) | 2x H200 | $33.12 |
+
+$107.04 of GPU time in all. Full output in `outputs/lazy/report.txt`, tables in `outputs/lazy/{lazy,pooled,cross}.csv`.
+
+**The gate passes.** Every pod's re-scored plain coinflip matches the sweep: r = 1.0000 for Llama, Gemma (on H100) and GLM, and
+0.9997-0.9998 for OLMo (on both A100 and RTX PRO 6000), with SD within 0.3%. Every new cell has split-half reliability of
+0.993-0.999 and median outcome mass of 0.92-1.00, so every cell is interpreted.
+
+![overview](figures/lazy_overview.png)
+
+Over the 225 WildChat, Alpaca and MATH tasks, per persona: the Assistant's r with its default (top), the coin's r with its default
+(middle), and the transfer ρ, the coin's change against the Assistant's, both residualized on the default Assistant (bottom).
+Filled = "You are a ___.", hollow = "In your next message, answer as a ___."; 95% CIs.
+
+**Every persona moves the Assistant, in every model and phrasing.** The persona's change is real in all 40 cells: its reliable
+share s_A is 0.58-1.00, so no cell is "Assistant unmoved". r(A_pf, A_0):
+
+| persona | OLMo you are | OLMo answer as | Llama you are | Llama answer as | Gemma you are | Gemma answer as | GLM you are | GLM answer as |
+|---|---|---|---|---|---|---|---|---|
+| pirate | 0.97 | 0.90 | 0.87 | 0.88 | 0.89 | 0.87 | 0.93 | 0.77 |
+| ghost | 0.98 | 0.89 | 0.90 | 0.86 | 0.93 | 0.91 | 0.93 | 0.87 |
+| cat | 0.97 | 0.86 | 0.82 | 0.77 | 0.82 | 0.80 | 0.74 | 0.50 |
+| wizard | 0.99 | 0.93 | 0.90 | 0.87 | 0.95 | 0.92 | 0.97 | 0.92 |
+| toddler | 0.77 | 0.60 | 0.38 | 0.50 | 0.23 | 0.35 | 0.47 | 0.21 |
+
+The toddler moves the Assistant most in every model. OLMo's "You are" barely moves it (r 0.97-0.99 except the toddler).
+
+**The coin follows the persona in Llama, Gemma and GLM, not in OLMo.** ρ, with the call (no mark: coin follows the persona; °: no
+transfer; −: coin against the persona):
+
+| persona | OLMo you are | OLMo answer as | Llama you are | Llama answer as | Gemma you are | Gemma answer as | GLM you are | GLM answer as |
+|---|---|---|---|---|---|---|---|---|
+| pirate | +0.03° | −0.15− | +0.55 | +0.63 | +0.67 | +0.74 | +0.03° | +0.16 |
+| ghost | +0.08° | −0.12° | +0.39 | +0.67 | +0.52 | +0.61 | +0.15 | +0.14 |
+| cat | +0.19 | −0.04° | +0.46 | +0.56 | +0.70 | +0.71 | +0.27 | +0.27 |
+| wizard | −0.03° | −0.12° | +0.47 | +0.69 | +0.62 | +0.76 | +0.16 | +0.12° |
+| toddler | +0.05° | −0.04° | +0.74 | +0.68 | +0.78 | +0.77 | +0.42 | +0.37 |
+
+- **Calls:** 29 of 40 cells "coin follows the persona": Llama 10, Gemma 10, GLM 8, OLMo 1. Ten are "no transfer" (OLMo 8, GLM 2),
+  and one is "coin against the persona" (OLMo, pirate, "answer as").
+- **Size:** τ, the coin's slope on the persona's change over its slope on the default preferences, is 0.45-1.85 in Llama, 0.53-1.36
+  in Gemma and 0.06-0.46 in GLM. In Llama and Gemma, the coin passes on a lazy persona's change about as strongly as it passes on
+  the trained-in preferences.
+- **Within source:** ρ with source dummies is within 0.05 of ρ in every model. The transfer is within sources, not just a shift
+  between them.
+- **OLMo's coin moves too, just not with its Assistant.** r(C_pf, C_0) is 0.82-0.94, with reliable shares of 0.78-0.94. Its
+  default coin is weak on these tasks (r(A_0, C_0) 0.39, SD 0.27 nats), as expected.
+
+**The phrasings:** "answer as" never moves the Assistant or the coin less than "you are". Averages over the five personas
+(movement = 1 − r with the default; τ as above):
+
+| model | Assistant movement, you are / answer as | difference [CI] | call | coin movement, you are / answer as | difference [CI] | call | τ, you are / answer as | difference [CI] |
+|---|---|---|---|---|---|---|---|---|
+| OLMo | 0.062 / 0.165 | −0.103 [−0.125, −0.083] | **"answer as" moves it more** | 0.090 / 0.163 | −0.072 [−0.106, −0.043] | **"answer as" moves it more** | 0.39 / −0.43 | +0.82 [+0.12, +1.61] |
+| Llama | 0.227 / 0.225 | +0.002 [−0.016, +0.020] | **no difference** | 0.081 / 0.073 | +0.009 [−0.003, +0.020] | **no difference** | 0.81 / 1.27 | −0.46 [−0.60, −0.29] |
+| Gemma | 0.235 / 0.234 | +0.001 [−0.011, +0.013] | **no difference** | 0.097 / 0.170 | −0.073 [−0.094, −0.054] | **"answer as" moves it more** | 0.70 / 1.01 | −0.31 [−0.41, −0.22] |
+| GLM | 0.191 / 0.345 | −0.154 [−0.180, −0.129] | **"answer as" moves it more** | 0.082 / 0.181 | −0.099 [−0.129, −0.074] | **"answer as" moves it more** | 0.29 / 0.32 | −0.03 [−0.17, +0.11] |
+
+Under "answer as" the coin also passes on more of the Assistant's change in Llama and Gemma (higher τ and ρ), and the same in
+GLM. OLMo is the exception again: its "answer as" coin moves away from the Assistant's change.
+
+![shifts](figures/lazy_shifts.png)
+
+**By source** (Hal's question): per source, the mean change of the persona's utilities from the default, relative to the mean
+change over the three sources, in SDs of the default.
+- **The Assistant:** almost every persona, in every model, moves it away from MATH and toward Alpaca. The toddler does this most:
+  MATH −0.52 (OLMo) to −0.91 (Gemma) SDs under "you are", CIs below 0 in all four. Since every model's default likes MATH best
+  (+1.0 to +1.2 SDs), a lazy persona mostly makes the Assistant less of a maths enthusiast.
+- **The coin mostly doesn't follow those shifts between sources.**
+  - GLM's coin does, under "answer as" (MATH −0.41 to −0.54 SDs).
+  - Llama's coin does only for the toddler (MATH −0.44 and −0.25).
+  - Gemma's coin goes the other way under "answer as": MATH up (+0.03 to +0.33) and WildChat down (−0.34 to −0.52) for every
+    persona. That looks like an effect of the phrasing on the coin rather than of any persona.
+
+So the transfer in the table above is mostly the coin following the persona's reordering of tasks *within* each source.
+
+Per-source scatter grids (the coin's change against the Assistant's, within WildChat, Alpaca and MATH, one row per persona and
+phrasing) are in `figures/lazy_sources_<model>.png`.
+
+**Exploratory, added after the data: a shared change and a persona-specific one.** The five personas' changes in the Assistant
+are largely the same change: the mean r(dA_p, dA_q) between personas is 0.51-0.80 per model and phrasing. So ρ could come from a
+generic "any character" shift. Splitting it up (`lazy.cross_stats`):
+
+![specific](figures/lazy_specific.png)
+
+- **The coin follows the shared change:** its change correlates with *other* personas' Assistant changes at 0.33-0.63 (Llama,
+  Gemma) and 0.12-0.14 (GLM).
+- **It also follows each persona's own change:**
+  - Matched personas beat mismatched ones by 0.08-0.23 (CIs above 0) in Llama, Gemma and GLM.
+  - Each persona's change minus the other four's mean, for the coin against the Assistant, gives r 0.59-0.74 (Llama, Gemma) and
+    0.30-0.32 (GLM), all CIs above 0.
+  - Per persona, the specific part ranges from 0.17 (GLM ghost) to 0.86 (Gemma ghost).
+- **OLMo:** none under "you are" (+0.04 [−0.03, +0.10]). A small one under "answer as" (+0.15 [+0.09, +0.21]), even though its
+  overall ρ is negative there: its "answer as" coin's shared change goes against the Assistant's shared change.
+
+**Harm:** no lazy persona makes the Assistant prefer harmful tasks. Its harm gap stays at 3.4 (Llama toddler, "answer as") or
+more, against defaults of 7.0-18.2. The coin's gap stays positive in every cell too (0.22 or more).
+
+**Uptake** (`outputs/lazy_replies/<model>/replies.html`, my reading of the pages; not a measurement):
+- Llama, Gemma and GLM answer in character under both phrasings: stage directions, accents, a toddler bouncing and asking for a
+  snack.
+- OLMo does so less consistently. A crude count of replies that open as the plain Assistant ("I choose Task B. Certainly! ...",
+  no stage directions or persona words in the first 200 characters) finds at least 10 of its 60 "you are" replies and 4 of 60
+  "answer as" ones, against 0-2 of 60 in the other models. That fits OLMo's "You are" barely moving its choices.
+
+**Context** (the two-pull fit over the same tasks; not read, see the pre-registration): w is 0.41-0.92 in Llama, −0.07 to 0.36 in
+Gemma and 0.18-0.42 in GLM. Gemma's low w with high ρ means its coin keeps its full default tilt and adds the persona's change on
+top. OLMo's w ranges from −1.1 to 3.7, unstable as expected with its weak default coin.
+
+**Predictions** (mine), 4 of 7 held:
+1. "You are" moves the Assistant, with r(A_pf, A_0) between 0.5 and 0.97: **failed** (13 of 20 cells, against at least 16). s_A ≥
+   0.5 in all 20, but OLMo moved less than that range (r ≥ 0.97 in 4 cells) and the toddler more (r < 0.5 in 3).
+2. Toddler or cat moves it most, and the toddler moves it away from MATH in at least 3 of 4: **held** (the toddler in all four,
+   MATH CIs below 0 in all four).
+3. "Answer as" moves the Assistant less in at least 3 of 4: **failed**. It never moves it less: more in OLMo and GLM, the same in
+   Llama and Gemma.
+4. The coin follows in at least 70% of moved cells: **held**, barely (29 of 40, 72.5%).
+5. Mean ρ highest in Gemma, lowest in OLMo: **held** (Gemma 0.69, Llama 0.58, GLM 0.21, OLMo −0.02).
+6. "You are" moves the coin more in at least 3 of 4: **failed**. "Answer as" moves it more in 3 of 4 (no difference in Llama).
+7. No lazy persona makes the Assistant prefer harmful tasks: **held** (all 40 gaps above 0).
+
+### Findings
+
+1. **A one-word persona is enough to move both the Assistant's choices and, in three of four models, the coin.** Llama's and
+   Gemma's coins pass on the persona's change at roughly the strength they pass on the trained-in preferences (τ ~0.5-1.9), GLM's
+   at about a third. The prompt never says what a pirate or a toddler likes, so the coin follows tastes the model infers for the
+   character.
+2. **Part of it is generic, part persona-specific.** All five personas push the Assistant in a shared direction (mostly: less
+   MATH, more Alpaca), and the coin follows much of that shared change. It also follows each persona's own departure from it
+   (persona-specific r 0.30-0.74 outside OLMo).
+3. **"In your next message, answer as" works at least as well as "You are".** It moves the Assistant as much (Llama, Gemma) or more
+   (OLMo, GLM), moves the coin more in three models, and in Llama and Gemma the coin passes on more of the Assistant's change
+   under it. An instruction about the next message is enough, as in the "if asked" rules.
+4. **The coin follows the persona within sources more than between them.** The Assistant's big shift away from MATH mostly
+   doesn't show in the coin, except in GLM and for Llama's toddler.
+5. **OLMo is the exception, again.** "You are" barely moves its Assistant, and its free replies often ignore the persona. Its
+   coin moves under every persona, but not the way its Assistant does.
+6. **Harm avoidance holds** in both the Assistant and the coin under every lazy persona, unlike under the Gilg evil persona.
+
+### What this says
+
+The long Gilg personas spell out what their character likes; these say one word. Even so, in Llama, Gemma and GLM the coin moves
+with the persona-prompted Assistant's reordering of tasks, including each persona's own part of it. So whatever drives the coin
+responds to the character the context casts as the AI, through tastes the model fills in itself. It doesn't need explicit
+preferences in the prompt. The phrasing result points the same way as the "if asked" rules: an instruction scoped to the next
+message moves the coin at least as much as an identity statement. That fits the coin tracking the choices the AI will make next,
+more than something about who the AI is. The usual alternative remains open: the persona comes from the user, so the coin could be
+reading what this user seems to want.
+
+### Caveats (from the results)
+
+- **"Answer as" isn't a weaker instruction for these models.** It moved the Assistant at least as much as "You are". So the phrasing
+  contrast compares two equally strong manipulations, not a strong and a shallow one.
+- **The shared change is partly a "less MATH" effect,** and the coin's response to it differs by model, including Gemma's coin
+  shifting the other way between sources under "answer as". Between-source and within-source transfer can tell different stories.
+- **The persona-specific analysis is exploratory** (added after the data). With five personas, "the other four's mean" is a rough
+  stand-in for the shared change.
+- **The uptake reading is mine**, from 12 replies per condition, with a crude keyword count for OLMo.
+- **GPUs:** Gemma's cells are on H100 and OLMo's on two GPU types, against the sweep's defaults. The gate passed everywhere.
+- **Scope:** one wording per phrasing, five personas (three of them mine), final models only, bf16. CIs cover task sampling only.
 
 ## Tasks
 
