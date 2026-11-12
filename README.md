@@ -5908,6 +5908,15 @@ Assistant, so its transfer will be the noisiest.
   message is the reply after the flip.
 - **The personas are mine** except pirate and ghost; one wording each, final models only, bf16. CIs cover task sampling only.
 
+#### Amendment before any data (2026-11-12): GPUs
+
+No H200 was in stock in the US/Canada datacenters. Gemma runs on two 1x H100 SXM pods (the same Hopper die; the
+persona-placement runs on H100 matched the H200 sweep at r 1.0000). OLMo runs pirate and ghost on a 1x A100 SXM (its sweep's
+GPU) and cat, wizard and toddler on a 1x RTX PRO 6000 (its persona runs matched the A100 sweep there at r 0.9997). The gate
+applies to each pod separately, as written. Llama and GLM wait for H200 or H100 stock. If either ends up on B200s (Blackwell),
+one of its pods also re-scores the plain Assistant there; if that model's gate then fails, A_0 and C_0 come from the
+same-GPU re-scores.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
