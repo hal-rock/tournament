@@ -1,0 +1,54 @@
+{
+ "rows": 866138,
+ "category": {
+  "math": 261902,
+  "code": 142272,
+  "chat": 115980,
+  "safety": 110800,
+  "multilingual": 99989,
+  "other": 94982,
+  "if": 29974,
+  "science": 9999,
+  "identity": 240
+ },
+ "source": {
+  "evol_codealpaca_heval_decontaminated": 107273,
+  "tulu_v3.9_aya_100k": 99989,
+  "tulu_v3.9_wildchat_100k": 99348,
+  "flan_v2_converted": 89982,
+  "tulu-3-sft-personas-math-filtered": 80547,
+  "numinamath_tir_math_decontaminated": 64312,
+  "tulu_v3.9_open_math_2_gsm8k_50k": 50000,
+  "tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k": 50000,
+  "tulu_v3.9_wildjailbreak_decontaminated_50k": 49965,
+  "tulu-3-sft-personas-math-grade-filtered": 47043,
+  "personahub_code_v2_34999": 34999,
+  "personahub_ifdata_manual_seed_v3_29980": 29974,
+  "tulu_v3.9_personahub_math_interm_algebra_20k": 20000,
+  "coconot_converted": 10835,
+  "tulu_v3.9_sciriff_10k": 9999,
+  "no_robots_converted": 9500,
+  "oasst1_converted": 7132,
+  "tulu_v3.9_table_gpt_5k": 5000,
+  "olmo_hardcoded": 240
+ },
+ "refusal_by_category": {
+  "chat": 4570,
+  "other": 31,
+  "math": 16,
+  "code": 1194,
+  "if": 444,
+  "safety": 48269,
+  "multilingual": 19,
+  "identity": 20
+ },
+ "selfref_by_category": {
+  "chat": 1024,
+  "code": 943,
+  "if": 8,
+  "safety": 6757,
+  "multilingual": 3,
+  "identity": 10
+ },
+ "multi_turn": 42850
+}

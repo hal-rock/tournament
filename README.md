@@ -1418,6 +1418,118 @@ Assistant, so these r differ a little from the table below, which pairs each sta
   the opener, in either direction.
 - CIs cover task sampling only: one phrasing, one seed of 15,000 pairs, no system prompt, bf16.
 
+## OLMo 2 32B SFT data attribution: which SFT examples push the coin toward the Assistant?
+
+OLMo 2 32B's SFT alone takes the coin from r = 0.39 to 0.89 with the Assistant's ranking (previous section). Which of its SFT
+data push it there? Hal's prior, from OLMo 3's DPO pairs (`../coinflip` RESULTS.md, "The tournament's broad preference effect,
+attributed the same way"): a broad, diffuse push from most kinds of data, not a special class. `../coinflip`'s attribution of
+OLMo 2's SFT on its 25 benign-vs-extremely-harmful pairs (RESULTS.md, "Which SFT examples and DPO pairs build OLMo 2 32B's
+effect?", 2026-11-11) found opposing category pushes at the base (chat, safety, IF and identity up, math and code down) and a
+refusal push, but those pairs are all about extreme harm. This attributes the broad effect, over the tournament's tasks.
+
+### Design
+
+- **Score:** `../coinflip`'s Adam-weighted first-order score, ported in `olmo2_attr.py`. An SFT conversation's score on a
+  metric f is (grad f / rms) . g: g is the gradient of the summed log-prob of every assistant turn (OLMo 2's SFT loss, masked
+  as open-instruct masks it), and rms is the per-coordinate RMS of a clipped 256-conversation batch gradient, estimated from
+  1,200 conversations outside the scored sample. Its **cos** is the score over |grad f| |g / rms|: how well the Adam step one
+  conversation would cause lines up with grad f, whatever its size. Everything but the model lives on a lattice of 1 in 17
+  coordinates. This score passed its closure test on OLMo 3's real DPO run (predicted change within 1.0-2.3x of the real one);
+  the probe-based method tried next to it failed its checks there and isn't used.
+- **Two points:** the **base** (the start of SFT, primary) and the **SFT checkpoint** (its end, secondary), each on a 1x H200
+  (one after the other on one pod if no second is in stock).
+  No points between them (Hal: the base->SFT line had a sharp feature at its midpoint in `../coinflip`).
+- **No closure test.** AI2 released no intermediate SFT checkpoints, and `../coinflip`'s whole-stage prediction from the base
+  missed by 400-1,000x. So every result here is first-order gradient alignment at a point, not what SFT did, and not causal.
+- **Metrics,** all linear in per-pair log-odds, on 6,000 of the stage runs' 15,000 task pairs (`olmo2_attr_prepare.py`), with
+  the SFT's own Assistant utilities as the fixed task score (the coin at SFT follows them at r = 0.89):
+
+  | query | what it is | base | SFT |
+  |---|---|---|---|
+  | `benign` | **primary**: the coin's slope on Assistant utility over the 257 non-harmful tasks (nats per SD) | +0.020 | +0.157 |
+  | `ordinary` | the same within origin over ALPACA, MATH and WILDCHAT (no STRESS-TEST tasks, no origin differences) | +0.002 | +0.080 |
+  | `harm_gap` | the coin's mean over non-harmful minus harmful tasks | +0.047 | +0.498 |
+  | `t1`, `t2` | `benign` on two disjoint halves of the non-harmful tasks | +0.024, +0.019 | +0.141, +0.163 |
+  | `perm1`, `perm2` | `benign` with utilities shuffled across tasks (nulls) | -0.001, +0.008 | +0.012, -0.010 |
+  | `heads_bias` | the coin's mean log-odds of heads (placebo; it moves a lot over SFT) | -0.51 | +0.72 |
+  | `asst_benign` | `benign`'s weights on the Assistant's own choice | +0.28 | +1.26 |
+  | `standard` | `../coinflip`'s 25-pair effect, rendered identically (checked byte for byte) | 0.156 | 0.979 |
+
+  (Values from the stored tournament runs on the sample; each matches the slope from fitted utilities.)
+- **SFT data:** `allenai/tulu-3-sft-olmo-2-mixture-0225` (866,138 conversations). `../coinflip`'s sample is reused unchanged
+  (`data/olmo2_attr/sft_sample.json`), so every unit can be compared with its standard-effect score from yesterday:
+  - 350 conversations from each of 8 source categories (chat: WildChat, OASST, No Robots; math; code; safety: WildJailbreak,
+    WildGuardMix, CoCoNot; IF; science; multilingual; other: FLAN, TableGPT) and all 240 identity rows;
+  - feature groups of 300: safety conversations whose reply refuses vs ones whose reply doesn't (regex), and self-referential
+    replies ("as an AI", identity rows excluded) vs source-matched controls;
+  - 1,200 more for rms and 64 for the clip norm.
+- **Content labels** (`olmo2_attr_data.py label`, Claude Opus 5.5 at low effort, from the text alone, written before any
+  score exists): task type (12 kinds), response stance (complies / partial / refuses), voice (impersonal / as an AI assistant /
+  as a character), whether the reply states its own view, mentions being an AI, or makes a moral judgment.
+- **Load checks, enforced in code:** per-pair coin effects and per-prompt Assistant log-odds match the tournament's stored
+  ones (median |difference| under 0.3 nats), and the standard effect matches `../coinflip` (within 0.05).
+
+### Pre-registered before any scores (2026-11-12)
+
+Per strat unit and query, cos as above. Units are weighted by how many rows of the mixture their category's stratum stands for.
+
+**Checks, at each point.** They qualify the reading; they don't stop it.
+1. Gradient sampling: cos(grad `benign_odd`, grad `benign_even`) >= 0.5.
+2. Lattice: even- vs odd-position halves of the lattice give `benign` scores with Spearman >= 0.8 (first 300 units).
+3. rms: scores with half A's vs half B's rms, Spearman >= 0.7 (first 300 units).
+4. **Specificity:** unit scores on `t1` and `t2` (disjoint tasks) agree at Spearman >= 0.5, at least 0.3 above `perm1` vs `perm2`.
+   If not, unit ranks there don't carry the preference: only group means are read, against the perm metrics.
+5. Placebo: |Spearman(`benign`, `heads_bias`)| < 0.8, or a generic shared direction can't be excluded (`../coinflip` found 0.96
+   at OLMo 2's SFT checkpoint for DPO pairs).
+
+**Primary reading: how broad is the push on `benign`?** `../coinflip`'s rules, unchanged, over categories holding at least 2% of
+rows (identity excluded): R1 at least 55% of units positive; R2 every category's mean positive (one exception allowed if not
+significantly negative, t > -2); R3 every category's share of the net within 3x of its share of rows, and at least 0.33x for
+three quarters of them; R4 the top 1% of units hold under 25% of the net. **Diffuse** = all four. **Concentrated** = a category
+or feature with under 10% of rows holds half the net, or the top 1% hold 40%, or under half the categories are positive.
+**Mixed** = otherwise. One change, because yesterday's rules broke on a net near zero: if the weighted mean's 95% CI (units
+resampled within category) includes 0, the verdict is **no clear net push**, and shares aren't read. **Opposing pushes** is
+reported alongside whenever one category has t >= 3 and another t <= -3.
+- The category pattern is **preference-specific** if category means on `t1` and `t2` agree (Spearman >= 0.7) and correlate with
+  `benign`'s more than either perm metric's do.
+
+**Refusal (is the safety push about harm?).** D = refusing minus complying safety conversations, in control SDs of cos, 95%
+bootstrap CI, on `standard`, `harm_gap`, `benign` and `ordinary`, paired across queries.
+- **Specific to harm:** D on `benign` is under half of D on `standard`, and the paired CI of the difference excludes 0.
+- **Broad too:** D on `benign` is at least 3/4 of D on `standard`, with a CI above 0.
+- Otherwise inconclusive; not readable at a point where D on `standard` has a CI including 0.
+
+**Content labels (exploratory, but labels fixed in advance).** For each label value against the rest, a within-category
+difference in cos (strat units, pooled over categories by row weight), in SDs of cos, with a bootstrap CI. Benjamini-Hochberg
+across all contrasts at q = 0.05. A contrast counts as a finding only if it survives BH on `benign` and is larger on `benign`
+than on both perm metrics.
+
+**Also reported:** coin vs Assistant (Spearman of unit cos on `benign` and `asst_benign`, and their category means); base vs SFT
+(unit ranks, category means); `benign` vs `standard` at the base, and today's `standard` against yesterday's saved scores for the
+same units (a replication check); size-weighted shares of the push per category against rows and tokens; the top and bottom
+units by `benign` cos, read by eye, on a transcript page.
+
+**Predictions** (mine; Hal's prior is "diffuse"):
+1. Checks 1-3 pass at both points. Check 4 passes at the base (70%) and at SFT (60%).
+2. The base is **not diffuse** (60%): math and code push less than chat, safety and IF, as for the standard effect.
+3. Refusal's push is **specific to harm** at the base (55%).
+4. `benign` and `standard` unit ranks at the base: Spearman under 0.5 (70%).
+5. Coin and Assistant unit ranks at the base: Spearman at least 0.5 (50%; no strong prior).
+6. Base vs SFT: category means agree (Spearman >= 0.5, 50%), unit ranks don't (under 0.4, 70%).
+7. Replies in the assistant's own voice push more than impersonal ones within category (50%).
+
+**What the outcomes would mean.**
+- **Diffuse at the base:** SFT starts pushing the coin toward the Assistant's ranking from nearly every kind of data, in
+  proportion, as Hal's reading of OLMo 3 says.
+- **Mixed or opposing:** some kinds of data push and others pull; the labels then say what distinguishes them.
+- **Refusal specific to harm:** the refusal push seen on `../coinflip`'s pairs comes from their harmful tasks, as Hal suspects.
+- **Base and SFT disagree:** single-point attribution of OLMo 2's SFT is fragile; only what both agree on is worth reading.
+
+**Known caveats.** First-order at two points of a 6,767-step stage, with no test that start-point pushes add up to what SFT did.
+A causal check would need short training forks from the base on top- vs bottom-scored data (an 8-GPU node). The fixed utilities
+are the SFT's, so a high score means pushing the coin toward the ranking the SFT Assistant ends up with, which can also move the
+Assistant's own ranking (`asst_benign` measures that). 350 units per category; coin mass 0.77-0.80.
+
 ## Does post-training make the user's choice more like the Assistant's?
 
 The coinflip asks whether Assistant preferences leak into a Human turn through a coin. Here nothing mediates: the user
