@@ -16,7 +16,11 @@ Statistics (with "|within" and "|benign_sources" versions):
 - per persona: fit:<cell>:{b_def,b_per,w,total} (X = c + b_def z(A_0) + b_per z(A_sys)) for T_sys, T_user, T_self, C_sys,
   C_user, C_self; rho_self:X@p and rho_user:X@p (b_per of the placement over b_per of the system prompt) for X in T, C;
   drho_self@p = rho_self:T - rho_self:C, drho_user@p likewise; dw_sys@p = w(T_sys) - w(C_sys); sep_sys@p = r(A_sys, A_0);
-  Delta_X@p = r(X_self, P_self) - r(X_self, A_self), dDelta@p = Delta_T - Delta_C, sep_self@p = r(A_self, P_self).
+  Delta_X@p = r(X_self, P_self) - r(X_self, A_self), dDelta@p = Delta_T - Delta_C, sep_self@p = r(A_self, P_self);
+- exploratory, added after four models' data: npull:X_<place>@p = b_per of the placement / the coin's plain slope on A_0
+  (X in T, C; C's plain coin is C_0), dnpull_<place>@p = npull:T - npull:C, and dabs_npull_<place>@p = |npull:T| - |npull:C|
+  (the size of the pull whichever its sign: slacker's system-prompt pull is negative in V4 Flash). Unlike rho, the
+  denominator doesn't depend on how strongly the system-prompt persona pulls each coin.
 
 Calls (pre-registered): 1 per model, on d_decl: "stronger" (CI above 0), "weaker" (below), "same"; 2: "unchanged" if
 r(Ad, A0) >= 0.95, else "changed"; 3 per persona, on drho_self: "less" (CI below 0), "more" (above), "no difference",
@@ -162,6 +166,12 @@ def statistics(U, origins, nonharm, personas=PERSONAS):
         for place in ("self", "user"):
             ra._diff(out, f"drho_{place}@{p}", f"rho_{place}:T@{p}", f"rho_{place}:C@{p}", SUFFIXES)
         ra._diff(out, f"dw_sys@{p}", f"fit:T_sys@{p}:w", f"fit:C_sys@{p}:w", SUFFIXES)
+        for place in ("sys", "user", "self"):  # exploratory (after V4, Llama, Trinity, DSV3's data): each pull in units of
+            for x, plain in (("T", "T"), ("C", "C0")):  # its coin's own plain slope on A_0
+                ra._ratio(out, f"npull:{x}_{place}@{p}", f"fit:{x}_{place}@{p}:b_per", f"slope:{plain}~A0")
+            ra._diff(out, f"dnpull_{place}@{p}", f"npull:T_{place}@{p}", f"npull:C_{place}@{p}", SUFFIXES)
+            if f"npull:T_{place}@{p}" in out and f"npull:C_{place}@{p}" in out:  # how much, whichever way it pulls
+                out[f"dabs_npull_{place}@{p}"] = abs(out[f"npull:T_{place}@{p}"]) - abs(out[f"npull:C_{place}@{p}"])
         if has(f"A_self@{p}", f"P_self@{p}"):
             out[f"sep_self@{p}"] = pearson(U[f"A_self@{p}"], U[f"P_self@{p}"])
             for x in "TC":
@@ -293,6 +303,9 @@ def plot_personas(d, S, path):
     if not personas:
         return
     fig, axes = plt.subplots(1, 2, figsize=(10, 0.55 * len(personas) + 1.8), sharey=True)
+    ends = [v for p in personas for x in "TC" for place in ("user", "self") for v in S.get(f"rho_{place}:{x}@{p}", ())[1:]]
+    xlim = (max(RHO_LIM[0], min(ends + [0.0])) - 0.1, min(RHO_LIM[1], max(ends + [1.0])) + 0.1)
+    clipped = any(v < RHO_LIM[0] or v > RHO_LIM[1] for v in ends)
     for ax, place, title in zip(axes, ("user", "self"), ("User's instruction: ρ_user", "User's self-description: ρ_self")):
         for k, (x, (color, label)) in enumerate((("C", COIN_STYLE["C0"]), ("T", COIN_STYLE["T"]))):
             for yi, p in enumerate(personas):
@@ -307,7 +320,7 @@ def plot_personas(d, S, path):
                         ax.plot(edge, y, marker, ms=6, color=color)
                 if RHO_LIM[0] <= est <= RHO_LIM[1]:
                     ax.plot(est, y, "o", ms=7, color=color, mec="white", mew=1.2, label=label if yi == 0 else None)
-        ax.set_xlim(RHO_LIM[0] - 0.1, RHO_LIM[1] + 0.1)
+        ax.set_xlim(*xlim)
         ax.axvline(0, color=RULE, lw=0.8)
         ax.axvline(1, color=RULE, lw=0.8, ls=":")
         ax.set_title(f"{title}\n(b_per of the placement / b_per of the system prompt)", fontsize=9.5, color=INK, loc="left")
@@ -315,52 +328,72 @@ def plot_personas(d, S, path):
     axes[0].set_yticks(range(len(personas)), personas)
     axes[0].invert_yaxis()
     fig.legend(*axes[0].get_legend_handles_labels(), loc="lower center", ncol=2, frameon=False, fontsize=9)
-    fig.suptitle(f"{d.label}: how much each placement pulls the coin, relative to the persona as system prompt "
-                 f"(95% CIs; arrows: past {RHO_LIM[0]:g} to {RHO_LIM[1]:g})",
+    fig.suptitle(f"{d.label}: each placement's pull on the coin, relative to the persona as system prompt (95% CIs"
+                 + (f"; arrows: CI past {RHO_LIM[0]:g} to {RHO_LIM[1]:g})" if clipped else ")"),
                  color=INK, fontsize=10.5, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0.08, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
 
-def plot_models(results, path):
+DOT_LIM = (-2.0, 2.5)  # Δρ_self's axis; arrows mark CIs past it
+
+
+def _dots(ax, rows, lim=None):
+    """rows: (y, (est, lo, hi), color, label) -> CI lines and dots, clipped to lim with arrows at the edges."""
+    for y, (est, lo, hi), color, label in rows:
+        a, b = (max(lo, lim[0]), min(hi, lim[1])) if lim else (lo, hi)
+        ax.plot([a, b], [y, y], color=color, lw=2, solid_capstyle="round")
+        if lim:
+            for edge, marker, off in ((lim[0], "<", lo < lim[0]), (lim[1], ">", hi > lim[1])):
+                if off:
+                    ax.plot(edge, y, marker, ms=5, color=color)
+        if not lim or lim[0] <= est <= lim[1]:
+            ax.plot(est, y, "o", ms=6, color=color, mec="white", mew=1.2, label=label)
+    if lim:
+        ax.set_xlim(lim[0] - 0.1, lim[1] + 0.1)
+    ax.axvline(0, color=RULE, lw=0.8)
+    style(ax)
+
+
+def plot_models(results, path, calls_by_key=None):
+    """results: {key: S}; calls_by_key: {key: calls rows}, to leave out Δρ_self where call 3 made no call."""
     keys = [k for k in KEYS if k in results]
     if not keys:
         return
-    fig, axes = plt.subplots(1, 2, figsize=(11, 0.75 * len(keys) + 1.8), sharey=True)
-    ax = axes[0]
+    called = {(k, r["persona"]) for k, rows in (calls_by_key or {}).items() for r in rows
+              if r["call_no"] == 3 and r["call"] in ("less", "more", "no difference")}
+    fig, axes = plt.subplots(1, 3, figsize=(15, 0.75 * len(keys) + 2.0), sharey=True)
+    rows = []
     for ci, (c, (color, label)) in enumerate(COIN_STYLE.items()):
-        for yi, k in enumerate(keys):
-            S = results[k]
-            if f"r:{c}~A0" not in S:
-                continue
-            est, lo, hi = S[f"r:{c}~A0"]
-            y = yi + (ci - 1) * 0.22
-            ax.plot([lo, hi], [y, y], color=color, lw=2, solid_capstyle="round")
-            ax.plot(est, y, "o", ms=7, color=color, mec="white", mew=1.2, label=label if yi == 0 else None)
-    ax.axvline(0, color=RULE, lw=0.8)
-    ax.set_title("r(coin, Assistant's own choice)", fontsize=10, color=INK, loc="left")
-    style(ax)
-    ax = axes[1]
-    for pi, p in enumerate(PERSONAS):
-        color = PERSONA_COLOR[p]
-        for yi, k in enumerate(keys):
-            S = results[k]
-            if f"drho_self@{p}" not in S:
-                continue
-            est, lo, hi = S[f"drho_self@{p}"]
-            y = yi + (pi - 1.5) * 0.17
-            ax.plot([lo, hi], [y, y], color=color, lw=2, solid_capstyle="round")
-            ax.plot(est, y, "o", ms=6, color=color, mec="white", mew=1.2, label=p if yi == 0 else None)
-    ax.axvline(0, color=RULE, lw=0.8)
-    ax.set_title("Δρ_self: the self-description's pull on the tool's coin\nminus on the user-reported coin",
-                 fontsize=10, color=INK, loc="left")
-    style(ax)
+        rows += [(yi + (ci - 1) * 0.22, results[k][f"r:{c}~A0"], color, label if yi == 0 else None)
+                 for yi, k in enumerate(keys) if f"r:{c}~A0" in results[k]]
+    _dots(axes[0], rows)
+    axes[0].set_title("r(coin, Assistant's own choice)", fontsize=10, color=INK, loc="left")
+    for ax, name, lim, title in (
+            (axes[1], "drho_self", DOT_LIM, "Δρ_self (pre-registered): the self-description's pull relative\nto the "
+                                            "system prompt's, tool coin minus user-reported coin"),
+            (axes[2], "dabs_npull_sys", None, "Exploratory: the system-prompt persona's pull (|b_per| / plain\n"
+                                              "slope), tool coin minus user-reported coin")):
+        rows = []
+        for pi, p in enumerate(PERSONAS):
+            for yi, k in enumerate(keys):
+                n = f"{name}@{p}"
+                if n in results[k] and (name != "drho_self" or calls_by_key is None or (k, p) in called):
+                    rows.append((yi + (pi - 1.5) * 0.17, results[k][n], PERSONA_COLOR[p], p))
+        seen = set()
+        rows = [(y, v, c, lab if lab not in seen and not seen.add(lab) else None) for y, v, c, lab in rows]
+        _dots(ax, rows, lim)
+        ax.set_title(title, fontsize=9.5, color=INK, loc="left")
     axes[0].set_yticks(range(len(keys)), [LABEL[k] for k in keys])
     axes[0].invert_yaxis()
-    for ax, ncol, x in ((axes[0], 3, 0.27), (axes[1], 4, 0.75)):
-        fig.legend(*ax.get_legend_handles_labels(), loc="lower center", ncol=ncol, frameon=False, fontsize=8.5,
-                   bbox_to_anchor=(x, 0.0))
-    fig.suptitle("The coin as a tool call (95% task-bootstrap CIs)", color=INK, fontsize=11, x=0.01, ha="left")
+    fig.legend(*axes[0].get_legend_handles_labels(), loc="lower center", ncol=3, frameon=False, fontsize=8.5,
+               bbox_to_anchor=(0.2, 0.0))
+    handles, labels = axes[2].get_legend_handles_labels()
+    order = [labels.index(p) for p in PERSONAS if p in labels]
+    fig.legend([handles[i] for i in order], [labels[i] for i in order], loc="lower center", ncol=4, frameon=False,
+               fontsize=8.5, bbox_to_anchor=(0.68, 0.0))
+    fig.suptitle("The coin as a tool call (95% task-bootstrap CIs; Δρ_self only where call 3 made a call, arrows: CI "
+                 "past the axis)", color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0.08, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
@@ -402,19 +435,20 @@ def main(argv=None):
     ap.add_argument("keys", nargs="*", default=list(KEYS))
     ap.add_argument("--n-boot", type=int, default=N_BOOTSTRAP)
     a = ap.parse_args(argv)
-    results, summary = {}, []
+    results, calls_by_key, summary = {}, {}, []
     for key in a.keys:
         if not (ra.OUT / f"tool-{key}" / "results").exists():
             print(f"{key}: no tool results yet")
             continue
         S, rows, pol = analyze(key, a.n_boot)
         results[key] = S
+        calls_by_key[key] = rows
         plain = next((r for r in pol if r["condition"] == "coinflip_tool"), None)
         for r in rows:
             summary.append(dict(model=key, **r, onpolicy_calls=f"{plain['calls']}/{plain['replies']}" if plain else ""))
     if summary:
         write_csv(ra.OUT / "tool_summary.csv", summary)
-        plot_models(results, ra.FIGURES / "replication_tool.png")
+        plot_models(results, ra.FIGURES / "replication_tool.png", calls_by_key)
 
 
 if __name__ == "__main__":

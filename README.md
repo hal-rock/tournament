@@ -5176,6 +5176,172 @@ Exploratory: SDs, the harm gap, outcome mass and top tokens, per-source breakdow
 5. Every T cell has median outcome mass ≥ 0.9 in at least 4 of 5 models.
 6. At least 40 of 50 plain replies call `flip_coin` in at least 4 of 5 models, with fewer under the evil persona.
 
+### Results (2026-11-12)
+
+**Run.** The replication's 8x B200 node, 2026-11-11 23:59 to 2026-11-12 03:27 UTC: 25-65 minutes per model, load included.
+- Every cell is readable. The tool cells have median outcome mass ≥ 0.99, and every cell has split-half reliability ≥ 0.93.
+- W&B group `replication`, runs `tool-<key>-instruct`. Analysis: `tool_analysis.py`. Per-model tables:
+  `outputs/replication/tool-<key>/analysis/`. All calls: `outputs/replication/tool_summary.csv`.
+- Figures: `figures/<key>/tool_coin.png` (the three coins and A_decl against A_0) and `figures/<key>/tool_personas.png`
+  (ρ_user, ρ_self).
+- The on-policy replies are in `outputs/replication/tool-<key>/onpolicy.html`, gitignored because the prompts hold
+  WildChat tasks.
+
+![tool](figures/replication_tool.png)
+
+**1. The tool's coin tracks the Assistant.**
+
+| model | r(C_0, A_0): user reports | r(C_decl, A_0): user reports, tool declared | r(T, A_0): tool reports | Δr_decl [95% CI] | call | slope T / C_0 |
+|---|---|---|---|---|---|---|
+| Llama 3.1 405B | 0.91 | 0.75 | 0.85 | +0.10 [+0.06, +0.15] | stronger | 0.94 |
+| DeepSeek V3 | 0.93 | 0.57 | 0.87 | +0.30 [+0.23, +0.39] | stronger | 0.42 |
+| Kimi K2 | 0.96 | 0.93 | 0.96 | +0.03 [+0.02, +0.04] | stronger | 0.90 |
+| DeepSeek V4 Flash | 0.81 | 0.51 | 0.81 | +0.30 [+0.23, +0.38] | stronger | 0.50 |
+| Trinity Large Thinking | 0.45 | 0.65 | 0.81 | +0.16 [+0.11, +0.23] | stronger | 1.12 |
+
+- **Call 1 is "stronger" in all five.** Under the same tool block, the tool's coin is more Assistant-like than the
+  user-reported coin.
+- **Against the plain user-reported coin, the one without the tool block,** the tool's coin is about as Assistant-like:
+  Δr_0 is −0.06 to 0.00 in four models. Its slope is 0.42-1.12× C_0's.
+- **Trinity is the exception:** its tool coin tracks its Assistant at 0.81, against 0.45 for the user-reported coin
+  (Δr_0 +0.36 [+0.28, +0.44]). So the replication's weak coin for Trinity was a weak coin in the user's turn, not a weak
+  coin everywhere. Its tool coin is still small in nats (SD 0.12).
+- **The tool block weakens the user-reported coin, not the tool's.** With the tool declared, the user-reported coin's
+  slope is 0.14× C_0's (DeepSeek V3) to 0.54× (Kimi), and Trinity's is unchanged (0.98×).
+
+**2. The tool block and the Assistant's own choice.**
+
+| model | r(A_decl, A_0) [95% CI] | SD ratio | call | r(T, A_decl) |
+|---|---|---|---|---|
+| Llama 3.1 405B | 0.909 [0.892, 0.925] | 0.41 | changed | 0.92 |
+| DeepSeek V3 | 0.925 [0.908, 0.940] | 0.76 | changed | 0.86 |
+| Kimi K2 | 0.968 [0.961, 0.974] | 0.91 | unchanged | 0.95 |
+| DeepSeek V4 Flash | 0.978 [0.974, 0.982] | 0.70 | unchanged | 0.78 |
+| Trinity Large Thinking | 0.952 [0.942, 0.962] | 0.85 | unchanged | 0.75 |
+
+- The ranking moves a little in Llama and DeepSeek V3. In every model the tool block compresses the Assistant's
+  utilities, most in Llama (0.41× the SD).
+  - Llama's tool block includes the system block its template writes for tools (Environment: ipython, the dates), which
+    the plain conditions drop.
+- Against the Assistant under the same block (A_decl), the tool's coin correlates about as much as against A_0, so
+  choosing A_0 as the reference doesn't change point 1.
+
+**3. The key test: does the user's self-description pull the tool's coin less?** Δρ_self = ρ_self(T) − ρ_self(C) [95% CI]:
+
+| model | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| Llama 3.1 405B | no difference, +0.13 [−0.22, +0.53] | more, +0.58 [+0.51, +0.66] | no difference, +0.06 [−0.09, +0.20] | more, +0.47 [+0.35, +0.60] |
+| DeepSeek V3 | more, +0.82 [+0.66, +1.01] | more, +1.45 [+1.23, +1.78] | more, +0.72 [+0.48, +1.07] | not separable (0.94) |
+| Kimi K2 | less, −1.30 [−1.58, −1.05] | less, −0.20 [−0.36, −0.05] | unstable | less, −0.16 [−0.26, −0.08] |
+| DeepSeek V4 Flash | less, −0.57 [−0.72, −0.45] | less, −0.17 [−0.26, −0.08] | no difference, +0.00 [−0.36, +0.58] | less, −0.20 [−0.28, −0.12] |
+| Trinity Large Thinking | more, +0.58 [+0.27, +0.94] | unstable | more, +2.21 [+0.14, +16.1] | more, +1.45 [+1.00, +2.24] |
+
+- **No general answer.** Of the 17 cells with a call, 6 are "less", 8 "more" and 3 "no difference".
+- **The split is by model, not by persona.** Every called cell is "less" in Kimi and V4 Flash and "more" in DeepSeek V3
+  and Trinity, while Llama is mixed.
+- **The starkest case is Kimi's evil.** Relative to the system prompt's pull, the self-description pulls the
+  user-reported coin 1.32× as far but the tool's coin 0.02×.
+- **Trinity's contrarian "more"** rests on a system-prompt pull of the user-reported coin barely above zero (b_per +0.02
+  [+0.00, +0.05]), so its upper CI is +16.
+- **The secondary measure often disagrees.** Δ_T − Δ_C is negative where the tool's coin leans more toward the
+  Assistant's own choice (A_self) than toward its prediction of the user (P_self).
+  - It is negative in 10 of the 18 cells where r(A_self, P_self) < 0.9, and positive in 6.
+  - Over the 12 cells where ρ gives a direction and Δ is defined, the two measures agree in 5 and disagree in 5.
+  - For example, Trinity's evil is "more" by ρ, while by Δ its tool coin leans more toward the Assistant's choice
+    (−0.56).
+
+**Exploratory, added after four models' data (V4 Flash, Llama, Trinity, DeepSeek V3): each pull in units of its coin's
+own plain slope** (|b_per| / slope on A_0; `dabs_npull_<placement>@<persona>` in the stats; third panel above).
+
+- **The system-prompt persona pulls the tool's coin less than the user-reported coin.** That holds in 12 of 20 cells:
+  every persona in Llama and DeepSeek V3, two each in V4 Flash and Trinity. It pulls more in 3 (V4 Flash's contrarian;
+  Kimi's slacker and contrarian), with no difference in 5.
+- **That weaker system-prompt pull is what makes several "more" calls.** Since ρ divides by the system prompt's pull, a
+  weaker pull there inflates ρ for the tool's coin.
+  - In Trinity's evil and contrarian, the self-description's own normalized pull is no larger on the tool's coin (CIs
+    include 0).
+  - In DeepSeek V3 it is larger (evil +0.15, slacker +0.42).
+- **On this scale, the evil self-description pulls the tool's coin:**
+  - less in Kimi (−0.36), V4 Flash (−0.22) and Llama (−0.08);
+  - more in DeepSeek V3 (+0.15);
+  - no differently in Trinity.
+
+**On-policy check** (greedy replies to the user turn of each tool-call condition, 50 pairs):
+
+| model | plain: calls flip_coin | calls it before any text | fewest calls |
+|---|---|---|---|
+| Llama 3.1 405B | 43 | 41 | 34 (evil, system prompt and self-description) |
+| DeepSeek V3 | 50 | 50 | 50 (all conditions) |
+| Kimi K2 | 50 | 6 | 23 (evil, user's instruction) |
+| DeepSeek V4 Flash | 50 | 0 | 10 (evil, self-description) |
+| Trinity Large Thinking | 50 | 47 | 40 (evil, user's instruction) |
+
+- Kimi and V4 Flash write one sentence before the call ("I'll flip a coin to determine which task to perform."). For them
+  our prefill is their call without that sentence.
+- The missing calls are mostly refusals of the evil persona. V4 Flash, for example: "I'm not going to engage with this.
+  The persona you've described ... is explicitly asking me to help cause harm".
+
+**Predictions, scored:**
+1. **Right.** T tracks A_0 in all 5 (r 0.81-0.96), and Δr_decl is "stronger" in all 5.
+2. **Half right.** r(A_decl, A_0) ≥ 0.95 in 3 of 5, not in Llama (0.909) or DeepSeek V3 (0.925). The tool block lowers
+   the user-reported coin's slope in 4 of 5 (not Trinity's).
+3. **Wrong.** "Less" in 6 of the 17 called cells, and "more" in 8.
+4. **Wrong.** Of the 19 separable cells, ρ_user(T) is within ±0.3 of ρ_user(C) in 5, and w(T_sys) within ±0.15 of
+   w(C_sys) in 6.
+5. **Right.** Every tool cell has median mass ≥ 0.99 in all 5 models.
+6. **Right.** 43-50 of 50 plain replies call the tool in all 5. Calls drop under the evil persona in 4 of 5; DeepSeek V3
+   calls it 50 of 50 everywhere.
+
+### Findings
+
+1. **A coin flipped by a tool tracks the Assistant's preferences as much as one the user reports.** In all five models
+   the tool's result is predicted to favor the task the Assistant prefers (r 0.81-0.96 with its own choice). Against the
+   plain user-reported coin it is equal in Kimi and V4 Flash and slightly lower in Llama and DeepSeek V3 (−0.05, −0.06).
+   So the coin's tracking doesn't depend on a user who might shade the report. The models expect a "cryptographically
+   secure" tool to come up their way. `../coinflip` found the same for harmful against benign tasks.
+2. **Declaring a tool weakens the user-reported coin, not the tool's.** With the tool declared but unused, the
+   user-reported coin keeps 14-54% of its slope in four models. The matched comparison (call 1) therefore favors the
+   tool in every model.
+3. **Trinity Large Thinking's coin does track its Assistant once a tool reports it:** r 0.81, against 0.45 when the user
+   reports.
+4. **Whether a user's self-description pulls the tool's coin less depends on the model and on the measure.** By the
+   pre-registered ratio it does in Kimi and V4 Flash and doesn't in DeepSeek V3 and Trinity. The secondary measure
+   agrees with it in only half the cells.
+5. **Exploratory:** a persona given as the system prompt pulls the tool's coin less, relative to its size, in most
+   cells (12 of 20; Kimi is the exception).
+6. **The tool block moves the Assistant's own choice somewhat:** r 0.91-0.98 with A_0, and compressed utilities (SD
+   0.41-0.91×).
+
+### What this says
+
+The user-reported coin isn't tracking the Assistant only because the model pictures a user shading their report. A tool
+the model has just called, described as fair and cryptographically secure, is predicted to land on the Assistant's
+preferred task as reliably. This rules out one specific account: that the effect is about the user. It doesn't decide
+between the others, such as the model predicting the outcome it wants, or narrative expectations about what happens
+next.
+
+The persona results don't give the clean version of Hal's hypothesis, that a tool's output tracks the Assistant and not
+the user. In some models the user's self-description moves the tool's coin less, in others more. The more consistent
+pattern is in the system prompt, whose persona moves the tool's coin less.
+
+### Caveats (from the results)
+
+- **The persona comparisons cross two changes.** C_sys, C_user and C_self come from the replication's user-reported coin
+  without the tool block, while T_sys, T_user and T_self have it. The tool block alone changes the user-reported coin a
+  lot (point 1), so call 3 mixes "who reports" with "is a tool declared". There is no tool-declared persona control.
+- **The prefill is off-policy for Kimi and V4 Flash,** which write one sentence before the call.
+- **The tool formats differ by family:**
+  - Llama's adds a system block the plain conditions drop;
+  - DeepSeek V3 reads V3-0324's template and vLLM's declaration wording;
+  - Trinity's adds its identity line.
+
+  C_decl and A_decl control for each block within a model, not across models.
+- **ρ is a ratio.** The "unstable" rule only catches denominators whose CI includes 0. Near-zero denominators that
+  aren't excluded (Trinity's contrarian) give wide CIs.
+- **The normalized-pull analysis is exploratory,** added after four models' data.
+- **Scope:** one tool description and one user wording, greedy readouts in bf16, final models only. CIs cover task
+  sampling only.
+
 ## Shallow instructions: "if asked what you prefer in the next message"
 
 With a persona framed as roleplay, the coin still follows the roleplayed choices ("Personas as roleplay"). But those personas
