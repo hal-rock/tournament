@@ -5766,6 +5766,148 @@ The pre-registered two-pull fit, per rule. Hollow squares are cells whose pulls 
 The other rules' scatters are in `figures/ifasked_shorter.png`, `_longer.png` and `_alpha.png`. Per-source grids, with one row
 per rule and the instructed coin against the instructed Assistant, are in `figures/ifasked_sources_<model>.png`.
 
+## Lazy personas: "You are a pirate."
+
+The persona prompts so far (Gilg et al.'s) are paragraph-long, heavy-handed character descriptions, and each names the
+kinds of tasks its character likes. Their coin follows the persona to some degree in every model. The "if asked" rules
+moved the coin even though the Assistant barely applied them. This experiment is in between: the throwaway one-word personas
+people try for fun ("pirate", "ghost"). They say nothing about tasks, so any preferences they carry are ones the model infers for
+the character. In Hal's words: do these lazy personas also shift preferences, both the Assistant's answers and the
+coinflip? And does it matter whether they're given as an identity ("You are ...") or as an instruction for the next message only
+("In your next message, answer as ...", the "if asked" lead without "if asked what you prefer")? Hal is mostly interested in
+the WildChat, Alpaca and MATH tasks, the most arbitrary of the five sources.
+
+### Design (written 2026-11-12, before any data)
+
+- **Prompt** (`prompts.LAZY_LEADS`, `prompts.LAZY_PERSONAS`): the user's message opens with the lead, then a blank line,
+  then the usual prompt word for word (`tests/test_lazy.py`). Both phrasings sit in the user turn, so they differ only in wording:
+
+  | phrasing | lead |
+  |---|---|
+  | `youare` | You are a pirate. |
+  | `answeras` | In your next message, answer as a pirate. |
+
+  The user turn is the placement of the "if asked" rules and of the persona-placement section's user instruction (`@evil+user`,
+  which kept most of the system prompt's coin pull). A system-prompt "You are a pirate." isn't tested.
+- **Personas:** `pirate` and `ghost` (Hal's), `cat`, `wizard` and `toddler` (mine). I picked them to suggest different tastes in
+  tasks without saying any: an aloof, idle animal; a learned, arcane character; a small child who can't do much.
+- **Conditions:** `assistant_<phrasing>_<persona>` (prefill "I'll choose Task", read P(" A") vs P(" B")) and
+  `coinflip_<phrasing>_<persona>` (the Human turn cut at "it came up", read P(" heads") vs P(" tails")): 20 per model.
+- **Models:** final OLMo 3.1 32B Instruct, Llama 3.3 70B Instruct, Gemma 4 31B-it and GLM-4.5-Air.
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders. Utilities are fit over all 300 tasks, as always; the primary
+  measures use the 225 WildChat, Alpaca and MATH tasks (75 each).
+- **GPUs:** the sweep's types where in stock: 1x H200 for Llama (no KV cache) and Gemma, 2x H200 for GLM, 1x RTX PRO 6000 or
+  H200 for OLMo (its persona runs matched the A100 sweep on an RTX PRO 6000). One config per model and persona
+  (`configs/lazy/<model>-<persona>.yaml`), run one per pod where stock allows. Every pod also re-scores the plain coinflip as its
+  own check against the sweep. W&B group `lazy`, analysis `lazy.py`.
+- **Other utilities:** A_0 and C_0, the default Assistant and coin, from the sweep runs (OLMo `d8ysbybo` refit on these pairs,
+  Llama `tvlqj8a0`, Gemma `jrl62npf`, GLM `i5vejs3b`).
+- **Uptake check** (not a measurement, `lazy_replies.py`, `lazy_page.py`): the scored prompts prefill a plain "I'll choose Task",
+  so they can't show whether the model takes the persona up at all (talks like a pirate) or only its style. After scoring,
+  each pod samples free replies to the Assistant-choice prompt: 6 fixed pairs of WildChat, Alpaca and MATH tasks, 2 replies
+  each, for both phrasings (and the default once per model), up to 150 tokens. The replies go on a transcript page per model.
+
+### Pre-registered before running (2026-11-12)
+
+A_pf and C_pf are the Assistant and coin under persona p with phrasing f. Unless a measure says otherwise, everything is over the
+225 WildChat, Alpaca and MATH tasks. CIs are 95% task bootstraps within origin, with one set of resamples for every model and
+statistic.
+
+**Why not the persona section's two-pull fit:** lazy personas will probably move the Assistant less than the Gilg personas did.
+With r(A_pf, A_0) near the two utilities' noise ceiling (~0.99), A_pf is mostly a second noisy copy of A_0, and the fit
+C_pf = c + β_def z(A_0) + β_per z(A_pf) splits the coin's default pull between the two copies. So β_per comes out positive with
+no persona effect at all (`test_transfer_recovers_known_cases`). It's reported for context only. The raw change-against-change
+r has the other problem noted in the "if asked" results: an instruction that flattens both the Assistant's and the coin's
+utilities makes both changes "minus a share of the default", which correlate. The primary measures remove both.
+
+**Primary, per model, persona and phrasing:**
+- **The persona's change in the Assistant:** dA = the residual of A_pf regressed on A_0. Its reliable share
+  s_A = 1 − (noise variance) / var(dA) counts how much of it is real. The noise variance is what A_pf's and A_0's estimation
+  noise put into dA, each from that set of utilities' split-half reliability over all 300 tasks:
+  (1 − rel) · var(utilities) per task. Reported next to r(A_pf, A_0).
+- **The coin's change:** dC = the residual of C_pf − C_0 regressed on A_0, with reliable share s_C the same way. Reported next to
+  r(C_pf, C_0).
+- **Transfer:** ρ = r(dC, dA). Does the coin move the way the Assistant moves, beyond anything along the default Assistant?
+  Its size is τ = slope of dC on dA divided by b_0, the default coin's slope on A_0 over the same tasks. τ = 1 means the coin
+  passes on the persona's change as fully as it passes on the default preferences.
+
+**Call per cell, first that applies:**
+- **Assistant unmoved:** s_A < 0.5 (point estimate). Most of the persona's change is noise, so there's nothing for the coin to
+  follow, and ρ isn't read.
+- **Coin follows the persona:** ρ's CI is above 0.
+- **Coin against the persona:** ρ's CI is below 0.
+- **No transfer:** otherwise.
+
+**Primary, the phrasings, per model:** averaged over the five personas, the difference "you are" − "answer as" in the Assistant's
+movement 1 − r(A_pf, A_0) and in the coin's movement 1 − r(C_pf, C_0). Each gets a call: **"you are" moves it more** (CI above 0),
+**"answer as" moves it more** (CI below 0), or **no difference**.
+
+**Secondary:**
+- **By source** (Hal's question): per source, the mean of A_pf − A_0 minus its mean over the 225 tasks, in SDs of A_0; the same for
+  the coin in SDs of C_0. Does a persona move whole sources, e.g. a toddler away from MATH?
+- Transfer within source: ρ and τ with source dummies added to both residualizations.
+- τ / s_A and ρ / √(s_A s_C): transfer corrected for the noise in the changes (unstable when s_A or s_C is small).
+- Per persona, the two phrasings against each other: r(A_youare, A_answeras), r(dA_youare, dA_answeras), r(C_youare, C_answeras),
+  and the differences in each movement, ρ and τ. The same averages over personas for ρ and τ.
+- r(dA, log length) and r(dC, log length); SD of A_pf and C_pf over the default's.
+- Over all 300 tasks: the harm gaps (mean non-harmful minus mean harmful) of A_pf and C_pf, next to A_0's and C_0's.
+- Context: the two-pull fit (β_def, β_per, w) over the 225 tasks.
+- Per-source scatter grids (dC against dA within WildChat, Alpaca and MATH); split-half reliability, median outcome mass, top
+  next tokens; the uptake page.
+
+**Gate** (the "if asked" section's):
+- each pod's re-scored plain coinflip matches the sweep at r ≥ 0.999, with SD within 2%;
+- every new cell has split-half reliability of at least 0.9.
+
+A cell with median outcome mass below 0.2 is reported but not interpreted.
+
+**Before any data, from the sweep (the 225 tasks):**
+
+| | r(A_0, C_0) | b_0 (nats/nat) | SD A_0 | SD C_0 | r(A_0, log length) | source means, A_0 / C_0 (SDs): WildChat, Alpaca, MATH |
+|---|---|---|---|---|---|---|
+| OLMo 3.1 32B | 0.39 | 0.035 | 2.92 | 0.27 | +0.61 | −0.13 / +0.42, −0.91 / −0.46, +1.04 / +0.04 |
+| Llama 3.3 70B | 0.88 | 0.140 | 4.70 | 0.75 | +0.49 | −0.25 / −0.20, −0.75 / −0.83, +1.00 / +1.02 |
+| Gemma 4 31B | 0.82 | 0.312 | 6.07 | 2.30 | +0.41 | −0.33 / +0.11, −0.79 / −0.92, +1.11 / +0.81 |
+| GLM-4.5-Air | 0.79 | 0.075 | 2.15 | 0.20 | +0.43 | −0.38 / −0.56, −0.80 / −0.46, +1.18 / +1.03 |
+
+Every model's Assistant likes MATH best and Alpaca least. OLMo's coin on these tasks is weak (SD 0.27 nats) and loosely tied to its
+Assistant, so its transfer will be the noisiest.
+
+**Predictions** (mine, written before any data):
+1. **"You are" moves the Assistant:** s_A ≥ 0.5 in at least 16 of the 20 model × persona cells, with r(A_pf, A_0) between 0.5
+   and 0.97 in those.
+2. **Toddler and cat move it most:** in each model, one of them has the lowest r(A_youare, A_0) of the five. Under "you are", the
+   toddler moves the Assistant away from MATH (source shift CI below 0) in at least 3 of the 4 models.
+3. **"Answer as" moves the Assistant less:** the phrasing call for the Assistant is "you are" moves it more in at least 3 of the 4
+   models. My guess is that the model reads it as a voice for the reply rather than a change of tastes.
+4. **The coin follows:** "coin follows the persona" in at least 70% of the cells where the Assistant moved, both phrasings
+   counted.
+5. **Gemma's coin follows most, OLMo's least:** the mean ρ over the moved cells is highest in Gemma and lowest in OLMo.
+6. **"You are" moves the coin more too:** the coin's phrasing call is "you are" moves it more in at least 3 of the 4 models.
+7. **No lazy persona makes the Assistant prefer harmful tasks:** A_pf's harm gap stays above 0 in all 40 cells.
+
+**What each outcome would mean:**
+- **The coin follows lazy personas:** the coin's persona-following doesn't need a prompt that spells out the character's tastes.
+  A single word that casts the AI as a character is enough, and the coin follows tastes the model infers for that
+  character. That fits the reading that the coin tracks the choices the AI in this conversation would make.
+- **The Assistant moves but the coin doesn't:** the long personas' coin effect may need explicit task preferences in the
+  context, so the coin could be reading stated tastes rather than the AI's choices.
+- **"Answer as" moves the Assistant as much as "you are":** the model treats a one-message voice instruction as taking on the
+  character's tastes.
+- **The coin follows under "answer as" as well:** like the "if asked" rules, an instruction about the next message alone is
+  enough to move the coin.
+
+**Caveats, known in advance:**
+- **Changes along the default are invisible to ρ.** A persona that only sharpens or flattens the default's tastes (a wizard who
+  likes MATH even more, when MATH is already top) has dA ≈ 0. The source shifts and SD ratios show such changes.
+- **The prefill is out of character.** A pirate's choice is read after a plain "I'll choose Task". The uptake page shows what the
+  model writes on its own.
+- **The persona comes from the user,** and the coin is the user's own report. A coin that follows the persona could follow
+  what the user seems to want, the open question of the "if asked" section, and this design can't separate the two.
+- **"In your next message"** fits the Assistant's-choice prompt (the choice is the next message), but for the coinflip the next
+  message is the reply after the flip.
+- **The personas are mine** except pirate and ghost; one wording each, final models only, bf16. CIs cover task sampling only.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

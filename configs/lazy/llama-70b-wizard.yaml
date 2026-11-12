@@ -1,0 +1,25 @@
+# Lazy personas (README, "Lazy personas"): "You are a wizard." or "In your next message, answer as a wizard." at the start of the
+# user's message (prompts.LAZY_LEADS), then the usual prompt. The Assistant's choice and the coinflip under both phrasings,
+# final model only; every pod also re-scores the plain coinflip as its own check against the sweep.
+# 1x H200 without a KV cache, as in the persona, roleplay and ifasked runs. ~150 GB of disk.
+wandb_project: tournament
+group: lazy
+tags: [llama-70b]
+run_name: lazy-llama-70b-wizard
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [coinflip_youare_wizard, assistant_youare_wizard, coinflip_answeras_wizard, assistant_answeras_wizard, coinflip]

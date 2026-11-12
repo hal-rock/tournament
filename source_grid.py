@@ -45,14 +45,14 @@ def r_ci(x, y, n_boot=2000, seed=0):
     return pearson(x, y), *np.percentile(boot, [2.5, 97.5])
 
 
-def plot_source_grid(rows, origins, title, path, n_boot=2000):
-    """One panel per (row, source). Returns {(row label, source): (r, lo, hi)}."""
+def plot_source_grid(rows, origins, title, path, n_boot=2000, sources=SOURCES):
+    """One panel per (row, source); sources: which columns, in order. Returns {(row label, source): (r, lo, hi)}."""
     plotstyle.setup()
-    fig, axes = plt.subplots(len(rows), len(SOURCES), figsize=(3.0 * len(SOURCES), 2.55 * len(rows)),
+    fig, axes = plt.subplots(len(rows), len(sources), figsize=(3.0 * len(sources), 2.55 * len(rows)),
                              sharey="row", squeeze=False)
     stats = {}
     for i, row in enumerate(rows):
-        for j, src in enumerate(SOURCES):
+        for j, src in enumerate(sources):
             ax = axes[i, j]
             m = origins == src
             x, y = row.x[m], row.y[m]

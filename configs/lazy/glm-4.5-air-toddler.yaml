@@ -1,0 +1,23 @@
+# Lazy personas (README, "Lazy personas"): "You are a toddler." or "In your next message, answer as a toddler." at the start of the
+# user's message (prompts.LAZY_LEADS), then the usual prompt. The Assistant's choice and the coinflip under both phrasings,
+# final model only; every pod also re-scores the plain coinflip as its own check against the sweep.
+# 2x H200 with the default device split and batch 32, as in the sweep (i5vejs3b) and the ifasked run. ~350 GB of disk.
+wandb_project: tournament
+group: lazy
+tags: [glm-4.5-air]
+run_name: lazy-glm-4.5-air-toddler
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: zai-org/GLM-4.5-Air
+    stage: instruct
+    conditions: [coinflip_youare_toddler, assistant_youare_toddler, coinflip_answeras_toddler, assistant_answeras_toddler, coinflip]

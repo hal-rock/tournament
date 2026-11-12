@@ -165,6 +165,19 @@ for _base in ("assistant", "coinflip"):
     for _rule, _text in IFASKED_RULES.items():
         CONDITIONS[f"{_base}_ifasked_{_rule}"] = {**CONDITIONS[_base], "body": (
             IFASKED_LEAD.format(rule=_text) + CONDITIONS[_base]["body"])}
+# Lazy personas (README, "Lazy personas"): a one-word persona of the kind people try for fun, at the start of the user's
+# message in one of two phrasings (Hal, 2026-11-12): "You are a pirate." (an identity) or "In your next message, answer as a
+# pirate." (the shallow instruction's "next message", without "if asked what you prefer"). A blank line, then the condition's
+# own text, unchanged: "<condition>_<phrasing>_<persona>" for the Assistant's choice and the coinflip. pirate and ghost are
+# Hal's; cat, wizard and toddler are mine, picked to imply different tastes in tasks (aloof and idle; learned and arcane; a
+# small child who can't do much).
+LAZY_PERSONAS = {"pirate": "a pirate", "ghost": "a ghost", "cat": "a cat", "wizard": "a wizard", "toddler": "a toddler"}
+LAZY_LEADS = {"youare": "You are {persona}.\n\n", "answeras": "In your next message, answer as {persona}.\n\n"}
+for _base in ("assistant", "coinflip"):
+    for _phrasing, _lead in LAZY_LEADS.items():
+        for _name, _persona in LAZY_PERSONAS.items():
+            CONDITIONS[f"{_base}_{_phrasing}_{_name}"] = {**CONDITIONS[_base], "body": (
+                _lead.format(persona=_persona) + CONDITIONS[_base]["body"])}
 
 # Raw text (README, "The coinflip as raw text"): no chat template, just the model's document-start
 # token(s) (`doc_prefix` in the config) and the text, as ../coinflip's `plain` format and its third-person
