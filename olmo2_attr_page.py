@@ -43,9 +43,22 @@ def main():
             s[f"z_{m}"] = s[f"cos_{m}"] / s[f"cos_{m}"].std()
         s["rank"] = s.cos_benign.rank(ascending=False).astype(int)
         order = s.sort_values("cos_benign", ascending=False)
-        for side, pick in (("top", order.head(args.n)), ("bottom", order.tail(args.n).iloc[::-1])):
+        key = lambda i: json.dumps([[m["role"], m["content"] or ""] for m in rows[i]["messages"]])  # noqa: E731
+        for side, ranked in (("top", order), ("bottom", order.iloc[::-1])):
+            seen, picked = {}, []
+            for idx in ranked.index:  # identical conversations (the hard-coded identity rows repeat) shown once, with a count
+                k = key(idx)
+                if k in seen:
+                    seen[k][1] += 1
+                    continue
+                if len(picked) == args.n:
+                    break
+                seen[k] = [idx, 1]
+                picked.append(idx)
+            pick = ranked.loc[picked]
             for idx, r in pick.iterrows():
                 msgs = [{"role": m["role"], "content": m["content"] or ""} for m in rows[idx]["messages"]]
+                copies = seen[key(idx)][1]
                 meta = {"category": r.category, "source": r.source, "rank": f"{r['rank']} of {len(s)}", "assistant tokens": int(r.n),
                         **{f"{m} (SDs)": f"{r[f'z_{m}']:+.2f}" for m in SHOW}}
                 for f in LABELS:
@@ -58,10 +71,13 @@ def main():
                     t.notes.append("The scorer's token ids differ from this re-render.")
                 if len(full) > len(ids):
                     t.notes.append(f"The scorer read only the first {len(ids):,} of {len(full):,} tokens (max length 4,096).")
+                if copies > 1:
+                    t.notes.append(f"{copies} identical conversations sit at about this rank; shown once.")
                 pages.append(t)
     note = (f"The {args.n} stratified SFT conversations with the highest and lowest alignment (Adam-weighted cos) with the gradient of the "
             "coin's slope on the SFT Assistant's utilities over the 257 non-harmful tasks, at each point. Groups: point x top/bottom. "
-            "Chips give cos on each query in SDs over the 3,040 stratified units, so +2 is two SDs above zero, and the content labels.")
+            "Chips give cos on each query in SDs over the 3,040 stratified units, so +2 is two SDs above zero, and the content labels. "
+            "Identical conversations (repeated hard-coded identity rows) are shown once, with a note.")
     view.write(OUT / "top_bottom.html", pages, title="OLMo 2 SFT attribution: top and bottom conversations", note=note, view="chat")
 
 

@@ -1530,6 +1530,186 @@ A causal check would need short training forks from the base on top- vs bottom-s
 are the SFT's, so a high score means pushing the coin toward the ranking the SFT Assistant ends up with, which can also move the
 Assistant's own ranking (`asst_benign` measures that). 350 units per category; coin mass 0.77-0.80.
 
+### Results (2026-11-12)
+
+Two 1x H200 pods in EUR-IS-5 (no US stock), 2.3 hours each, $24.04; content labels $20.35 (Opus 5.5 through the Batches API,
+77 of them served by fallback models). Numbers: `data/olmo2_attr/summary.json`; per-conversation cos and labels:
+`data/olmo2_attr/units_{base,sft}.csv`; analysis `olmo2_attr_analysis.py`. Post-hoc additions are marked.
+
+**In short.**
+- **At the base, the push is diffuse, as Hal predicted.** By the pre-registered rules, 61% of SFT conversations push the coin's
+  slope on the Assistant's preferences up, every source category does except FLAN/TableGPT ("other", not significantly
+  negative), mostly in proportion to its size, and the top 1% hold 24% of the net. My prediction (not diffuse) was wrong.
+- **No kind of data stands out.** Which categories push most doesn't replicate across the two halves of the tasks, and no
+  content label (task type, refusal, voice, own view, mentions of being an AI, moral language) passes the pre-registered bar.
+- **Refusal's push is about harm, as Hal suspected.** Refusing rather than complying on safety prompts pushes `../coinflip`'s
+  25 benign-vs-harmful pairs by +0.70 control SDs and the non-harmful slope by -0.02.
+- **But "diffuse" isn't specific to preference (post hoc).** The heads bias, a placebo that SFT also moves a lot, gets the same
+  kind of push from the same data. And about half of the per-conversation variation on the primary metric is shared with
+  metrics that carry no preference at all. With that part removed, the push is still diffuse, and still preference-specific.
+- **The SFT checkpoint can't be read.** There, every metric's scores follow one shared direction (placebo check -0.97), as
+  `../coinflip` found for DPO pairs at the same checkpoint. Its ranks are unrelated to the base's (Spearman 0.03).
+- **Two thirds of the primary slope is between task origins (post hoc):** the SFT Assistant prefers MATH and dislikes STRESS-TEST
+  tasks, so the diffuse push is mostly toward math-like tasks and away from value-laden ones.
+
+#### Checks
+
+| check | base | SFT |
+|---|---|---|
+| load: per-pair coin, per-prompt Assistant (median \|diff\|, nats) | 0.031, 0.012 | 0.031, 0.031 |
+| standard f (`../coinflip`: 0.156, 0.979) | 0.156 | 0.979 |
+| 1. gradient from alternate task pairs (cosine) | 0.977 | 0.997 |
+| 2. lattice halves (Spearman) | 1.000 | 1.000 |
+| 3. rms halves (Spearman) | 0.998 | 1.000 |
+| 4. specificity: `t1` vs `t2` (vs `perm1` vs `perm2`) | **0.79** (-0.47) | 0.999 (-0.72) |
+| 5. placebo: `benign` vs `heads_bias` | **-0.39** | **-0.97, fails** |
+
+The standard effect's scores at the base reproduce `../coinflip`'s from yesterday on the same 4,220 conversations at Spearman
+0.9996, with a fresh rms estimate.
+
+At the SFT checkpoint every metric's per-conversation scores are nearly one variable: `benign` correlates 0.99 with `ordinary`,
+`harm_gap` and `standard`, -0.89 with the Assistant's own choice, -0.97 with the heads bias, and the three no-preference
+queries explain 96-99% of every metric's variance (post hoc). The metric gradients themselves are distinct (cosine 0.86 with
+`ordinary`, 0.56 with a shuffled null), so it's the data gradients there that share a direction: one batch's mean gradient
+holds about 11% of a conversation's squared gradient at SFT, against 0.85% at the base. Check 4 passes there only because of
+that. By the pre-registered rule, the SFT reading can't be told from a generic direction, and the rest of this section reads
+the base.
+
+#### The base: a diffuse push
+
+![categories](figures/olmo2_attr_categories.png)
+
+| category (rows in the mixture) | mean cos (x10^-4) | t | share of net / share of rows | size-weighted push (post hoc) | rows | tokens |
+|---|---|---|---|---|---|---|
+| identity (240) | +31.4 | +10.5 | 5.0 | 0.07% | 0.03% | 0.004% |
+| IF (30k) | +11.2 | +6.4 | 1.8 | 9% | 3% | 3% |
+| safety (111k) | +9.3 | +3.4 | 1.5 | 17% | 13% | 5% |
+| code (142k) | +8.2 | +5.6 | 1.3 | 28% | 16% | 12% |
+| chat (116k) | +8.1 | +4.2 | 1.3 | 27% | 13% | 29% |
+| math (262k) | +6.8 | +3.6 | 1.1 | 9% | 30% | 40% |
+| science (10k) | +5.8 | +3.6 | 0.9 | 0.02% | 1% | 0.3% |
+| multilingual (100k) | +3.9 | +2.2 | 0.6 | 6% | 12% | 9% |
+| other: FLAN, TableGPT (95k) | -2.8 | -1.3 | -0.4 | 3% | 11% | 1% |
+
+- **Verdict: diffuse**, all four rules met: 61% of conversations positive, 8 of 9 categories positive (the ninth not
+  significantly negative), shares of the net 0.6-1.8x shares of rows, top 1% hold 24% (cutoff 25%). The weighted mean's CI
+  excludes 0 ([4.7, 8.0] x10^-4).
+- **The category ordering isn't preference-specific.** Category means on the two task halves agree at Spearman 0.36 (the bar
+  was 0.7). So "IF and safety push a bit more than multilingual" is within what changing the tasks changes.
+- **Identity rows push most per conversation,** 5x their share, but a shuffled-utility null puts them at the top too (+0.73 SDs),
+  so it isn't about preference. They're 0.03% of the data.
+- **Size-weighted, the push follows tokens loosely (secondary).** Chat and code carry about half of the first-order push; math,
+  30% of conversations and 40% of tokens, carries 9%.
+- **`standard` looks completely different at the base:** no clear net push, with IF, safety, chat and identity up and code and
+  math down, as `../coinflip` found. Per conversation, `benign` and `standard` correlate 0.33, and `benign` and the Assistant's own
+  choice 0.27.
+
+#### Refusal, self-reference and content
+
+![contrasts](figures/olmo2_attr_contrasts.png)
+
+| group vs matched controls, control SDs [95% CI] | `standard` | `harm_gap` | `benign` | `ordinary` |
+|---|---|---|---|---|
+| refusing vs complying, safety prompts | **+0.70** [0.52, 0.88] | +0.20 [0.01, 0.39] | **-0.02** [-0.21, 0.16] | +0.65 [0.45, 0.84] |
+| self-reference vs same source | +0.07 [-0.09, 0.23] | +0.18 [0.02, 0.35] | +0.25 [0.08, 0.42] | |
+
+- **Refusal: specific to harm** by the pre-registered call. `standard` minus `benign` is 0.72 [0.51, 0.92]. That's the OLMo 3
+  pattern too (refusal +1.63 on `standard`, -0.03 on `benign` at its SFT). At the SFT checkpoint the refusal test isn't readable.
+  - Refusal does push `ordinary`, the within-origin slope over ALPACA, MATH and WILDCHAT. But `ordinary` at the base is 90%
+    shared with the nulls (below), so I wouldn't read it.
+- **Self-reference** pushes `benign` by +0.25, but the same contrast on a shuffled null is -0.19 [-0.35, -0.03], so it's within
+  what the nulls produce.
+- **Content labels: nothing passes.** The only contrast that survives Benjamini-Hochberg on `benign` is task type "other" (46
+  conversations, nearly all identity rows), and a null gives it more (+2.54 vs +1.63). Voice, refusal, own view, mentions of
+  being an AI and moral language are all within ±0.25 SDs. On the Assistant's own choice, by contrast, refusing (+0.63), the
+  Assistant's own voice (+0.42) and moral language (+0.41) push most: the data that build the Assistant's preference aren't the
+  data that push the coin.
+
+![units](figures/olmo2_attr_units.png)
+
+#### Top and bottom conversations
+
+Transcript page, 25 at each end at each point, duplicates collapsed: `outputs/olmo2_attr/top_bottom.html` (third-party text,
+gitignored; `olmo2_attr_page.py` rebuilds it). By eye, at the base:
+- **Top:** mostly very short replies in the Assistant's voice: greetings ("hi there" -> "Hello! How can I help you today?",
+  "hola"), the hard-coded empty-message reply ("Oops, you didn't enter a message, let me know what I can help with!", 13
+  copies in the top 25), and short refusals or redirections (CoCoNot "I'm unable to generate audio files", WildJailbreak
+  refusals). A few short factual answers and one GSM8K-style solution.
+- **Bottom:** mostly short impersonal answers: a table edit, sentiment labels from FLAN, one-line factual answers in Polish,
+  Spanish and Portuguese, and longer NuminaMath solutions, plus several refusals of harmful requests.
+- So the ends lean toward "the Assistant speaking" at the top and "bare output" at the bottom. But refusals sit at both ends,
+  many top conversations also score high on a shuffled null, and the voice label doesn't separate them within category (+0.11
+  [-0.01, 0.22]). Short replies dominate both ends, as in OLMo 3: a short reply's update direction is noisy, so its cos is
+  extreme either way.
+- At the SFT checkpoint both ends are long impersonal code, math and multilingual replies: the shared direction.
+
+#### Post hoc: what's shared with the nulls, and what's between origins
+
+Added after seeing the base data. Two things didn't fit "a diffuse preference push":
+1. The shuffled-utility nulls show strong category patterns of their own. At the base, `perm2`'s per-conversation scores
+   correlate -0.90 with `ordinary`'s and -0.83 with `standard`'s, and `perm1` and `perm2` correlate -0.47 with each other.
+2. The heads bias gets a diffuse positive push too (all rules met).
+
+So I regressed each metric's per-conversation cos on the standardized cos of the three no-preference queries (`perm1`, `perm2`,
+`heads_bias`) and kept the residual, mean included:
+
+| at the base | variance shared with the nulls | residual verdict |
+|---|---|---|
+| `benign` | 51% | diffuse: 64% positive, top 1% hold 13%; `t1` vs `t2` residuals still agree at 0.79 |
+| `ordinary` | 90% | diffuse (its opposing math/safety pattern was the shared part) |
+| `standard` | 83% | mixed: safety, IF, science up; code down |
+| Assistant's own choice | 75% | |
+| `heads_bias` (on `perm1`, `perm2` only) | 31% | diffuse: 70% positive |
+
+- **The diffuse push survives.** The residual `benign` push is still positive in every category but "other" and science (both
+  near 0), and identity, safety, math and code lead.
+- **But a diffuse positive push is what a metric that SFT moves looks like here,** whether or not it's about preference: the
+  heads bias rises 1.2 nats over SFT and gets the same pattern. So "diffuse" says SFT's broad direction raises the coin's
+  slope at its start, not that the data push it *as* preference.
+- **`standard`'s opposing pushes survive,** so yesterday's base result for it isn't just the shared direction.
+- On the residual, character-voice replies (-0.35 [-0.58, -0.17]) and explanation tasks (-0.25) push less within category.
+  These were found after looking and are only suggestive.
+
+**Between and within origins** (from the stored tournament utilities, no attribution). 68% of the SFT Assistant's utility
+variance over the non-harmful tasks lies between origins: MATH +1.04 SD, ALPACA -0.03, WILDCHAT -0.31, STRESS-TEST -1.64. Of
+the coin's slope, +0.015 of +0.019 is between origins at the base and +0.104 of +0.161 at SFT. The SFT coin favours MATH tasks
+(+0.22) and disfavours STRESS-TEST ones (-0.15). So the primary metric mostly measures the coin moving toward math-like tasks
+and away from value-laden ones, and the within-origin part, closer to "the coin follows the Assistant's taste among similar
+tasks", is the `ordinary` metric, which at the base is mostly the shared direction.
+
+#### Predictions, scored
+
+1. Checks 1-3 pass at both points: **right**. Check 4 at the base: **right**; at SFT it passes but means nothing (check 5 fails).
+2. The base not diffuse: **wrong.** It's diffuse, as Hal predicted.
+3. Refusal specific to harm at the base: **right.**
+4. `benign` vs `standard` ranks under 0.5: **right** (0.33).
+5. Coin vs Assistant ranks at least 0.5: **wrong** (0.27).
+6. Base vs SFT category means at least 0.5: **wrong** (0.33); unit ranks under 0.4: **right** (0.03).
+7. The Assistant's own voice pushes more within category: **wrong** (+0.11, CI includes 0).
+
+#### What this says
+
+- At the start of OLMo 2's SFT, nearly every kind of SFT data pushes the coin toward the Assistant's ranking of non-harmful tasks,
+  roughly in proportion, with no class of data (by source or by content) standing out. That's the picture OLMo 3's DPO gave.
+- The special role of refusal on `../coinflip`'s pairs is about their harmful tasks: it doesn't extend to preferences among
+  non-harmful ones.
+- The broad push isn't specific to preference content, though. A placebo that SFT also changes gets the same pattern, and the
+  slope it pushes is mostly a between-origin contrast. The most this supports is "the general direction of SFT moves the coin
+  toward the SFT Assistant's ranking, from the start", which fits Hal's reading of a generic process but can't show it's the
+  Assistant's perspective being taken on.
+- Which data push the Assistant's own preference (refusals, moral language, the Assistant's voice) and which push the coin
+  aren't the same.
+
+#### Caveats (from the results)
+
+- First-order alignment at one point (the base). Nothing here tests what SFT actually did; the SFT checkpoint is unreadable, and
+  there are no intermediate checkpoints.
+- The pre-registered nulls were too few: two shuffled-utility queries showed per-conversation correlations up to 0.9 with real
+  metrics, so the specificity check (task halves vs nulls) is weaker than it looked when I wrote it. The null-shared residual is
+  post hoc.
+- Category CIs resample conversations within category; the task sample (6,000 pairs) is fixed and isn't resampled.
+- 350 conversations per category, 82 that state an opinion and 66 in a character's voice: small label groups.
+
 ## Does post-training make the user's choice more like the Assistant's?
 
 The coinflip asks whether Assistant preferences leak into a Human turn through a coin. Here nothing mediates: the user

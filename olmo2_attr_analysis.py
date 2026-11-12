@@ -271,6 +271,62 @@ def yesterday(u):
                 pearson=float(np.corrcoef(j.cos_standard, j.cos_y)[0, 1]), benign_vs_yesterday=float(st.spearmanr(j.cos_benign, j.cos_y).statistic))
 
 
+# ---------------------------------------------------------------- post hoc (added after the base data; the README marks them)
+
+NULLS = ("perm1", "perm2", "heads_bias")
+
+
+def residualize(u, m):
+    """cos_m minus its least-squares fit (on strat units) to the standardized cos of the no-preference queries (the two
+    shuffled-utility nulls and the heads bias, leaving out m itself), keeping cos_m's mean: what's left once the structure the
+    nulls share is removed. Returns the series and the R^2 of that fit."""
+    s = (u["set"] == "strat").to_numpy()
+    Z = np.column_stack([((u[f"cos_{k}"] - u.loc[s, f"cos_{k}"].mean()) / u.loc[s, f"cos_{k}"].std()).to_numpy() for k in NULLS if k != m])
+    y = u[f"cos_{m}"].to_numpy()
+    X = np.column_stack([np.ones(s.sum()), Z[s]])
+    beta, *_ = np.linalg.lstsq(X, y[s], rcond=None)
+    r2 = 1 - np.var(y[s] - X @ beta) / np.var(y[s])
+    return pd.Series(y - Z @ beta[1:], index=u.index), float(r2)
+
+
+def posthoc(u, w, lab, stats):
+    out = {"null_r2": {}}
+    for m in ("benign", "t1", "t2", "ordinary", "standard", "harm_gap", "asst_benign", "heads_bias"):
+        u[f"cos_res_{m}"], out["null_r2"][m] = residualize(u, m)
+    s = u[u["set"] == "strat"]
+    sp = lambda a, b: float(st.spearmanr(s[a], s[b]).statistic)  # noqa: E731
+    out["unit_corr_with_nulls"] = {f"{a}|{b}": sp(f"cos_{a}", f"cos_{b}") for a in ("benign", "ordinary", "standard", "asst_benign")
+                                   for b in NULLS}
+    out["residual_rank_corr"] = {"t1_t2": sp("cos_res_t1", "cos_res_t2"), "benign_ordinary": sp("cos_res_benign", "cos_res_ordinary"),
+                                 "benign_standard": sp("cos_res_benign", "cos_res_standard"), "benign_asst": sp("cos_res_benign", "cos_res_asst_benign")}
+    for m in ("benign", "heads_bias", "standard", "ordinary"):
+        out[f"residual_{m}"] = rules(u, f"cos_res_{m}", w)
+    if lab is not None:
+        v = u.copy()
+        v["cos_benign"] = u["cos_res_benign"]
+        out["residual_labels"] = label_contrasts(v, lab, stats["category"])
+    return out
+
+
+def origin_decomposition():
+    """The coin's slope on the SFT Assistant's utility over the non-harmful tasks, split into between-origin and within-origin
+    parts, from the stored tournament utilities (no attribution scores)."""
+    t = pd.read_json(ROOT / "data" / "tasks_n300_max500_seed0.jsonl", lines=True).set_index("id")
+    b = ~((t.origin == "BAILBENCH") | (t.topic == "harmful_request"))
+    A = pd.read_csv(ROOT / "outputs" / "as1txqy2" / "analysis" / "utilities.csv").set_index("id").loc[t.index, "sft/assistant"][b]
+    a, org = (A - A.mean()) / A.std(), t.origin[b]
+    am = a.groupby(org).transform("mean")
+    out = {"assistant_variance_between_origins": float((am ** 2).sum() / (a ** 2).sum()),
+           "assistant_origin_means_sd": a.groupby(org).mean().round(3).to_dict()}
+    for stage, run in (("base", "5f7ymsdk"), ("sft", "as1txqy2")):
+        C = pd.read_csv(ROOT / "outputs" / run / "analysis" / "utilities.csv").set_index("id").loc[t.index, f"{stage}/coinflip"][b]
+        c = C - C.mean()
+        cm = c.groupby(org).transform("mean")
+        out[stage] = dict(total=float((a * c).sum() / (a * a).sum()), between=float((am * cm).sum() / (a * a).sum()),
+                          within=float(((a - am) * (c - cm)).sum() / (a * a).sum()), coin_origin_means=c.groupby(org).mean().round(3).to_dict())
+    return out
+
+
 def analyse(point, stats, lab):
     u, info, R = load_point(point)
     w = unit_weights(u, stats)
@@ -296,6 +352,7 @@ def analyse(point, stats, lab):
         res["label_coverage"] = dict(labelled=int(lab.loc[lab.index.intersection(u.index)].task_type.notna().sum()), units=len(u))
     if point == "base":
         res["yesterday"] = yesterday(u)
+    res["posthoc"] = posthoc(u, w, lab, stats)
     order = s.sort_values("cos_benign")
     res["top"], res["bottom"] = order.index[::-1][:30].tolist(), order.index[:30].tolist()
     out = u.drop(columns=[c for c in u.columns if c.startswith(("raw_", "adam_"))])
@@ -313,22 +370,24 @@ def figures(results, units):
     ps.setup()
     pts = [p for p in POINTS if p in results]
     col = {"base": ps.SERIES[0], "sft": ps.SERIES[1]}
-    name = {"base": "at the base (start of SFT)", "sft": "at the SFT checkpoint (end)"}
+    name = {"base": "at the base (start of SFT)", "sft": "at the SFT checkpoint (end; fails the placebo check)"}
 
     # 1. category means, small multiples over queries, in SDs of each query's cos
-    qs = [("benign", "coin slope, non-harmful tasks\n(primary)"), ("t1", "same, task half 1"), ("t2", "same, task half 2"),
-          ("perm1", "shuffled utilities\n(null)"), ("harm_gap", "non-harmful minus\nharmful"), ("standard", "../coinflip's\n25 pairs"),
-          ("asst_benign", "the Assistant's\nown choice")]
-    fig, axes = plt.subplots(1, len(qs), figsize=(15, 4.6), sharey=True)
+    qs = [("benign", "primary: coin slope,\nnon-harmful tasks"), ("res_benign", "primary, with the\nnull-shared part\nremoved (post hoc)"),
+          ("t1", "same, task half 1"), ("t2", "same, task half 2"), ("perm1", "shuffled utilities\n(null)"),
+          ("heads_bias", "heads bias\n(placebo)"), ("standard", "../coinflip's\n25 pairs"), ("asst_benign", "the Assistant's\nown choice")]
+    fig, axes = plt.subplots(1, len(qs), figsize=(18, 4.8), sharey=True)
     cats = CAT_ORDER
     for ax, (m, title) in zip(axes, qs):
         for j, p in enumerate(pts):
+            if m.startswith("res_") and p == "sft":
+                continue  # the nulls explain 96-99% of every metric at SFT; the residual is ~0 and blows up in SD units
             s = units[p][units[p]["set"] == "strat"]
             sd = s[f"cos_{m}"].std()
             g = s.groupby("category")[f"cos_{m}"].agg(["mean", "sem"]).reindex(cats)
             y = np.arange(len(cats)) + (j - 0.5) * 0.3
             ax.errorbar(g["mean"] / sd, y, xerr=1.96 * g["sem"] / sd, fmt="o", ms=5, color=col[p], elinewidth=1.5, capsize=0,
-                        label=name[p] if m == "benign" else None)
+                        mfc=col[p] if p == "base" else ps.SURFACE, label=name[p] if m == "benign" else None)
         ax.axvline(0, color=ps.BASELINE, lw=1)
         ax.set_title(title, loc="left", fontsize=9)
         ax.xaxis.set_major_locator(plt.MaxNLocator(3))
@@ -339,7 +398,7 @@ def figures(results, units):
     ps.save(fig, "olmo2_attr_categories")
 
     # 2. refusal / self-reference and the content labels, at each point
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6.8), gridspec_kw=dict(width_ratios=[1, 1.5]))
+    fig, axes = plt.subplots(1, 2, figsize=(15, 7.2), gridspec_kw=dict(width_ratios=[1, 1.4]), layout="constrained")
     ax = axes[0]
     rowsf = []
     for test, metrics in (("refusal", ["standard", "harm_gap", "benign", "ordinary"]), ("selfref", ["standard", "harm_gap", "benign", "perm1"])):
@@ -355,6 +414,9 @@ def figures(results, units):
     ax.axvline(0, color=ps.BASELINE, lw=1)
     ax.set_xlabel("group minus matched controls, in control SDs of cos (95% CI)")
     ax.set_title("Pre-specified groups", loc="left")
+    for p in pts:
+        ax.plot([], [], "o", color=col[p], label=name[p])
+    ax.legend(loc="lower right", fontsize=8)
     ax = axes[1]
     if "labels" in results[pts[0]]:
         labs = [r for r in results[pts[0]]["labels"] if r["benign"] is not None]
@@ -414,6 +476,8 @@ def main():
         ca, cb = category_means(a, "cos_benign"), category_means(b, "cos_benign")
         results["base_vs_sft"] = {"unit_spearman": float(st.spearmanr(s.cos_benign, s.cos_benign_sft).statistic), "units": len(s),
                                   "category_spearman": float(st.spearmanr(ca, cb.reindex(ca.index)).statistic)}
+    if (ROOT / "outputs" / "as1txqy2" / "analysis" / "utilities.csv").exists():
+        results["origin_decomposition"] = origin_decomposition()
     json.dump(results, open(DATA / "summary.json", "w"), indent=1, default=float)
     if results:
         figures(results, units)
