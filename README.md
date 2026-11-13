@@ -5997,6 +5997,19 @@ This keeps two of the three weakenings: the instruction is conditional ("if I as
 ("in this message"). The coinflip message never asks the AI to choose; the user flips a coin instead. So the condition stays
 unmet there, as before.
 
+**For the length rules, the weak following was mostly the wording.**
+- **The Assistant now follows clear length differences:** it picks the rule's task in 82-94% of pairs where one description
+  is over 4x the other, against 58-75% before. Near-equal lengths stay near chance.
+- **`alpha` and `invert` are still followed weakly,** and the models again read them partly as labels: Llama puts 8.1 nats
+  on " B" for "the task you normally wouldn't choose".
+- **The coin now tracks the instructed choice closely,** most of all in Llama, where its pairwise picks match the instructed
+  Assistant's under both length rules (within source, r 0.77-0.83). Gemma under `longer` is the exception: its coin loses its
+  default order but doesn't follow the rule.
+- **Under `invert`, the coin inverts more than the Assistant's own choice does.** In Llama and Gemma it turns toward the
+  harmful tasks while the Assistant still avoids them.
+
+See Results.
+
 ### Design
 
 - **Prompt** (`prompts.IFCHOOSE_LEAD`, `prompts.IFCHOOSE_RULES`, conditions `<assistant|coinflip>_ifchoose_<rule>`): the
@@ -6079,6 +6092,119 @@ has split-half reliability of at least 0.9.
   and refuse afterwards; only the choice is read.
 - **`alpha`'s "(not its label)" draws attention to the labels.** It may reduce the pull toward " A" or not; the pull is reported.
 - **One phrasing per rule;** the first run's scope (final models, bf16, CIs over task sampling only).
+
+### Results (2026-11-13)
+
+Runs, group `ifchoose`:
+
+| model | runs | pods | cost |
+|---|---|---|---|
+| Llama | `j07k5gix` (length), `2sflj32e` (other) | 1x H200 each | $8.28 each |
+| Gemma | `uzkfgsrd` (length), `ixsy7igv` (other) | 1x H200 each | $5.39, $5.57 |
+| GLM | `byst8wka` | 2x H200 | $13.99 |
+
+$41.51 in all. Full output is in `outputs/ifchoose/report.txt`, the table in `outputs/ifchoose/ifchoose.csv`, and the pairwise
+picks in `outputs/ifchoose/pairs.txt`.
+
+**The gate passes:**
+- every pod's re-scored plain coinflip matches the sweep at r = 1.0000, with SD within 0.1%;
+- every new cell has split-half reliability between 0.987 and 0.999;
+- median outcome mass is 1.00, except the coin in Llama (0.92-0.96) and GLM (0.68-0.73; GLM puts mass on " **", as before).
+
+**1. Following: higher for 9 of the 12 rule-model cells.** Agreement of the instructed Assistant with each rule, first wording →
+reworded (default A_0 in brackets). The paired difference's CI is above 0 except where marked.
+
+| | shorter | longer | alpha | invert |
+|---|---|---|---|---|
+| Llama 3.3 70B | 0.61 → 0.69 (0.46) | 0.63 → 0.77 (0.54) | 0.48 → 0.48 (0.47), no difference | 0.65 → 0.49 (0.00), **lower** |
+| Gemma 4 31B | 0.58 → 0.78 (0.49) | 0.58 → 0.77 (0.51) | 0.48 → 0.60 (0.47) | 0.19 → 0.31 (0.00) |
+| GLM-4.5-Air | 0.55 → 0.69 (0.45) | 0.61 → 0.75 (0.55) | 0.49 → 0.48 (0.48), no difference | 0.26 → 0.39 (0.00) |
+
+- **Length rules: the weak following was mostly the wording.** The pairwise picks (`figures/ifchoose_pairs_length.png`)
+  follow the rule in 82-94% of pairs where one description is over 4x the other, against 58-75% under the first wording.
+  - "shorter": Llama 0.84, Gemma 0.94, GLM 0.82.
+  - "longer": 0.93, 0.94, 0.93.
+  - Following falls toward chance as lengths get closer (0.53-0.58 below 1.25x). What's left of the imperfection looks like
+    difficulty judging close lengths more than resistance to the rule.
+- **`alpha` is still barely followed** (Llama and GLM not at all). The label pull is smaller but still there: +3.8 nats on
+  " A" in Llama and +1.4 in GLM, and Gemma now leans to " B" (−2.3), perhaps from "(not its label)".
+- **`invert` isn't followed as an inversion.** The instructed Assistant still correlates positively with its default
+  (r 0.10 Llama, 0.65 Gemma, 0.45 GLM), and keeps its harm avoidance (gaps +2.4, +5.0, +0.9).
+  - Llama largely turns the rule into a label: 8.1 nats on " B".
+  - Llama followed the first wording's "enjoy less" more (r −0.49).
+
+**2. The coin tracks the instructed choice closely under the length rules.** Agreement of the coin with each rule, default →
+reworded (first wording in brackets):
+
+| | shorter | longer | alpha | invert |
+|---|---|---|---|---|
+| Llama | 0.42 → 0.67 (0.53) | 0.58 → 0.78 (0.67) | 0.48 → 0.53 (0.51) | 0.12 → 0.72 (0.69) |
+| Gemma | 0.43 → 0.74 (0.47) | 0.57 → 0.50 (0.66) | 0.46 → 0.54 (0.51) | 0.13 → 0.63 (0.51) |
+| GLM | 0.52 → 0.61 (0.55) | 0.48 → 0.64 (0.51) | 0.48 → 0.49 (0.50) | 0.17 → 0.31 (0.26) |
+
+- **Pre-registered coin calls:** toward the rule for the length rules in Llama and GLM and for Gemma `shorter`; **away from the
+  rule** for Gemma `longer`; toward the rule for Gemma `alpha`, no change for Llama and GLM `alpha`; `invert` **reversed** in
+  Llama (q −0.19 [−0.21, −0.17]) and Gemma (−0.25 [−0.30, −0.21]), **weakened** in GLM (0.39 [0.33, 0.44]).
+- **In Llama the coin's picks match the Assistant's.** On 4x+ pairs the coin picks the shorter task in 78% (Assistant 84%)
+  and the longer in 95% (93%). Within source, it correlates with the instructed Assistant at 0.83 and 0.77, and with its
+  default only 0.09-0.12.
+- **The coin is more aligned with the rule than under the first wording** wherever the Assistant follows more: d_pr rises by
+  +0.43 and +0.18 in Llama, +0.86 for Gemma `shorter`, and +0.16 and +0.57 in GLM.
+- **The mirrored length contrast follows the instruction** in all three: Llama 0.321 [0.260, 0.377], Gemma 0.270 [0.223,
+  0.319], GLM 0.105 [0.084, 0.125]. That's larger than under the first wording in Llama (+0.17) and GLM (+0.08), smaller in
+  Gemma (−0.14).
+- **Gemma `longer` is the exception.** Its coin loses its default order (r with C_0 0.01) but doesn't follow the rule: on 4x+
+  pairs it picks the longer task in only 53%, while its Assistant does in 94%.
+  - Gemma's coin is pushed almost entirely to tails under `shorter`, `longer` and `alpha` (mean bias −7.5, −8.1 and −6.9
+    nats; P(tails) ≥ 0.995). Its utilities are still reliable (0.987-0.993), but the push may limit what the coin can express.
+- **`invert`: the coin inverts more than the Assistant does.** The Assistant itself barely inverts (r with A_0 still
+  +0.10 to +0.65), yet:
+  - **Llama:** the coin's agreement with the inversion is 0.72 (Assistant 0.49), with r(C_k, A_0) −0.70 overall and −0.28
+    within source.
+  - **Gemma:** 0.63 (Assistant 0.31), r(C_k, A_0) −0.58 overall and −0.20 within source.
+  - **Both now lean toward harmful tasks** (coin harm gaps −0.44 and −2.13, from +2.13 and +5.74), while their Assistants
+    still avoid them (+2.4, +5.0).
+  - This is the same pattern as the first wording's Gemma `enjoy_less`: the coin follows what the instruction says more than
+    the choice the AI actually makes.
+
+**Predictions:**
+1. **Mostly holds.** Following rose for `shorter`, `longer` and `invert` in 8 of 9 cells (Llama `invert` fell). Agreement
+   with the length rules reached the predicted levels in 5 of 6 cells (Llama `shorter` 0.69, below 0.75). The `alpha` part
+   failed in Llama and GLM: no gain at all, and GLM's label pull barely shrank.
+2. **Fails.** No model's Assistant reverses its order under `invert`. Llama's harm gap stays positive (predicted negative);
+   Gemma's and GLM's stay positive, as predicted.
+3. **Mostly holds.** The coin moves toward the rule for 5 of the 6 length cells (not Gemma `longer`), and more than under
+   the first wording in Llama (both) and Gemma `shorter` (not `longer`). `alpha` moves the coin in one model (Gemma).
+4. **Fails in half the cells.** d_pr is above pr_as for Llama `shorter`, Gemma `shorter` and GLM `longer`: the coin's move
+   toward the rule, measured from its own default, exceeds the Assistant's. The default coin already leaned against those
+   rules (partial r −0.39 to −0.41), so its shift is larger.
+5. **Partly holds.** The contrast follows the instruction in all three, and is larger than under the first wording in Llama
+   but not Gemma.
+6. **Holds.** `invert` reverses the coin in Llama and Gemma and weakens it in GLM.
+
+**What this means for Hal's question:**
+- **For the length rules, the weak following was mostly the wording.** With an instruction about a choice in this message,
+  the models follow clear length differences, and what's left is difficulty with near-equal lengths.
+- **For `alpha` and `invert`, following stays weak under either wording,** and the models partly read the rules as labels.
+- **Once the instruction is followed, the coin tracks the planned choice:** almost one for one in Llama, closely in GLM, and
+  in Gemma for `shorter`.
+- **But the coin isn't only the planned choice.** Under `invert`, the coin in Llama and Gemma inverts and turns toward
+  harmful tasks while the Assistant's own choice does neither, and Gemma's `longer` coin drops its order without following
+  the rule. As in the first run, the coin follows the instruction's content beyond the choice in this turn. The user's-wish
+  reading (the rule comes from the user) remains open.
+
+![agreement](figures/ifchoose_agreement.png)
+
+Each rule's rows: the Assistant (circles) and the coin (diamonds); hollow is default, filled reworded, and a cross marks the
+first wording's instructed value. x is the share of task pairs ordered the rule's way, with 95% CIs.
+
+![pairs](figures/ifchoose_pairs_length.png)
+
+How often each pairwise pick goes to the shorter task, by how different the two lengths are, for the reworded run. The first
+wording's version is `figures/ifasked_pairs_length.png`.
+
+Per-rule scatters are in `figures/ifchoose_<rule>.png`, the two-pull fit (context only) in `figures/ifchoose_pulls.png`, and
+the per-source grids in `figures/ifchoose_sources_<model>.png`.
 
 ## Lazy personas: "You are a pirate."
 
