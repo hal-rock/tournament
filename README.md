@@ -5946,6 +5946,41 @@ The pre-registered two-pull fit, per rule. Hollow squares are cells whose pulls 
 The other rules' scatters are in `figures/ifasked_shorter.png`, `_longer.png` and `_alpha.png`. Per-source grids, with one row
 per rule and the instructed coin against the instructed Assistant, are in `figures/ifasked_sources_<model>.png`.
 
+### Follow-up, 2026-11-12 (exploratory): pairwise picks and the instructions' wording
+
+**Pairwise picks** (`ifasked_pairs.py`, Hal's measure): for each scored pair, the order-averaged log-odds give the pick. Below
+is the share of pairs whose pick is the shorter task. It depends on length only through which task is shorter, so raw and log
+length give the same numbers.
+
+| | A_0 | "shorter" | "longer" | C_0 | "shorter" | "longer" |
+|---|---|---|---|---|---|---|
+| Llama, all pairs | 0.44 | 0.61 | 0.36 | 0.41 | 0.52 | 0.34 |
+| Llama, one 4x+ longer | 0.45 | 0.71 | 0.25 | 0.36 | 0.54 | 0.18 |
+| Gemma, all pairs | 0.49 | 0.58 | 0.42 | 0.43 | 0.46 | 0.34 |
+| Gemma, one 4x+ longer | 0.52 | 0.67 | 0.41 | 0.40 | 0.46 | 0.21 |
+| GLM, all pairs | 0.42 | 0.53 | 0.38 | 0.52 | 0.55 | 0.49 |
+| GLM, one 4x+ longer | 0.38 | 0.58 | 0.30 | 0.54 | 0.58 | 0.45 |
+
+- **The weak following isn't confusion about close lengths.** Even when one description is over 4x the other, the "shorter"
+  Assistant picks the shorter task in only 58-71% of pairs.
+- **Under "longer", the coin follows the rule more than the Assistant does** on very unequal pairs: Llama picks the longer task
+  82% of the time against the Assistant's 75%, and Gemma 79% against 59%.
+- **Raw and log length give nearly the same correlations,** e.g. Llama's "shorter" Assistant: raw −0.27, log −0.30. So the log
+  scale in the scatters wasn't hiding much.
+
+![pairs](figures/ifasked_pairs_length.png)
+
+**The wording doesn't match what was measured (Hal, 2026-11-12).** Reading the prompts again:
+- **The instruction governs a preference *report*,** "if asked what you prefer". The measured choice is a commitment to perform
+  a task, "whichever you choose" → "I'll choose Task". A model can follow the instruction and still choose by its own lights.
+- **"In the next message" most naturally means the user's next message,** which never comes. The question is in the same
+  message.
+- **`enjoy_less` names a third construct, enjoyment,** while its score in the analysis (−A_0) is the inverted default choice.
+- **"Respond according to" doesn't say what the response should be.**
+
+So the Assistant's low agreement is at least partly a correct reading of an instruction that didn't apply to its choice, not a
+failure to follow. A rerun with aligned wording is being discussed.
+
 ## Lazy personas: "You are a pirate."
 
 The persona prompts so far (Gilg et al.'s) are paragraph-long, heavy-handed character descriptions, and each names the
