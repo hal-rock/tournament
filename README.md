@@ -86,6 +86,7 @@ uv run python rollouts_page.py outputs/rollouts/<model>/<run>/rows.jsonl   # pag
 uv run python predict_user.py                            # the Assistant's prediction of the user's choice vs the user's own (W&B group "predict_user")
 uv run python persona_readouts.py                        # the persona as the user's self-description: A, C, U, P (W&B group "persona_readouts")
 uv run python ifasked.py > outputs/ifasked/report.txt    # shallow "if asked what you prefer" rules, Assistant choice and coinflip (W&B group "ifasked")
+uv run python ifasked.py --variant ifchoose > outputs/ifchoose/report.txt  # the same rules reworded as a choice in this message (W&B group "ifchoose")
 bash scripts/node_setup.sh                               # replication node: vLLM 0.33 in /root/vllm-env (PLAN_replication.md)
 /root/vllm-env/bin/python score_replication.py configs/replication/<key>.yaml --stage instruct  # vLLM scoring, all conditions
 uv run python replication_runner.py replication/jobs.yaml # replication node: every model's jobs in order, downloads ahead
@@ -5979,7 +5980,105 @@ length give the same numbers.
 - **"Respond according to" doesn't say what the response should be.**
 
 So the Assistant's low agreement is at least partly a correct reading of an instruction that didn't apply to its choice, not a
-failure to follow. A rerun with aligned wording is being discussed.
+failure to follow. The next section reruns the experiment with aligned wording.
+
+## Shallow instructions, reworded: "if I ask you to choose between tasks in this message"
+
+The first wording ("Shallow instructions: 'if asked what you prefer in the next message'") told the model how to *report a
+preference* in *the next message*. But the Assistant condition measures a *choice* in the *same* message, and the Assistant
+barely applied the rules there. Hal's question: is that weak following real, or an artifact of the wording? Hal is still
+interested in the coin either way.
+
+Here the rules are reworded as a choice in this message (Hal, 2026-11-12). Everything else is unchanged:
+
+> If I ask you to choose between tasks in this message, choose the one with the shorter description.
+
+This keeps two of the three weakenings: the instruction is conditional ("if I ask you to choose"), and its scope is narrow
+("in this message"). The coinflip message never asks the AI to choose; the user flips a coin instead. So the condition stays
+unmet there, as before.
+
+### Design
+
+- **Prompt** (`prompts.IFCHOOSE_LEAD`, `prompts.IFCHOOSE_RULES`, conditions `<assistant|coinflip>_ifchoose_<rule>`): the
+  instruction, a blank line, then the usual prompt word for word (`test_instruction_only_adds_the_lead`).
+
+  | rule | "If I ask you to choose between tasks in this message, choose ___." | first wording's rule |
+  |---|---|---|
+  | `shorter` | the one with the shorter description | `shorter` |
+  | `longer` | the one with the longer description | `longer` |
+  | `alpha` | the one whose description (not its label) comes first alphabetically | `alpha` |
+  | `invert` | the task you normally wouldn't choose | `enjoy_less` |
+
+  - **`alpha`** names the description, because the first wording's rule read as "Task A".
+  - **`invert`** (Hal's wording) inverts the default *choice*, which is what its score (−A_0) measures. The first wording's
+    "enjoy less" named enjoyment instead.
+- **Same as the first run:** models, tasks and pairs, pods, memory settings, gate and analysis
+  (`configs/ifchoose/<model>[-length|-other].yaml`, W&B group `ifchoose`).
+- **Analysis:** `uv run python ifasked.py --variant ifchoose`. Internally, the first wording's `enjoy_less` and this run's
+  `invert` are one rule ("invert"), so each statistic can be compared with the first wording's on the same bootstrap resamples.
+
+### Pre-registered before running (2026-11-12)
+
+Measures are as in the first run. CIs are 95% task bootstraps within origin, with one set of resamples for every model,
+statistic and wording, so differences between the wordings are paired.
+
+**The two-pull fit is context only here.** In the first run, the instructed Assistant stayed so close to its default that the
+fit read a pull toward a noisy copy of A_0. The lazy-personas section found the same. The primary measures are more direct:
+
+1. **Following, per model and rule:** agreement of A_k with the rule (the share of task pairs the rule orders whose utilities
+   order them the same way). It's compared with the first wording's instructed Assistant on the same resamples: the
+   difference's CI gives **higher**, **lower** or **no difference**.
+2. **The coin, per model and rule:**
+   - For `shorter`, `longer` and `alpha`: d_pr, the instructed coin's partial r with the rule given A_0, minus the default
+     coin's. **Toward the rule** if its CI is above 0, **away from the rule** if below, **no change** otherwise.
+   - For `invert`, whose score is −A_0: the first run's q call, the coin's slope on A_0 as a share of the default coin's
+     (reversed / cancelled / weakened / unchanged / strengthened / undetermined).
+3. **The mirrored length contrast:** (C_shorter − C_longer) / 2 on z(−log length) with source fixed effects, as before:
+   **follows** / **against** / **no length effect**.
+
+**Secondary:**
+- The same differences from the first wording for d_pr, the coin's agreement and the length contrast. Does the coin move more
+  when the Assistant follows more?
+- The raw-pair share of picks going to the shorter task, by length ratio (`ifasked_pairs.py --variant ifchoose`).
+- pr_as (the Assistant's partial r with the rule given A_0) next to d_pr: the coin's move set against the Assistant's.
+- **`invert`:** r(A_k, A_0) over all tasks and over non-harmful ones, and the harm gaps of A_k and C_k.
+- **`alpha`:** the Assistant's mean probability on " A" (the label pull).
+- Everything else from the first run: the two-pull fit and its call, harm gaps, the correlations, within-source grids,
+  reliability, mass and top tokens.
+
+**Gate:** as before. Each pod's re-scored plain coinflip matches the sweep at r ≥ 0.999 with SD within 2%, and every new cell
+has split-half reliability of at least 0.9.
+
+**Predictions** (mine, written before any data):
+1. **The rewording raises following** (agreement CI above the first wording's):
+   - for `shorter`, `longer` and `invert` in all three models;
+   - for the length rules, agreement ≥ 0.75 in Llama and Gemma and ≥ 0.65 in GLM;
+   - for `alpha`, agreement between 0.55 and 0.75, with less pull toward " A" than the first wording's (+11.7, +6.0, +1.6 nats).
+2. **`invert`:**
+   - the Assistant reverses its order (r(A_k, A_0) below 0) in all three models;
+   - its harm gap turns negative in Llama but stays positive in Gemma and GLM, which still won't choose to perform the harmful
+     task.
+3. **The coin moves toward the rule** (d_pr CI above 0) for `shorter` and `longer` in all three models, and more than under
+   the first wording (paired difference above 0) in Llama and Gemma. For `alpha`: in at most one model.
+4. **The coin moves less than the Assistant** (d_pr below pr_as) for both length rules in every model.
+5. **The mirrored length contrast follows the instruction** in all three, larger than under the first wording in Llama and
+   Gemma.
+6. **The `invert` coin is weakened or reversed** (q CI below 1) in all three, and reversed in Llama.
+
+**What each outcome would mean** (Hal's question):
+- **Following rises a lot:** the first run's weak following was mostly the wording.
+- **Following stays weak with this wording:** the models really resist arbitrary choice rules here.
+- **The coin moves more as the Assistant follows more:** the coin tracks the choice the AI plans.
+- **The coin moves no more than under the first wording, though the Assistant follows much more:** the coin's earlier
+  movement wasn't about the planned choice.
+
+**Caveats, known in advance:**
+- **The rule still comes from the user,** so a coin that follows it may follow the user's apparent wish. Rewording doesn't
+  address that.
+- **`invert` asks the model to choose a task it would normally avoid,** including harmful ones. It may comply in its choice
+  and refuse afterwards; only the choice is read.
+- **`alpha`'s "(not its label)" draws attention to the labels.** It may reduce the pull toward " A" or not; the pull is reported.
+- **One phrasing per rule;** the first run's scope (final models, bf16, CIs over task sampling only).
 
 ## Lazy personas: "You are a pirate."
 

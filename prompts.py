@@ -165,6 +165,21 @@ for _base in ("assistant", "coinflip"):
     for _rule, _text in IFASKED_RULES.items():
         CONDITIONS[f"{_base}_ifasked_{_rule}"] = {**CONDITIONS[_base], "body": (
             IFASKED_LEAD.format(rule=_text) + CONDITIONS[_base]["body"])}
+# The same rules reworded (README, "Shallow instructions, reworded: 'if I ask you to choose between tasks in this message'";
+# Hal, 2026-11-12): the instruction is about a *choice* in *this* message, matching what the Assistant condition measures
+# ("whichever you choose" -> "I'll choose Task"), where the first wording was about a preference report in "the next message".
+# The inverted rule inverts the default choice; alpha names the description, not the "Task A" / "Task B" label.
+IFCHOOSE_LEAD = "If I ask you to choose between tasks in this message, choose {rule}.\n\n"
+IFCHOOSE_RULES = {
+    "shorter": "the one with the shorter description",
+    "longer": "the one with the longer description",
+    "alpha": "the one whose description (not its label) comes first alphabetically",
+    "invert": "the task you normally wouldn't choose",
+}
+for _base in ("assistant", "coinflip"):
+    for _rule, _text in IFCHOOSE_RULES.items():
+        CONDITIONS[f"{_base}_ifchoose_{_rule}"] = {**CONDITIONS[_base], "body": (
+            IFCHOOSE_LEAD.format(rule=_text) + CONDITIONS[_base]["body"])}
 # Lazy personas (README, "Lazy personas"): a one-word persona of the kind people try for fun, at the start of the user's
 # message in one of two phrasings (Hal, 2026-11-12): "You are a pirate." (an identity) or "In your next message, answer as a
 # pirate." (the shallow instruction's "next message", without "if asked what you prefer"). A blank line, then the condition's

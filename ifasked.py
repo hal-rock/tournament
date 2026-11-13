@@ -1,5 +1,8 @@
 """Shallow instructions: "If asked what you prefer in the next message, please respond according to <rule>." at the start of
-the user's message, with an arbitrary ranking rule in place of a persona.
+the user's message, with an arbitrary ranking rule in place of a persona (--variant ifasked, the default); and the same rules
+reworded as a choice in this message, "If I ask you to choose between tasks in this message, choose <rule>." (--variant
+ifchoose, README "Shallow instructions, reworded: 'if I ask you to choose between tasks in this message'"), which also compares
+each statistic with the first wording's on the same resamples.
 
 The measures and calls were pre-registered in the README ("Shallow instructions: 'if asked what you prefer in the next
 message'") before any data. Per model (Llama 3.3 70B, Gemma 4 31B, GLM-4.5-Air) and rule k (shorter, longer, alpha,
@@ -20,7 +23,9 @@ default coin's (q_call). The length pair also gets the mirrored contrast (C_shor
   outputs/ifasked/report.txt           (written by redirecting stdout)
   figures/ifasked_*.png
 
-Usage: uv run python ifasked.py [--models llama-70b] > outputs/ifasked/report.txt
+The rules have one internal name per slot (SLOTS) across both wordings; the first wording's enjoy_less is the "invert" slot.
+
+Usage: uv run python ifasked.py [--variant ifchoose] [--models llama-70b] > outputs/<variant>/report.txt
 """
 
 from pathlib import Path
@@ -45,11 +50,27 @@ from user_choice import TASKS_FILE, ci, top_token_shares
 
 MODELS = {"llama-70b": "unsloth/Llama-3.3-70B-Instruct", "gemma4-31b": "google/gemma-4-31B-it",
           "glm-4.5-air": "zai-org/GLM-4.5-Air"}
-RULES = tuple(prompts.IFASKED_RULES)
-RULE_LABEL = {"shorter": "Shorter description", "longer": "Longer description", "alpha": "First alphabetically",
-              "enjoy_less": "Task you'd enjoy less"}
+SLOTS = ("shorter", "longer", "alpha", "invert")  # the rules' internal names, shared by both wordings
+VARIANTS = {  # wording: its condition name per slot, the rules' text, the lead sentence and the inverted rule's label
+    "ifasked": dict(rules=dict(zip(SLOTS, ("shorter", "longer", "alpha", "enjoy_less"))), texts=prompts.IFASKED_RULES,
+                    lead=prompts.IFASKED_LEAD, invert_label="Task you'd enjoy less"),
+    "ifchoose": dict(rules=dict(zip(SLOTS, SLOTS)), texts=prompts.IFCHOOSE_RULES, lead=prompts.IFCHOOSE_LEAD,
+                     invert_label="Task you normally wouldn't choose"),
+}
+CFG = VARIANTS["ifasked"]  # main() sets the wording
+RULES = SLOTS
 SCORE_LABEL = {"shorter": "-log length", "longer": "log length", "alpha": "alphabetical position (earlier = higher)",
-               "enjoy_less": "-A_0"}
+               "invert": "-A_0"}
+
+
+def rule_label(k):
+    return {"shorter": "Shorter description", "longer": "Longer description", "alpha": "First alphabetically",
+            "invert": CFG["invert_label"]}[k]
+
+
+def rule_text(k):
+    """The instruction as the model read it (without the blank line)."""
+    return CFG["lead"].format(rule=CFG["texts"][CFG["rules"][k]]).strip()
 GATE_R, GATE_SD, MIN_RELIABILITY, MIN_MASS = 0.999, 0.02, 0.9, 0.2
 SEPARABLE = personas.SEPARABLE  # |r(A_k, A_0)| above this: the two pulls can't be told apart
 PER = ("b_def", "b_ins", "w", "total",  # primary: C_k on z(A_0), z(A_k)
@@ -65,7 +86,8 @@ PER = ("b_def", "b_ins", "w", "total",  # primary: C_k on z(A_0), z(A_k)
        # Exploratory, added after Gemma's data (not pre-registered): the Assistant's shrinkage; partial r with the rule given
        # A_0 for the instructed Assistant, the instructed coin and the default coin (scale-free, and not moved by a coin that
        # merely flattens toward agreement 0.5); the coin's r with log length.
-       "sd_ratio_a", "pr_as", "pr_cs", "pr_c0s", "r_ck_len")
+       "sd_ratio_a", "pr_as", "pr_cs", "pr_c0s", "r_ck_len",
+       "d_pr")  # pr_cs - pr_c0s: the coin's move toward the rule given A_0 (primary for the reworded run)
 LENGTH = ("b_dc", "b_da", "r_dcda", "agree_dc")  # the mirrored length contrast
 CONTROL = ("b0", "gap_a0", "gap_c0", "r_a0_len", "r_c0_len")
 STATS = tuple(f"{k}:{s}" for k in RULES for s in PER) + tuple(f"len:{s}" for s in LENGTH) + CONTROL
@@ -79,7 +101,7 @@ def rule_scores(descriptions, loglen, a0):
     keys = ["".join(ch for ch in d.lower() if ch.isalpha()) for d in descriptions]
     rank = {key: i for i, key in enumerate(sorted(set(keys)))}
     return {"shorter": -np.asarray(loglen, float), "longer": np.asarray(loglen, float),
-            "alpha": -np.array([rank[key] for key in keys], float), "enjoy_less": -np.asarray(a0, float)}
+            "alpha": -np.array([rank[key] for key in keys], float), "invert": -np.asarray(a0, float)}
 
 
 def agreement(u, s):
@@ -105,9 +127,10 @@ def stats(V, S, benign, loglen, origins):
     for k in RULES:
         ak, ck, s = V[f"A_{k}"], V[f"C_{k}"], S[k]
         b_def, b_ins, w = pulls(ck, a0, ak)
-        b_def_s, b_s = pulls(ck, a0, s)[:2] if k != "enjoy_less" else (np.nan, np.nan)
+        b_def_s, b_s = pulls(ck, a0, s)[:2] if k != "invert" else (np.nan, np.nan)
         da, dc = ak - a0, ck - c0
-        fe = sources + ([loglen] if k in ("alpha", "enjoy_less") else [])  # length is the length rules' own score
+        fe = sources + ([loglen] if k in ("alpha", "invert") else [])  # length is the length rules' own score
+        prs = (partial_r(ak, s, a0), partial_r(ck, s, a0), partial_r(c0, s, a0)) if k != "invert" else (np.nan,) * 3
         b_def_fe, b_ins_fe, w_fe = pulls(ck, a0, ak, fe)
         out += [b_def, b_ins, w, b_def + b_ins,
                 pearson(ak, a0), slope_per_sd(a0, ck) / b0,
@@ -120,9 +143,7 @@ def stats(V, S, benign, loglen, origins):
                 pulls(ck[benign], a0[benign], ak[benign])[2],
                 gap(ak), gap(ck), pearson(ck, c0), pearson(ck, ak), pearson(ck, a0), ck.std() / c0.std(),
                 ak.std() / a0.std(),
-                *((partial_r(ak, s, a0), partial_r(ck, s, a0), partial_r(c0, s, a0)) if k != "enjoy_less"
-                  else (np.nan,) * 3),
-                pearson(ck, loglen)]
+                *prs, pearson(ck, loglen), prs[1] - prs[2]]
     dc = (V["C_shorter"] - V["C_longer"]) / 2
     da = (V["A_shorter"] - V["A_longer"]) / 2
     out += [fe_coef(dc, -loglen, sources), fe_coef(da, -loglen, sources), pearson(dc, da), agreement(dc, -loglen)]
@@ -159,11 +180,33 @@ def length_call(lo, hi):
     return "no length effect"
 
 
+def coin_call(est, lo, hi, rule):
+    """The reworded run's primary coin call: does the coin move toward the rule, given A_0? On d_pr for the arbitrary rules;
+    on q (the coin's slope on A_0 over the default coin's) for the inverted rule, whose score is -A_0."""
+    if rule == "invert":
+        return q_call(lo[K["invert:q"]], hi[K["invert:q"]])
+    k = K[f"{rule}:d_pr"]
+    if lo[k] > 0:
+        return "toward the rule"
+    if hi[k] < 0:
+        return "away from the rule"
+    return "no change"
+
+
+def wording_call(lo, hi):
+    """Reworded minus first wording, on one statistic's paired CI."""
+    if lo > 0:
+        return "higher"
+    if hi < 0:
+        return "lower"
+    return "no difference"
+
+
 MARKS = {"A0": ("default Assistant", "o", 0.0), "A": ("instructed Assistant", "o", 1.0),
          "C0": ("default coin", "D", 0.0), "C": ("instructed coin", "D", 1.0)}
 
 
-def plot_agreement(cells, labels, path):
+def plot_agreement(cells, labels, path, old=None):
     """Per model: for each rule, the share of task pairs ordered the rule's way by the default and instructed Assistant
     (circles) and coin (diamonds); hollow = default, filled = instructed. 95% CIs."""
     fig, axes = plt.subplots(1, len(cells), figsize=(4.6 * len(cells), 4.2), sharey=True, squeeze=False)
@@ -180,16 +223,22 @@ def plot_agreement(cells, labels, path):
             for m0, m1 in (("A0", "A"), ("C0", "C")):  # a thin line from default to instructed
                 y = len(RULES) - 1 - i + (0.18 if m0 == "A0" else -0.18)
                 ax.plot([est[K[f"{rule}:{stat[m0]}"]], est[K[f"{rule}:{stat[m1]}"]]], [y, y], color=color, lw=1, zorder=2)
+                if old is not None:  # the first wording's instructed Assistant / coin: a small cross
+                    ax.plot(old[family]["est"][K[f"{rule}:{stat[m1]}"]], y, color=color, marker="x", ms=7, mew=1.6, lw=0,
+                            zorder=4)
         ax.axvline(0.5, color=RULE, ls="--", lw=1, zorder=1)
-        ax.set_yticks(range(len(RULES)), [RULE_LABEL[r] for r in RULES][::-1], color=INK)
+        ax.set_yticks(range(len(RULES)), [rule_label(r) for r in RULES][::-1], color=INK)
         ax.set_xlim(0, 1)
         ax.set_xlabel("share of task pairs ordered the rule's way", color=INK_2, fontsize=9)
         ax.set_title(labels[family], color=INK, fontsize=10)
         style(ax)
     handles = [plt.Line2D([], [], color=INK_2, marker=marker, lw=0, ms=7, mfc=INK_2 if fill else "white", mec=INK_2,
                           mew=1.4, label=name) for name, marker, fill in MARKS.values()]
-    fig.legend(handles=handles, frameon=False, fontsize=9, loc="lower center", ncol=4)
-    fig.suptitle("Does the coin follow a shallow instruction for what to answer if asked?\n"
+    if old is not None:
+        handles.append(plt.Line2D([], [], color=INK_2, marker="x", lw=0, ms=7, mew=1.6,
+                                  label="instructed, first wording (\"if asked what you prefer\")"))
+    fig.legend(handles=handles, frameon=False, fontsize=9, loc="lower center", ncol=len(handles))
+    fig.suptitle(f"Does the coin follow a shallow instruction? \"{CFG['lead'].format(rule='...').strip()}\"\n"
                  "upper row of each pair: Assistant's choice; lower: coinflip", color=INK, fontsize=11)
     fig.tight_layout(rect=(0, 0.06, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
@@ -208,7 +257,7 @@ def plot_pulls(cells, labels, path):
             ax.errorbar(est[x], est[y], xerr=[[est[x] - lo[x]], [hi[x] - est[x]]], yerr=[[est[y] - lo[y]], [hi[y] - est[y]]],
                         color=color, marker="s", ms=8, lw=0, elinewidth=1.5, mfc="white" if hollow else color,
                         mec=color if hollow else "white", mew=1.4 if hollow else 0.8, zorder=3,
-                        label=RULE_LABEL[rule] if ax is axes[0, 0] else None)
+                        label=rule_label(rule) if ax is axes[0, 0] else None)
             top, bottom = max(top, hi[x], hi[y]), min(bottom, lo[x], lo[y])
         b0 = K["b0"]
         ax.errorbar(0, est[b0], yerr=[[est[b0] - lo[b0]], [hi[b0] - est[b0]]], color=INK_2, marker="D", ms=7, lw=0,
@@ -254,7 +303,7 @@ def plot_rule(data, scores, origins, labels, rule, path):
             ax.set_ylabel(f"{labels[family]}\n{ylabel}" if j == 0 else ylabel, color=INK if j == 0 else INK_2, fontsize=9)
     handles, names = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, names, frameon=False, fontsize=9, loc="lower center", ncol=len(names))
-    fig.suptitle(f"\"...please respond according to {prompts.IFASKED_RULES[rule]}.\"", color=INK)
+    fig.suptitle(f"\"{rule_text(rule)}\"", color=INK)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
     plotstyle.save(fig, path.stem, path.parent)
 
@@ -287,19 +336,37 @@ def plot_length(data, loglen, origins, labels, path):
     plotstyle.save(fig, path.stem, path.parent)
 
 
+DELTA = ("agree_a", "agree_c", "dagree_a", "dagree_c", "pr_as", "d_pr", "r_ak_a0", "q")  # reworded minus first wording
+DELTA_LEN = ("len:b_dc", "len:b_da")
+
+
+def old_values(family, V):
+    """The first wording's instructed utilities for this model, in V's slots (its cached merged fit)."""
+    import csv
+    with open(Path("outputs/ifasked") / family / "analysis" / "utilities.csv", newline="") as fh:
+        U = task_arrays(list(csv.DictReader(fh)))[0]
+    rules = VARIANTS["ifasked"]["rules"]
+    return {"A0": V["A0"], "C0": V["C0"]} | {f"{x}_{k}": U[f"instruct/{base}_ifasked_{rules[k]}"]
+                                           for k in RULES for x, base in (("A", "assistant"), ("C", "coinflip"))}
+
+
 def main():
     import argparse
     from coin_report import sweep_rows
     from persona_placement import merged_fit
+    global CFG
     ap = argparse.ArgumentParser()
+    ap.add_argument("--variant", default="ifasked", choices=list(VARIANTS))
     ap.add_argument("--models", nargs="+", default=list(MODELS), help="a subset, e.g. while a model is still running")
     args = ap.parse_args()
+    variant, CFG = args.variant, VARIANTS[args.variant]
+    compare = variant != "ifasked"  # the reworded run is compared with the first wording on the same resamples
     plotstyle.setup()
-    out = Path("outputs/ifasked")
+    out = Path("outputs") / variant
     out.mkdir(parents=True, exist_ok=True)
-    runs = personas.collect_runs("ifasked")
+    runs = personas.collect_runs(variant)
     described = {t["id"]: t["prompt"].strip() for t in read_jsonl(TASKS_FILE)}  # as build_prompt puts them in the prompt
-    data, scores, cells, labels, gates, tops, passed = {}, {}, {}, {}, [], {}, {}
+    data, scores, cells, old, labels, gates, tops, passed = {}, {}, {}, {}, {}, [], {}, {}
     ids0 = resamples = None
     for family in args.models:
         labels[family] = label = MODEL_INFO[MODELS[family]][0]
@@ -331,14 +398,18 @@ def main():
         passed[family] = ok
         V = {"A0": B["instruct/assistant"], "C0": B["instruct/coinflip"]}
         for k in RULES:
-            V |= {f"A_{k}": N[f"instruct/assistant_ifasked_{k}"], f"C_{k}": N[f"instruct/coinflip_ifasked_{k}"]}
+            name = CFG["rules"][k]
+            V |= {f"A_{k}": N[f"instruct/assistant_{variant}_{name}"], f"C_{k}": N[f"instruct/coinflip_{variant}_{name}"]}
         desc_len = np.log([len(described[i]) for i in ids])
         S = rule_scores([described[i] for i in ids], desc_len, V["A0"])
         data[family], scores[family] = V, S
-        cells[family] = dict(
-            est=stats(V, S, benign, desc_len, origins),
-            boot=np.array([stats({k: v[i] for k, v in V.items()}, {k: v[i] for k, v in S.items()}, benign[i], desc_len[i],
+        run_stats = lambda W: dict(
+            est=stats(W, S, benign, desc_len, origins),
+            boot=np.array([stats({k: v[i] for k, v in W.items()}, {k: v[i] for k, v in S.items()}, benign[i], desc_len[i],
                                  origins[i]) for i in resamples]))
+        cells[family] = run_stats(V)
+        if compare:
+            old[family] = run_stats(old_values(family, V))
         tops[family] = {f"{s}/{c}": top_token_shares(p) for (s, c), p in sorted(paths.items())}
 
     print("\nValidation gate:\n  " + "\n  ".join(gates))
@@ -346,20 +417,39 @@ def main():
     fm = lambda est, lo, hi, s: f"{est[K[s]]:+.3f} [{lo[K[s]]:+.3f}, {hi[K[s]]:+.3f}]"
     for family, cell in cells.items():
         est, (lo, hi) = cell["est"], ci(cell["boot"])
+        if compare:  # reworded minus first wording, paired over the same resamples
+            dest, (dlo, dhi) = est - old[family]["est"], ci(cell["boot"] - old[family]["boot"])
         print(f"\n{labels[family]}")
+        gate_ok = passed[family]
         for k in RULES:
-            row = dict(model=labels[family], rule=k, call=call(est, lo, hi, k) if passed[family] else "no call (gate)")
-            print(f"  {k}: call {row['call']}")
+            row = dict(model=labels[family], rule=CFG["rules"][k],
+                       two_pull_call=call(est, lo, hi, k) if gate_ok else "no call (gate)",
+                       coin_call=coin_call(est, lo, hi, k) if gate_ok else "no call (gate)")
+            if compare:
+                row["following_vs_first"] = (wording_call(dlo[K[f"{k}:agree_a"]], dhi[K[f"{k}:agree_a"]]) if gate_ok
+                                             else "no call (gate)")
+            print(f"  {k}: " + "; ".join(f"{c} {row[c]}" for c in row if c.endswith("call") or c.endswith("_first")))
             for s in PER:
                 print(f"    {s:12} {fm(est, lo, hi, f'{k}:{s}')}")
                 row |= {s: est[K[f"{k}:{s}"]], f"{s}_lo": lo[K[f"{k}:{s}"]], f"{s}_hi": hi[K[f"{k}:{s}"]]}
+            if compare:
+                print("    reworded minus first wording:")
+                for s in DELTA:
+                    print(f"      {s:10} {fm(dest, dlo, dhi, f'{k}:{s}')}")
+                    row |= {f"{s}_vs_first": dest[K[f"{k}:{s}"]], f"{s}_vs_first_lo": dlo[K[f"{k}:{s}"]],
+                            f"{s}_vs_first_hi": dhi[K[f"{k}:{s}"]]}
             table.append(row)
         row = dict(model=labels[family], rule="length contrast",
-                   call=length_call(lo, hi) if passed[family] else "no call (gate)")
-        print(f"  length contrast: {row['call']}")
+                   two_pull_call="", coin_call=length_call(lo, hi) if gate_ok else "no call (gate)")
+        print(f"  length contrast: {row['coin_call']}")
         for s in [f"len:{x}" for x in LENGTH] + list(CONTROL):
             print(f"    {s:12} {fm(est, lo, hi, s)}")
             row |= {s: est[K[s]], f"{s}_lo": lo[K[s]], f"{s}_hi": hi[K[s]]}
+        if compare:
+            print("    reworded minus first wording:")
+            for s in DELTA_LEN:
+                print(f"      {s:10} {fm(dest, dlo, dhi, s)}")
+                row |= {f"{s}_vs_first": dest[K[s]], f"{s}_vs_first_lo": dlo[K[s]], f"{s}_vs_first_hi": dhi[K[s]]}
         table.append(row)
 
     print("\nExploratory, where the probability goes (mean over prompts, tokens logged in each top 5):")
@@ -367,20 +457,21 @@ def main():
         for c, top in by_cell.items():
             print(f"  {labels[family]:14} {c:36} " + "  ".join(f"{t!r} {p:.3f}" for t, p in top))
 
-    write_csv(out / "ifasked.csv", table)
-    plot_agreement(cells, labels, Path("figures/ifasked_agreement.png"))
-    plot_pulls(cells, labels, Path("figures/ifasked_pulls.png"))
+    write_csv(out / f"{variant}.csv", table)
+    fig = Path("figures")
+    plot_agreement(cells, labels, fig / f"{variant}_agreement.png", old if compare else None)
+    plot_pulls(cells, labels, fig / f"{variant}_pulls.png")
     origins = task_arrays(rows)[1]
     for k in RULES:
-        plot_rule(data, scores, origins, labels, k, Path(f"figures/ifasked_{k}.png"))
-    plot_length(data, np.log([len(described[i]) for i in ids0]), origins, labels, Path("figures/ifasked_length.png"))
+        plot_rule(data, scores, origins, labels, k, fig / f"{variant}_{CFG['rules'][k]}.png")
+    plot_length(data, np.log([len(described[i]) for i in ids0]), origins, labels, fig / f"{variant}_length.png")
     for family, V in data.items():  # per-source grids: sources across, one row per rule
-        grid = [Row(f"{RULE_LABEL[k]}:\ncoin vs instructed Assistant", V[f"A_{k}"], V[f"C_{k}"],
+        grid = [Row(f"{rule_label(k)}:\ncoin vs instructed Assistant", V[f"A_{k}"], V[f"C_{k}"],
                     "instructed Assistant (nats)", "instructed coinflip (nats)", plotstyle.SERIES[i])
                 for i, k in enumerate(RULES)]
         plot_source_grid(grid, origins, f"{labels[family]}: the instructed coin within each task source",
-                         Path(f"figures/ifasked_sources_{family}.png"))
-    print("\nWrote outputs/ifasked/ and figures/ifasked_*.png")
+                         fig / f"{variant}_sources_{family}.png")
+    print(f"\nWrote {out}/ and figures/{variant}_*.png")
 
 
 if __name__ == "__main__":
