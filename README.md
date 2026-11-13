@@ -6468,8 +6468,9 @@ phrasing) are in `figures/lazy_sources_<model>.png`.
 Plain utilities rather than changes, under "answer as" (added after the data, for presenting): `figures/lazy_scatter_<model>.png`
 has one row per persona. The columns are the persona Assistant against the default Assistant, the persona coin against the
 persona Assistant, and the persona coin against the default Assistant. Each is over the 225 tasks pooled, colored by source, with
-r and its task-bootstrap CI. The pooled r includes the between-source differences, which the transfer measures above remove. Run
-`uv run python lazy.py --scatter-only` to remake them from the cached fits.
+r and its task-bootstrap CI. The pooled r includes the between-source differences, which the transfer measures above remove. The
+same figures for "You are a ___." are `figures/lazy_scatter_youare_<model>.png`. Run `uv run python lazy.py --scatter-only` to
+remake both sets from the cached fits.
 
 ![scatter Llama](figures/lazy_scatter_llama-70b.png)
 
