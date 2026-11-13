@@ -5476,11 +5476,14 @@ Exploratory: SDs, the harm gap, outcome mass and top tokens, per-source breakdow
 - W&B group `replication`, runs `tool-<key>-instruct`. Analysis: `tool_analysis.py`. Per-model tables:
   `outputs/replication/tool-<key>/analysis/`. All calls: `outputs/replication/tool_summary.csv`.
 - Figures: `figures/<key>/tool_coin.png` (the three coins and A_decl against A_0) and `figures/<key>/tool_personas.png`
-  (ρ_user, ρ_self).
+  (ρ_user, ρ_self). Across models, the tool's coin alone against the Assistant, one panel per model:
+  `figures/replication_tool_scatter.png` (below the summary figure).
 - The on-policy replies are in `outputs/replication/tool-<key>/onpolicy.html`, gitignored because the prompts hold
   WildChat tasks.
 
 ![tool](figures/replication_tool.png)
+
+![tool scatter](figures/replication_tool_scatter.png)
 
 **1. The tool's coin tracks the Assistant.**
 

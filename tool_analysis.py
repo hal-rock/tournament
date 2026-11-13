@@ -33,8 +33,10 @@ Outputs:
   figures/<key>/tool_coin.png              C_0, C_decl and T against A_0, and A_decl against A_0
   figures/<key>/tool_personas.png          rho_user and rho_self of the tool's coin against the user-reported coin
   figures/replication_tool.png             across models: r(coin, A_0) for the three coins, and drho_self per persona
+  figures/replication_tool_scatter.png     one panel per model: T against A_0, with r (all tasks, within sources)
 
 Usage: uv run python tool_analysis.py [key ...] [--n-boot 2000]
+       uv run python tool_analysis.py --scatter-only    (the scatter figure from the saved stats.csv files)
 """
 
 import os
@@ -53,7 +55,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 import replication_analysis as ra  # noqa: E402
-from analyze import N_BOOTSTRAP, pearson  # noqa: E402
+from analyze import N_BOOTSTRAP, ORIGIN_STYLE, pearson  # noqa: E402
 from matskit import plotstyle  # noqa: E402
 from openers import slope_per_sd, write_csv  # noqa: E402
 from replication import PERSONAS  # noqa: E402
@@ -398,6 +400,61 @@ def plot_models(results, path, calls_by_key=None):
     plotstyle.save(fig, path.stem, path.parent)
 
 
+ORIGIN_LABELS = {"MATH": "MATH", "ALPACA": "Alpaca", "WILDCHAT": "WildChat", "STRESS_TEST": "STRESS-TEST",
+                 "BAILBENCH": "BailBench"}
+
+
+def saved_stats(key, root=None):
+    """{name: (estimate, lo, hi)} from analyze()'s stats.csv, so figures don't rerun the bootstrap."""
+    path = Path(root or ra.OUT) / f"tool-{key}" / "analysis" / "stats.csv"
+    rows = [line.split(",") for line in path.read_text().splitlines()[1:]]
+    return {r[0]: tuple(float(v) for v in r[1:]) for r in rows}
+
+
+def plot_tool_scatter(keys, path, root=None):
+    """One panel per model: the tool's coin (T) against the Assistant's own choice (A_0), one per task, with an
+    ordinary least-squares line and r (95% task-bootstrap CI, all 300 tasks and pooled within sources) from stats.csv."""
+    keys = [k for k in keys if (Path(root or ra.OUT) / f"tool-{k}" / "analysis" / "stats.csv").exists()]
+    if not keys:
+        return
+    ncols = 3
+    nrows = -(-(len(keys) + 1) // ncols)  # a free cell for the legend
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.4 * ncols, 3.9 * nrows), dpi=200, squeeze=False)
+    for ax, key in zip(axes.flat, keys):
+        d, S = Data(key, root), saved_stats(key, root)
+        x, y = d.U["A0"], d.U["T"]
+        for origin, (color, marker) in ORIGIN_STYLE.items():
+            m = d.origins == origin
+            ax.scatter(x[m], y[m], s=18, c=color, marker=marker, edgecolors="white", linewidths=0.5,
+                       label=ORIGIN_LABELS[origin], zorder=3)
+        xs = np.array([x.min(), x.max()])
+        ax.plot(xs, np.polyval(np.polyfit(x, y, 1), xs), color=INK, lw=1.6, zorder=4)
+        ax.axhline(0, color=RULE, lw=0.8, zorder=1)
+        ax.axvline(0, color=RULE, lw=0.8, zorder=1)
+        style(ax)
+        est, lo, hi = S["r:T~A0"]
+        w_est, w_lo, w_hi = S["r:T~A0|within"]
+        ax.set_title(d.label, loc="left", fontsize=11.5, fontweight="bold", color=INK, pad=36)
+        ax.text(0, 1.03, f"r = {est:.2f}  [{lo:.2f}, {hi:.2f}]\nwithin sources: {w_est:.2f}  [{w_lo:.2f}, {w_hi:.2f}]",
+                transform=ax.transAxes, fontsize=9, color=INK, va="bottom", linespacing=1.4)
+        ax.set_xlabel("Assistant utility (log-odds)", fontsize=9, color=INK_2)
+        ax.set_ylabel("Tool-call coin utility (log-odds)", fontsize=9, color=INK_2)
+    spare = list(axes.flat[len(keys):])
+    for ax in spare:
+        ax.axis("off")
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    if spare:
+        spare[0].legend(handles, labels, frameon=False, loc="center left", fontsize=10, markerscale=1.6,
+                        title="Task source", title_fontproperties={"size": 10, "weight": "bold"})
+    else:
+        fig.legend(handles, labels, frameon=False, ncol=len(labels), loc="lower center", fontsize=9)
+    fig.suptitle("The coin as a tool call: task utilities when a flip_coin tool reports the flip vs the Assistant's own "
+                 "choice (300 tasks; 95% task-bootstrap CIs; axes differ between panels)", color=INK_2, fontsize=11, x=0.01,
+                 ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    plotstyle.save(fig, path.stem, path.parent)
+
+
 # ----------------------------------------------------------------------------------------------------------------- main
 
 def analyze(key, n_boot=N_BOOTSTRAP, figures=True, root=None, fig_root=None):
@@ -434,7 +491,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("keys", nargs="*", default=list(KEYS))
     ap.add_argument("--n-boot", type=int, default=N_BOOTSTRAP)
+    ap.add_argument("--scatter-only", action="store_true", help="only replication_tool_scatter.png, from saved stats")
     a = ap.parse_args(argv)
+    if a.scatter_only:
+        plot_tool_scatter(a.keys, ra.FIGURES / "replication_tool_scatter.png")
+        return
     results, calls_by_key, summary = {}, {}, []
     for key in a.keys:
         if not (ra.OUT / f"tool-{key}" / "results").exists():
@@ -449,6 +510,7 @@ def main(argv=None):
     if summary:
         write_csv(ra.OUT / "tool_summary.csv", summary)
         plot_models(results, ra.FIGURES / "replication_tool.png", calls_by_key)
+        plot_tool_scatter([k for k in KEYS if k in results], ra.FIGURES / "replication_tool_scatter.png")
 
 
 if __name__ == "__main__":
