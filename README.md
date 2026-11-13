@@ -6206,6 +6206,12 @@ wording's version is `figures/ifasked_pairs_length.png`.
 Per-rule scatters are in `figures/ifchoose_<rule>.png`, the two-pull fit (context only) in `figures/ifchoose_pulls.png`, and
 the per-source grids in `figures/ifchoose_sources_<model>.png`.
 
+![example](figures/ifchoose_example_prompt.png)
+
+One full prompt (`ifchoose_example.py`): the shortest and longest MATH tasks under "longer", with Llama's coin probabilities
+in both orders and its own choice. The coin's 0.63-0.70 for the longer task, against the Assistant's 1.00, gives a sense of
+how large these coin "preferences" are in probability terms.
+
 ## Lazy personas: "You are a pirate."
 
 The persona prompts so far (Gilg et al.'s) are paragraph-long, heavy-handed character descriptions, and each names the
