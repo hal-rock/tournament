@@ -22,9 +22,11 @@ CIs are 95% task bootstraps within origin, one set of resamples for every model 
   outputs/lazy/pooled.csv           one row per model: the phrasing contrasts over personas
   outputs/lazy/cross.csv            exploratory (added after the data): matched vs mismatched personas, persona-specific transfer
   outputs/lazy/report.txt           (written by redirecting stdout)
-  figures/lazy_*.png
+  figures/lazy_*.png                (lazy_scatter_<model>.png: per persona, "answer as", the persona Assistant vs the default,
+                                    the persona coin vs the persona Assistant and vs the default, over the 225 tasks)
 
 Usage: uv run python lazy.py [--models llama-70b] > outputs/lazy/report.txt
+       uv run python lazy.py --scatter-only    (only the lazy_scatter figures, from the cached fits)
 """
 
 import json
@@ -38,7 +40,7 @@ import numpy as np
 
 import personas
 import prompts
-from analyze import N_BOOTSTRAP, pearson, read_jsonl
+from analyze import N_BOOTSTRAP, ORIGIN_STYLE, pearson, read_jsonl
 from matskit import plotstyle
 from models import MODEL_INFO
 from openers import write_csv
@@ -282,6 +284,73 @@ def plot_shifts(cells, labels, path):
     plotstyle.save(fig, path.stem, path.parent)
 
 
+SCATTER_PHRASING = "answeras"  # Hal's focus, and the phrasings move the Assistant about equally
+SCATTER_COLUMNS = (  # (x, y, title): Hal's three comparisons, as in earlier persona figures
+    ("A0", "A", "Assistant: persona vs default"),
+    ("A", "C", "Persona coin vs persona Assistant"),
+    ("A0", "C", "Persona coin vs default Assistant"))
+SCATTER_AXIS = {"A0": "default Assistant utility", "A": "persona Assistant utility", "C": "persona coin utility"}
+
+
+def plot_persona_scatter(V, origins, label, path, resamples):
+    """One model: a row per persona ("answer as" phrasing), three scatters per row (SCATTER_COLUMNS), over the 225 arbitrary
+    tasks pooled, colored by source, with a least-squares line and r (95% task-bootstrap CI within origin) over all 225."""
+    arb = np.isin(origins, ARB)
+    arb_resamples = [b[arb[b]] for b in resamples]  # stratified within origin, so each keeps the 225 tasks' count
+    fig, axes = plt.subplots(len(PERSONAS), len(SCATTER_COLUMNS), figsize=(4.2 * len(SCATTER_COLUMNS), 3.0 * len(PERSONAS)),
+                             dpi=200, sharex="col", sharey="col", squeeze=False)
+    for i, p in enumerate(PERSONAS):
+        cells = {"A0": V["A0"], "A": V[f"A:{p}:{SCATTER_PHRASING}"], "C": V[f"C:{p}:{SCATTER_PHRASING}"]}
+        for j, (kx, ky, title) in enumerate(SCATTER_COLUMNS):
+            ax, x, y = axes[i, j], cells[kx], cells[ky]
+            for s in (s for s in ORIGIN_STYLE if s in ARB):  # the house order: MATH, Alpaca, WildChat
+                color, marker = ORIGIN_STYLE[s]
+                m = origins == s
+                ax.scatter(x[m], y[m], s=14, c=color, marker=marker, edgecolors="white", linewidths=0.4,
+                           label=SOURCE_LABEL[s], zorder=3)
+            xs = np.array([x[arb].min(), x[arb].max()])
+            ax.plot(xs, np.polyval(np.polyfit(x[arb], y[arb], 1), xs), color=INK, lw=1.4, zorder=4)
+            ax.axhline(0, color=RULE, lw=0.8, zorder=1)
+            ax.axvline(0, color=RULE, lw=0.8, zorder=1)
+            r = pearson(x[arb], y[arb])
+            lo, hi = np.percentile([pearson(x[b], y[b]) for b in arb_resamples], [2.5, 97.5])
+            ax.text(0.03, 0.97, f"r = {r:.2f}  [{lo:.2f}, {hi:.2f}]", transform=ax.transAxes, va="top", ha="left",
+                    fontsize=9, color=INK, bbox=dict(facecolor="white", edgecolor="none", alpha=0.8, pad=1.5), zorder=5)
+            if i == 0:
+                ax.set_title(title, loc="left", fontsize=11, fontweight="bold", color=INK, pad=8)
+            if i == len(PERSONAS) - 1:
+                ax.set_xlabel(f"{SCATTER_AXIS[kx]} (log-odds)", fontsize=9, color=INK_2)
+            ax.set_ylabel(SCATTER_AXIS[ky], fontsize=8.5, color=INK_2)
+            style(ax)
+        axes[i, 0].annotate(p, (-0.32, 0.5), xycoords="axes fraction", rotation=90, ha="center", va="center",
+                            fontsize=12, fontweight="bold", color=INK)
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), frameon=False, ncol=len(ARB), loc="lower center", fontsize=9.5,
+               markerscale=1.5)
+    fig.suptitle(f"{label}: \"In your next message, answer as a ___.\" at the start of the user's message\n"
+                 f"(WildChat, Alpaca and MATH tasks pooled, n = {arb.sum()}; r with 95% task-bootstrap CIs; each column "
+                 "shares its axes)", color=INK_2, fontsize=11, x=0.01, ha="left")
+    fig.tight_layout(rect=(0.02, 0.025, 1, 0.97))
+    plotstyle.save(fig, path.stem, path.parent)
+
+
+def scatter_data(family):
+    """(V, origins) as main() builds them, from the cached merged fit (outputs/lazy/<family>/analysis) and the sweep, for
+    plot_persona_scatter without W&B or the full bootstrap."""
+    import csv
+    from coin_report import sweep_rows
+    with open(Path("outputs/lazy") / family / "analysis" / "utilities.csv", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    srow = sweep_rows(family)
+    assert [r["id"] for r in rows] == [r["id"] for r in srow], "task sets differ"
+    N, origins = task_arrays(rows)[:2]
+    B = task_arrays(srow)[0]
+    V = {"A0": B["instruct/assistant"], "C0": B["instruct/coinflip"]}
+    for p in PERSONAS:
+        for f in PHRASINGS:
+            V[f"A:{p}:{f}"], V[f"C:{p}:{f}"] = N[f"instruct/assistant_{f}_{p}"], N[f"instruct/coinflip_{f}_{p}"]
+    return V, origins
+
+
 def sweep_summary(family):
     """summary.json of the model's sweep (for the default utilities' reliabilities)."""
     from coin_report import GLM_SWEEP
@@ -300,8 +369,18 @@ def main():
     from persona_placement import merged_fit
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", default=list(MODELS), help="a subset, e.g. while a model is still running")
+    ap.add_argument("--scatter-only", action="store_true", help="only figures/lazy_scatter_<model>.png, from the cached fits")
     args = ap.parse_args()
     plotstyle.setup()
+    if args.scatter_only:
+        resamples = None
+        for family in args.models:
+            V, origins = scatter_data(family)
+            if resamples is None:
+                resamples = stratified_resamples(origins, np.random.default_rng(0), N_BOOTSTRAP)
+            plot_persona_scatter(V, origins, MODEL_INFO[MODELS[family]][0], Path(f"figures/lazy_scatter_{family}.png"),
+                                 resamples)
+        return
     out = Path("outputs/lazy")
     out.mkdir(parents=True, exist_ok=True)
     runs = personas.collect_runs("lazy")
@@ -423,6 +502,7 @@ def main():
         plot_source_grid(grid, origins, f"{labels[family]}: the coin's change against the Assistant's, within each source\n"
                          "(both residualized on the default Assistant over the three sources)",
                          Path(f"figures/lazy_sources_{family}.png"), sources=ARB)
+        plot_persona_scatter(V, origins, labels[family], Path(f"figures/lazy_scatter_{family}.png"), resamples)
     print("\nWrote outputs/lazy/ and figures/lazy_*.png")
 
 

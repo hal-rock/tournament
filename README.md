@@ -6465,6 +6465,14 @@ So the transfer in the table above is mostly the coin following the persona's re
 Per-source scatter grids (the coin's change against the Assistant's, within WildChat, Alpaca and MATH, one row per persona and
 phrasing) are in `figures/lazy_sources_<model>.png`.
 
+Plain utilities rather than changes, under "answer as" (added after the data, for presenting): `figures/lazy_scatter_<model>.png`
+has one row per persona. The columns are the persona Assistant against the default Assistant, the persona coin against the
+persona Assistant, and the persona coin against the default Assistant. Each is over the 225 tasks pooled, colored by source, with
+r and its task-bootstrap CI. The pooled r includes the between-source differences, which the transfer measures above remove. Run
+`uv run python lazy.py --scatter-only` to remake them from the cached fits.
+
+![scatter Llama](figures/lazy_scatter_llama-70b.png)
+
 **Exploratory, added after the data: a shared change and a persona-specific one.** The five personas' changes in the Assistant
 are largely the same change: the mean r(dA_p, dA_q) between personas is 0.51-0.80 per model and phrasing. So ρ could come from a
 generic "any character" shift. Splitting it up (`lazy.cross_stats`):
