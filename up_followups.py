@@ -247,7 +247,8 @@ def report(all_runs, stats, data):
             rows2.append(row)
             print(f"  {FINALS[fam]:14} {QUESTION[q]:20} mass {D['mass_med']:.2f} | share {fmt(S['swap: share'], 1)} "
                   f"r(d, c) {S['swap: r(d, c)'][0]:+.2f} kappa {fmt(S['kappa'])} share_r {fmt(S['swap: share_r'], 1)} | "
-                  f"r(answer, A) {S['r(answer, A final)'][0]:+.2f} | whole line {fmt(S['swap_line: share'], 1)}")
+                  f"r(answer, A) {S['r(answer, A final)'][0]:+.2f} | whole line {fmt(S['swap_line: share'], 1)}"
+                  + ("  [mass < 0.2: reported, not interpreted]" if D["mass_med"] < 0.2 else ""))
     write_csv(OUT / "line2.csv", rows2)
     plot_line2(rows2)
 
@@ -413,12 +414,16 @@ def score_predictions(rows1, rows2, rows3, sums, before_r):
                 verdict(not missing and all(abs(b2[k]["swap: share"]) < 0.01 for k in need), missing)))
     need = [(f, q) for f in ("gemma4-31b", "glm-4.5-air") for q in ("choice (heads/tails)", "preference")]
     missing = [k for k in need if k not in b2]
+    low = [f for f in ("gemma4-31b", "glm-4.5-air") if (f, "choice (heads/tails)") in b2
+           and b2[f, "choice (heads/tails)"]["mass"] < 0.2]
     ok = not missing and all(
         b2[f, "choice (heads/tails)"]["swap: r(d, c)"] <= -0.3 and b2[f, "choice (heads/tails)"]["kappa lo"] > 0
         and 0.5 <= b2[f, "choice (heads/tails)"]["swap: share"] / b2[f, "preference"]["swap: share"] <= 2
-        for f in ("gemma4-31b", "glm-4.5-air"))
+        for f in ("gemma4-31b", "glm-4.5-air") if f not in low)
     out.append(("5 the heads/tails choice reads ' up' in Gemma and GLM, share within 2x of the preference's",
-                verdict(ok, missing)))
+                verdict(ok and len(low) < 2, missing,
+                        [f"{f}'s heads/tails choice has median mass {b2[f, 'choice (heads/tails)']['mass']:.2f} < 0.2: "
+                         "not interpreted" for f in low])))
     need = [(f, q) for f in FINALS for q in ("choice (A/B)", "choice (heads/tails)")]
     missing = [k for k in need if k not in b2]
     out.append(("6 both choices track the Assistant, r >= 0.8",
@@ -529,30 +534,27 @@ def plot_line3(rows):
 
 
 def plot_line4_positions(rows):
-    fams = [f for f in FINALS if any(r["family"] == f for r in rows)]
-    if not fams:
+    """One panel per model and question (the tokens after " up" differ between questions), share by position."""
+    keys = [(f, q) for f in FINALS for q in ("preference", "guess")
+            if any(r["family"] == f and r["question"] == q for r in rows)]
+    if not keys:
         return
-    fig, axes = plt.subplots(len(fams), 1, figsize=(12, 3.3 * len(fams)), squeeze=False)
-    for ax, fam in zip(axes[:, 0], fams):
-        for j, q in enumerate(("preference", "guess")):
-            rs = sorted((r for r in rows if r["family"] == fam and r["question"] == q), key=lambda r: r["k"])
-            if not rs:
-                continue
-            x = [r["k"] for r in rs]
-            e = np.array([100 * r["share"] for r in rs])
-            ax.fill_between(x, [100 * r["share lo"] for r in rs], [100 * r["share hi"] for r in rs], color=ps.SERIES[j],
-                            alpha=0.18, lw=0)
-            ax.plot(x, e, color=ps.SERIES[j], lw=2, marker="o", ms=4, label=q)
-            if j == 0:
-                ax.set_xticks(x, [r["token"].replace("\n", "\\n") for r in rs], rotation=90, fontsize=7)
-                n_line = sum(r["in_line"] for r in rs)
-                ax.axvspan(-0.5, n_line - 0.5, color=ps.GRID, alpha=0.4, lw=0)
+    fig, axes = plt.subplots(len(keys), 1, figsize=(12, 2.9 * len(keys)), squeeze=False)
+    for ax, (fam, q) in zip(axes[:, 0], keys):
+        rs = sorted((r for r in rows if r["family"] == fam and r["question"] == q), key=lambda r: r["k"])
+        x = [r["k"] for r in rs]
+        color = ps.SERIES[("preference", "guess").index(q)]
+        ax.fill_between(x, [100 * r["share lo"] for r in rs], [100 * r["share hi"] for r in rs], color=color, alpha=0.18,
+                        lw=0)
+        ax.plot(x, [100 * r["share"] for r in rs], color=color, lw=2, marker="o", ms=4)
+        ax.set_xticks(x, [r["token"].replace("\n", "\\n") for r in rs], rotation=90, fontsize=7)
+        n_line = sum(r["in_line"] for r in rs)
+        ax.axvspan(-0.5, n_line - 0.5, color=ps.GRID, alpha=0.4, lw=0)
         ax.axhline(0, color=ps.BASELINE, lw=0.8)
         ax.set_yscale("symlog", linthresh=1)
         ax.set_ylabel("share reversed (%)")
-        ax.set_title(f"{FINALS[fam]}: each position swapped alone (shaded: the coin line)", fontsize=10)
-        ax.legend(frameon=False, fontsize=9, loc="upper left")
-    fig.suptitle("Line 4: where the answer's order-dependence sits, position by position", fontsize=11)
+        ax.set_title(f"{FINALS[fam]}, {q}: each position swapped alone at every block (shaded: the coin line)", fontsize=10)
+    fig.suptitle("Line 4: where the answer's order-dependence sits, position by position (500 pairs; 95% CIs)", fontsize=11)
     fig.tight_layout()
     ps.save(fig, "up_line4_positions")
 

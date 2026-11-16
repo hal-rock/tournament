@@ -475,29 +475,32 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
             res[k]["coin_grad_path"] = y
         rho = rand_dirs(n_layers, cap_own[0].shape[-1])
     partner = {k: k + 1 if items[k]["order"] == 0 else k - 1 for k in range(len(items))}  # chunk keeps pairs together
-    for arm, spec in specs.items():
-        blocks = arm_blocks(spec.blocks, n_layers)
+    for spec in specs.values():
         assert spec.transform is None or spec.where == "up", "transforms are for \" up\" only"
-        for batch in batches:
-            its = [items[k] for k in batch]
-            kf = min(it["line"][0] for it in its)
+    # Batches outer, arms inner: each batch's captures are stacked once ([B, L, P, D]) and every arm slices them, so
+    # building an arm's values is a few tensor ops rather than one per block and row (on a busy host's CPU the per-row
+    # version left the GPU at 31%: Llama 3.1 base, 2026-11-16). The values are the same tensors as before.
+    for batch in batches:
+        its = [items[k] for k in batch]
+        kf = min(it["line"][0] for it in its)
+        last = torch.tensor([len(it["ids"]) - 1 for it in its])
+        up = torch.tensor([it["up"] for it in its])
+        stacked = {"own": torch.stack([cap_own[k] for k in batch]),
+                   "other": torch.stack([cap_own[partner[k]] for k in batch]),
+                   "ok": torch.stack([cap_ok[k] for k in batch])}
+        dirs = {"grad": torch.stack([u_grad[k] for k in batch]) if u_grad else None,  # [B, L, D]
+                "lens": torch.stack([u_lens[k] for k in batch]) if u_lens else None}
+        for arm, spec in specs.items():
+            blocks = arm_blocks(spec.blocks, n_layers)
             pos = torch.tensor([arm_positions(spec.where, it) for it in its])
-            idx = [[p - it["line"][0] for p in arm_positions(spec.where, it)] for it in its]  # into the captures
-            src = [cap_own[k] if spec.source == "own" else cap_own[partner[k]] if spec.source == "other" else cap_ok[k]
-                   for k in batch]
-            values = {}
-            for l in blocks:
-                rows = []
-                for r, k in enumerate(batch):
-                    s = src[r][l, idx[r]]
-                    if spec.transform is not None:
-                        u = (u_lens if spec.transform.endswith("lens") else u_grad)[k][l].float()
-                        s = mix(cap_own[k][l, idx[r]].float(), s.float(), spec.transform, u,
-                                None if rho is None else rho[l]).to(s.dtype)
-                    rows.append(s)
-                values[l] = torch.stack(rows)  # [B, P, D]
-            last = torch.tensor([len(it["ids"]) - 1 for it in its])
-            up = torch.tensor([it["up"] for it in its])
+            cols = [p - its[0]["line"][0] for p in arm_positions(spec.where, its[0])]  # into the captures
+            assert all([p - it["line"][0] for p in arm_positions(spec.where, it)] == cols for it in its)
+            S = stacked[spec.source][:, blocks][:, :, cols]  # [B, nb, P, D]
+            if spec.transform is not None:
+                U = dirs["lens" if spec.transform.endswith("lens") else "grad"][:, blocks].float()[:, :, None, :]
+                R = None if rho is None else rho[blocks][None, :, None, :]
+                S = mix(stacked["own"][:, blocks][:, :, cols].float(), S.float(), spec.transform, U, R).to(S.dtype)
+            values = {l: S[:, j] for j, l in enumerate(blocks)}  # [B, P, D] per block
             with replace(model, values, pos):
                 lp, _ = forward(model, [it["ids"] for it in its], pad_id, torch.stack([up, last], 1), keep_from=kf)
             rep, mass = outcome(lp[:, 1], rep_ids)
@@ -549,6 +552,8 @@ def main():
                     help="arm sets (arm_specs; default: the config's arm_sets, else base)")
     ap.add_argument("--lens", action="store_true", help="also read the logit lens over the suffix (line 4); or config lens")
     a = ap.parse_args()
+    # torch's default intra-op threads follow the host's cores (88-96 on 22-24 vCPU pods), which oversubscribes a busy host
+    torch.set_num_threads(min(16, torch.get_num_threads()))
     cfg0 = yaml.safe_load(open(a.config))
     reports = a.report or ([] if a.report_auto else [cfg0.get("report", "coin_report")])
     arm_sets = a.arm_sets or cfg0.get("arm_sets", ["base"])
