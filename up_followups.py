@@ -54,8 +54,12 @@ def runs():
         if r.state != "finished":
             continue
         cfg = r.config
+        path = Path("outputs/coin_report") / cfg["family"] / r.id
+        if not (path / "rows.jsonl").exists():  # finished on W&B, not fetched from its pod yet
+            print(f"skipping {cfg['family']}/{cfg['report']} {r.id}: no rows.jsonl here yet")
+            continue
         out.append(dict(id=r.id, family=cfg["family"], report=cfg["report"], arm_sets=tuple(cfg["arm_sets"]),
-                        config=cfg, path=Path("outputs/coin_report") / cfg["family"] / r.id))
+                        config=cfg, path=path))
     return out
 
 
@@ -199,7 +203,6 @@ def report(all_runs, stats, data):
         print(f"\n{fam} {run['report']} [{kind}] {len(D['c'])} pairs: mass {D['mass_med']:.2f}, answer SD "
               f"{S['answer SD'][0]:.2f}, coin SD {S['coin SD'][0]:.2f}, self-patch max |d| {self_max:.2g}, "
               f"wording {run['config'].get('wording_check')}")
-    predictions = []
 
     # ---------------------------------------------------------------- line 1
     print("\n=== Line 1: base models (coin-free share of the answer's pair effect)")
@@ -228,16 +231,6 @@ def report(all_runs, stats, data):
                       f"{S['r(answer, A final)'][0]:+.2f}, r(ans, A_b) {S['r(answer, A base)'][0]:+.2f} -> "
                       f"{'READS' if reads and gate else 'no'}")
     write_csv(OUT / "line1.csv", rows1)
-    by = {(r["family"], r["stage"], r["question"]): r for r in rows1}
-    p1 = all(by[f, "base", QUESTION[q]]["swap: share_r"] < by[f, "final", QUESTION[q]]["swap: share_r"]
-             for f in FINALS for q in ("coin_report", "coin_predict_think")
-             if (f, "base", QUESTION[q]) in by and (f, "final", QUESTION[q]) in by)
-    p2 = all(not by[f, "base", QUESTION[q]]["reads"] for f in ("llama-70b", "glm-4.5-air")
-             for q in ("coin_report", "coin_predict_think") if (f, "base", QUESTION[q]) in by)
-    g = [by[k] for k in (("gemma4-31b", "base", "preference"), ("gemma4-31b", "base", "guess")) if k in by]
-    p3 = any(r["reads"] and r["swap: share_r"] < by["gemma4-31b", "final", r["question"]]["swap: share_r"] for r in g)
-    predictions += [("1 base share_r below final's everywhere", p1), ("2 Llama, GLM bases don't read ' up'", p2),
-                    ("3 Gemma base reads ' up' on >= 1 question, less than final", p3)]
     plot_line1(rows1)
 
     # ---------------------------------------------------------------- line 2
@@ -256,16 +249,6 @@ def report(all_runs, stats, data):
                   f"r(d, c) {S['swap: r(d, c)'][0]:+.2f} kappa {fmt(S['kappa'])} share_r {fmt(S['swap: share_r'], 1)} | "
                   f"r(answer, A) {S['r(answer, A final)'][0]:+.2f} | whole line {fmt(S['swap_line: share'], 1)}")
     write_csv(OUT / "line2.csv", rows2)
-    by2 = {(r["family"], r["question"]): r for r in rows2}
-    p4 = all(abs(by2[f, "choice (A/B)"]["swap: share"]) < 0.01 for f in FINALS if (f, "choice (A/B)") in by2)
-    p5 = all((lambda c, p: c["swap: r(d, c)"] <= -0.3 and c["kappa lo"] > 0 and 0.5 <= c["swap: share"] / p["swap: share"] <= 2)
-             (by2[f, "choice (heads/tails)"], by2[f, "preference"]) for f in ("gemma4-31b", "glm-4.5-air")
-             if (f, "choice (heads/tails)") in by2)
-    p6 = all(by2[f, q]["r(answer, A final)"] >= 0.8 for f in FINALS for q in ("choice (A/B)", "choice (heads/tails)")
-             if (f, q) in by2)
-    predictions += [("4 A/B choice |share| < 1% everywhere", p4),
-                    ("5 heads/tails choice reads ' up' in Gemma, GLM, share within 2x of preference's", p5),
-                    ("6 both choices track A (r >= 0.8)", p6)]
     plot_line2(rows2)
 
     # ---------------------------------------------------------------- line 3
@@ -290,17 +273,11 @@ def report(all_runs, stats, data):
             print("      " + " | ".join(f"{a.removeprefix('swap_')} f {fmt(S[a + ': f'])}" for a in LINE3_ARMS)
                   + f" | f_pot + f_null {S['f_pot + f_null'][0]:+.2f}")
     write_csv(OUT / "line3.csv", rows3)
-    finals3 = [r for r in rows3 if r["family"] in FINALS]
-    p7 = all(r["split_check"] for r in finals3)
-    p8 = all(r["swap_pot_grad: f"] > r["swap_null_grad: f"] for r in finals3 if r["family"] == "gemma4-31b")
-    p9 = all(abs(r["swap_rand: f"]) < 0.1 for r in rows3)
-    predictions += [("7 the split's check holds in all finals", p7), ("8 Gemma: f_pot_grad > f_null_grad", p8),
-                    ("9 |f_rand| < 0.1 everywhere", p9)]
     plot_line3(rows3)
 
     # ---------------------------------------------------------------- line 4
     print("\n=== Line 4: across the line (first 500 pairs)")
-    rows4, sums, p10, p11, p12 = [], [], True, True, True
+    rows4, sums = [], []
     for fam in FINALS:
         for q in ("coin_report", "coin_predict_think"):
             if (fam, q, "line4") not in stats:
@@ -341,9 +318,7 @@ def report(all_runs, stats, data):
                              **{f"drop {tokens[k]!r}": with_ci(drops[k])[0] for k in range(n_line)}))
             shares_line = [S4[f"pos{k:02d}: share"][0] for k in range(n_line)]
             best = int(np.argmax(shares_line))
-            p10 &= SS[0] < W[0]
-            p11 &= best == n_line - 1
-            p12 &= readout[0] >= 0.5
+            sums[-1]["up_is_largest"] = best == n_line - 1
             print(f"  {FINALS[fam]:14} {QUESTION[q]:10} whole line {fmt(W, 1)}, sum of its single tokens {fmt(SS, 1)}, "
                   f"largest single {tokens[best]!r} {100 * shares_line[best]:.1f}%, ' up' {100 * shares_line[-1]:.1f}%, "
                   f"readout position {100 * readout[0]:.0f}%")
@@ -354,12 +329,10 @@ def report(all_runs, stats, data):
                                                                      for k in range(n_line)))
     write_csv(OUT / "line4_positions.csv", rows4)
     write_csv(OUT / "line4_sums.csv", sums)
-    predictions += [("10 sum of single line-token shares < whole line", p10), ("11 ' up' largest single in the line", p11),
-                    ("12 readout position share >= 0.5", p12)]
     plot_line4_positions(rows4)
 
     print("\n=== Line 4: logit lens of log P(' heads') - log P(' tails') over the suffix (pair effects; all 1,000 pairs)")
-    rows_lens, p13 = [], True
+    rows_lens, before_r = [], {}
     lens_maps = {}
     for fam in FINALS:
         for q in ("coin_report", "coin_predict_think"):
@@ -384,8 +357,7 @@ def report(all_runs, stats, data):
                                       depth_of_max=int(np.nanargmax(r_lens_c[:, k])) if np.isfinite(r_lens_c[:, k]).any() else -1,
                                       r_lens_A_max=float(np.nanmax(r_lens_a[:, k])) if np.isfinite(r_lens_a[:, k]).any() else np.nan))
             before =[k for k, t in enumerate(tokens[:20]) if t.strip() in ("it", "came")][:2]
-            if fam in ("gemma4-31b", "llama-70b"):
-                p13 &= all(r_out_c[k] > 0.3 for k in before) and len(before) == 2
+            before_r[fam, QUESTION[q]] = [float(r_out_c[k]) for k in before]
             unlikely = [k for k in range(len(tokens)) if mass_med[k] < 0.01]
             print(f"  {FINALS[fam]:14} {QUESTION[q]:10} output r with the coin at " + "  ".join(
                 f"{tokens[k]!r} {r_out_c[k]:+.2f}" for k in range(len(tokens))))
@@ -394,12 +366,90 @@ def report(all_runs, stats, data):
                       f"{tokens[k]!r} {np.nanmax(r_lens_c[:, k]):+.2f}@{np.nanargmax(r_lens_c[:, k])}"
                       for k in range(len(tokens)) if np.isfinite(r_lens_c[:, k]).any()))
     write_csv(OUT / "line4_lens.csv", rows_lens)
-    predictions += [("13 output heads/tails lean at ' it', ' came' tracks the coin (r > 0.3) in Gemma, Llama", p13)]
     plot_lens(lens_maps)
 
     print("\n=== Pre-registered predictions")
-    for name, ok in predictions:
-        print(f"  {name}: {'holds' if ok else 'fails'}")
+    for name, status in score_predictions(rows1, rows2, rows3, sums, before_r):
+        print(f"  {name}: {status}")
+
+
+def verdict(ok, missing=(), notes=()):
+    """holds / fails, or incomplete while a required cell is missing; notes (e.g. a gated-out cell) are appended."""
+    if missing:
+        return "incomplete (missing " + ", ".join(map(str, missing)) + ")"
+    return ("holds" if ok else "fails") + ("" if not notes else " (" + "; ".join(notes) + ")")
+
+
+def score_predictions(rows1, rows2, rows3, sums, before_r):
+    """The 13 pre-registered predictions (README, "Follow-ups on the coin's ' up'"), each over the cells it names."""
+    QS = ("preference", "guess")
+    b1 = {(r["family"], r["stage"], r["question"]): r for r in rows1}
+    out = []
+
+    def cells1(fams, stages):
+        need = [(f, s, q) for f in fams for s in stages for q in QS]
+        missing = [k for k in need if k not in b1]
+        gated = [k for k in need if k in b1 and k[1] == "base" and not b1[k]["gate"]]
+        return missing, gated, [f"{k[0]} base {k[2]} fails the gate: not interpreted" for k in gated]
+
+    missing, gated, notes = cells1(FINALS, ("final", "base"))
+    ok = all(b1[f, "base", q]["swap: share_r"] < b1[f, "final", q]["swap: share_r"]
+             for f in FINALS for q in QS if (f, "base", q) not in gated) if not missing else False
+    out.append(("1 each base's share_r below its final's, both questions", verdict(ok, missing, notes)))
+    missing, gated, notes = cells1(("llama-70b", "glm-4.5-air"), ("base",))
+    ok = not missing and not any(b1[f, "base", q]["reads"] for f in ("llama-70b", "glm-4.5-air") for q in QS
+                                 if (f, "base", q) not in gated)
+    out.append(("2 the Llama and GLM bases don't read ' up' on either question", verdict(ok, missing, notes)))
+    missing, gated, notes = cells1(("gemma4-31b",), ("final", "base"))
+    ok = not missing and any(b1["gemma4-31b", "base", q]["reads"]
+                             and b1["gemma4-31b", "base", q]["swap: share_r"] < b1["gemma4-31b", "final", q]["swap: share_r"]
+                             for q in QS if ("gemma4-31b", "base", q) not in gated)
+    out.append(("3 Gemma's base reads ' up' on >= 1 question, by less than its final", verdict(ok, missing, notes)))
+
+    b2 = {(r["family"], r["question"]): r for r in rows2}
+    need = [(f, "choice (A/B)") for f in FINALS]
+    missing = [k for k in need if k not in b2]
+    out.append(("4 the A/B choice: |share| < 1% in every final",
+                verdict(not missing and all(abs(b2[k]["swap: share"]) < 0.01 for k in need), missing)))
+    need = [(f, q) for f in ("gemma4-31b", "glm-4.5-air") for q in ("choice (heads/tails)", "preference")]
+    missing = [k for k in need if k not in b2]
+    ok = not missing and all(
+        b2[f, "choice (heads/tails)"]["swap: r(d, c)"] <= -0.3 and b2[f, "choice (heads/tails)"]["kappa lo"] > 0
+        and 0.5 <= b2[f, "choice (heads/tails)"]["swap: share"] / b2[f, "preference"]["swap: share"] <= 2
+        for f in ("gemma4-31b", "glm-4.5-air"))
+    out.append(("5 the heads/tails choice reads ' up' in Gemma and GLM, share within 2x of the preference's",
+                verdict(ok, missing)))
+    need = [(f, q) for f in FINALS for q in ("choice (A/B)", "choice (heads/tails)")]
+    missing = [k for k in need if k not in b2]
+    out.append(("6 both choices track the Assistant, r >= 0.8",
+                verdict(not missing and all(b2[k]["r(answer, A final)"] >= 0.8 for k in need), missing)))
+
+    b3 = {(r["family"], r["question"]): r for r in rows3}
+    need = [(f, q) for f in FINALS for q in QS]
+    missing = [k for k in need if k not in b3]
+    out.append(("7 the split's check holds in every final", verdict(not missing and all(b3[k]["split_check"] for k in need),
+                                                                    missing)))
+    g = [("gemma4-31b", q) for q in QS]
+    missing8 = [k for k in g if k not in b3]
+    out.append(("8 Gemma: f_pot_grad > f_null_grad, both questions",
+                verdict(not missing8 and all(b3[k]["swap_pot_grad: f"] > b3[k]["swap_null_grad: f"] for k in g), missing8)))
+    out.append(("9 |f_rand| < 0.1 everywhere", verdict(not missing and all(abs(r["swap_rand: f"]) < 0.1 for r in rows3),
+                                                       missing)))
+
+    b4 = {(r["family"], r["question"]): r for r in sums}
+    missing = [k for k in need if k not in b4]
+    out.append(("10 the line's single-token shares sum to less than the whole line's",
+                verdict(not missing and all(b4[k]["single_sum"] < b4[k]["whole_line"] for k in need), missing)))
+    out.append(("11 ' up' has the largest single-token share in the line",
+                verdict(not missing and all(b4[k]["up_is_largest"] for k in need), missing)))
+    out.append(("12 the readout position's own share >= 0.5",
+                verdict(not missing and all(b4[k]["readout_share"] >= 0.5 for k in need), missing)))
+    need = [(f, q) for f in ("gemma4-31b", "llama-70b") for q in QS]
+    missing = [k for k in need if k not in before_r]
+    ok = not missing and all(len(before_r[k]) == 2 and all(r > 0.3 for r in before_r[k]) for k in need)
+    out.append(("13 the output's heads/tails lean at ' it', ' came' tracks the coin (r > 0.3) in Gemma and Llama",
+                verdict(ok, missing)))
+    return out
 
 
 # ---------------------------------------------------------------- figures

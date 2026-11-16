@@ -13,4 +13,6 @@ batch_size: 16
 chunk_pairs: 64
 model:
   name: zai-org/GLM-4.5-Air
-  max_memory: {0: 69GiB, 1: 69GiB, 2: 72GiB}
+  # 70/70/67, not the hope run's 69/69/72: loading the weights ran out of memory on GPU 2 (expert merging, 2.75 GiB) in
+  # two of three loads on 2026-11-16; a placement change only, the same computation.
+  max_memory: {0: 70GiB, 1: 70GiB, 2: 67GiB}
