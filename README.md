@@ -6556,6 +6556,138 @@ reading what this user seems to want.
 - **GPUs:** Gemma's cells are on H100 and OLMo's on two GPU types, against the sweep's defaults. The gate passed everywhere.
 - **Scope:** one wording per phrasing, five personas (three of them mine), final models only, bf16. CIs cover task sampling only.
 
+## Follow-ups on the coin's " up": base models, a choice, the output-potent part, and the whole line
+
+Hal's reading after the persona, rollout and rule results (2026-11-16): the coinflip effect might be better explained at the level of
+the model's predictive ground than in terms of personas. The coin's lean would then be the model's *planned output* for the
+Assistant's turn. A base model might plan the Assistant's output on the user's tokens too, but it would have to keep that plan out
+of the coin's prediction, since it is still predicting the user's tokens well. Post-training lifts that constraint, so the planned
+preference either (1) starts to exist, or (2) already existed and starts to show in output-potent directions. The ' up' patching
+("Does the Assistant read the coin's ' up'?", "Shorter questions") found a small but real heads/tails-coded path from " up" into
+the Assistant's later answer. Four follow-ups, all on that patching design:
+
+1. **Base models.** Does a base model's Assistant-turn answer read " up" too, though its coin barely varies?
+2. **A choice.** After the coin, the user backs out and lets the Assistant choose. Does the choice read " up", as the shallow-rule
+   results (the coin tracks an instructed *choice*) might suggest?
+3. **The output-potent part.** Is it the part of " up"'s state that moves the coin's own heads/tails prediction that the later answer
+   reads, or the rest?
+4. **The whole line.** The whole coin line carries more than " up" alone (up to 23% against 7%). Which tokens carry it? And do the
+   heads/tails log-odds lean toward the preferred task's outcome even at tokens where neither is a likely next token, at the output
+   or through the logit lens?
+
+Hal's scope (2026-11-16): finals and bases of Gemma 4 31B, Llama 3.3 70B (base 3.1) and GLM-4.5-Air; OLMo dropped; no instructed
+rule in line 2 (a possible later round); line 4 on finals only; lines 1, 3 and 4 on both readouts below.
+
+### Design (written 2026-11-16, before any data)
+
+- **Shared:** `report_patch.py` as in the earlier report runs: the same 1,000 pilot pairs outside the sweep, both orders, every arm
+  in the same batches, the residual entering the patched blocks replaced at the patched positions (`acts.replace`, `at="pre"`).
+  Every forward of a batch keeps logits from the line's first token on, so all arms round the LM head alike. Configs
+  `configs/up_followups/<model>.yaml`, W&B group `coin_report`, tag `up_followups`.
+- **Readouts** (the "answer"): the heads/tails preference ("which outcome would you have preferred, heads or tails?") and the guess
+  ("which way do you think it landed?"), bold in the finals (`coin_report_bold`, `coin_predict_think_bold`, the earlier runs'
+  primary wordings). In the bases the job picks plain or bold per question by the earlier rule: the higher median outcome mass over
+  the first 24 pilot pairs (`report_patch.choose_wording`); a median below 0.2 is reported, not interpreted.
+- **Models and GPUs:** finals and bases on the same GPU type within each family. Gemma 4 31B-it and base: 1x H100 SXM (as the earlier
+  Gemma report runs). Llama 3.3 70B Instruct: 1x H200 (as before); its base, Llama 3.1 70B: 1x H200 if in stock. GLM-4.5-Air and
+  its base: 3x H100 SXM, as in the hope run (no H200 or B200 pair was in stock; the earlier GLM report runs used 2x H200). The bases
+  use their instruct sibling's template, as in the sweep, so their prompts are the sweep's base prompts token for token. Llama 3.1
+  base's chat-marker embeddings are exactly zero (CLAUDE.md), and the answer sits after those markers.
+- **The coin-free share** (`coin_report.share_r`, needed for line 1). The earlier share was κ / slope(answer on coin): the fraction of
+  the answer's *coin-aligned* part that the swap reverses. Base coins barely vary (pair SD 0.05-0.09 nats in the sweep), so it can't
+  be measured there. share_r = -slope(d on r) / 2 is the fraction of the answer's *own* pair effect r that the swap reverses, with
+  no coin needed; it equals the earlier share times r(answer, coin)^2 when the swap moves only the coin-aligned part. A patch that
+  only disrupts the answer gives share_r > 0 too. Two checks tell them apart: the ctrl arm (" up" from the "OK, " prompt: same
+  mapping, foreign activation), and the **bias shrink** (`coin_report.bias_shrink`), how much the swap shrinks the order-averaged
+  part of the answer (its heads lean), which content brought in from the other order can hardly move but a disruption shrinks
+  along with the pair effect (pure disruption: bias shrink = 2 share_r). From the finals' earlier runs (computed from the rows on
+  disk before these predictions were written), swap share_r is:
+
+  | model | preference | guess | ctrl (both) | bias shrink (both) |
+  |---|---|---|---|---|
+  | Gemma 4 31B | 2.4% [2.3, 2.6] | 4.7% [4.3, 4.9] | ≤ 0.1% | 0.02, 0.00 |
+  | Llama 3.3 70B | 0.2% [0.2, 0.3] | 1.3% [1.2, 1.4] | 0.0% | 0.00, 0.00 |
+  | GLM-4.5-Air | 1.3% [1.0, 1.5] | 3.3% [2.8, 3.8] | 0.1%, 0.5% | 0.00, 0.03 |
+
+**Line 1: base models.** Each base runs both readouts with the earlier arms (`--arm-sets base line3`; line 3's arms are read only for
+a base that passes line 1).
+- Gate per base and question: median outcome mass >= 0.2, and the SD of the unpatched answer's pair effect >= 0.25 nats (above
+  batch-shape noise).
+- A base **reads " up"** on a question if share_r(swap) has a 95% CI above 0 *and* the paired difference share_r(swap) -
+  share_r(ctrl) has a CI above 0 (bootstrap over pairs). If the bias shrink's CI also excludes 0 and includes 2 share_r, the result
+  is flagged as consistent with disruption.
+- Compared with the final's share_r for the same question, from this round's final runs (which repeat the swap and ctrl arms).
+- Descriptors: r of the base's answer with its own sweep Assistant utilities and with the final's.
+
+**Line 2: the Assistant's choice** (finals, `--arm-sets base`). The coinflip prompt through "it came up", then ". Actually, never
+mind the coin: I'll let you choose." and either "Which task do you choose, Task A or Task B?" with the Assistant condition's prefill
+"I'll choose Task" (`coin_choose_ab`, read at " A" / " B"), or "Heads or tails?" with "I'll choose" or "I'll choose **"
+(`coin_choose_ht`, prefill picked by the mass rule). Measures as in the earlier report runs (swap r(d, c), share, κ), plus share_r
+and r(choice, the sweep's A_i - A_j).
+
+**Line 3: the output-potent part of " up"** (finals' line-3 runs; bases only if they pass line 1). At every block, the swap's
+difference at " up", Δ = h_source - h_own, is split along that block's unit direction u, and each part is patched alone (at every
+block, as the swap is):
+- **Directions.** Primary: u = the gradient of the coin's log-odds at " up" (log P(" heads") - log P(" tails")) with respect to the
+  residual entering that block at " up", through everything after it there: the direction that, at that depth, moves the coin's
+  own prediction (`report_patch.coin_grads`; per prompt, from its own residuals). Secondary: the logit lens's gradient there (final
+  norm and unembedding; `lens_dirs`), meaningful only from about where the coin's lean appears in the lens.
+- **Arms** (`--arm-sets line3`): `swap_pot_grad` (own + (Δ·u)u), `swap_null_grad` (source - (Δ·u)u; the two add up to the swap),
+  the same two with the lens direction, and `swap_rand` (a fixed random unit direction per block, shifted by the potent part's
+  size: what any 1-D shift that big does).
+- **Check of the split** (single blocks, everything after recomputed at " up"): at 50%, 75% and 90% of the depth, the full swap,
+  its potent part and its null part at that block alone (`v50_full`, `v75_pot`, ...). There the coin read at " up" can move, so
+  g_X = slope(coin shift of X on coin shift of the full swap) says how much of the coin's change each part carries. The split counts
+  as output-potent vs output-null if g_pot >= 0.5 and g_null <= 0.5 at 75% and 90%; otherwise line 3's arms are reported, not
+  interpreted.
+- **Measure:** f_X = slope(d_X on d_swap) over pairs, the part of the swap's shift in the answer that arm X reproduces (1 = all,
+  0 = none), with 95% CIs. Read where the swap itself reads " up" clearly (swap r(d, c) <= -0.3).
+
+**Line 4: across the line** (finals, `--arm-sets line4`, the first 500 pilot pairs, both readouts).
+- **Per position:** each position from the line's first token ("Okay") to the end of the prompt, swapped alone at every block
+  (`pos00`, ...; the line, the question, the template's turn markers and the prefill: 42-49 positions, the same tokens in both
+  orders), and the whole line without each of its tokens (`loo00`, ...). Measures: share and share_r per position; the drop
+  share(whole line) - share(line without token k), with the whole line's share from the line-3 run on the same 500 pairs.
+- **Logit lens** (in the line-3 runs, unpatched, all 1,000 pairs): log P(" heads") - log P(" tails") (and the same without the
+  space) at every suffix position, read from the residual entering every block (final norm + unembedding, `acts.logit_lens`) and
+  at the output, with the output's heads/tails mass. Per position and depth: the pair effect's r with the coin at " up" and with the
+  sweep's A_i - A_j. All depths are kept: the lens may only be readable in some middle range, which isn't known in advance.
+  "Unlikely" tokens are positions where the output's median heads/tails mass is below 0.01.
+
+### Predictions (written 2026-11-16, before any data)
+
+Line 1:
+1. Every base's share_r is below its final's, for both questions.
+2. The Llama and GLM bases don't read " up" (the swap - ctrl difference's CI includes 0) on either question.
+3. Gemma's base, whose Assistant-format preferences already look like its final's (sweep r 0.50), reads " up" on at least one
+   question, by less than its final.
+
+Line 2:
+
+4. The A/B choice doesn't read " up": |share| < 1% in all three finals, as with the A/B report.
+5. The heads/tails choice reads " up" in Gemma and GLM (swap r(d, c) <= -0.3, κ's CI above 0), with a share within a factor of two
+   of the heads/tails preference's in this round.
+6. Both choices track the Assistant: r(choice, A_i - A_j) >= 0.8 in every final.
+
+Line 3:
+
+7. The split's check holds (g_pot >= 0.5, g_null <= 0.5 at 75% and 90% depth) in all three finals.
+8. In Gemma, whose path is tight and late, the output-potent part carries more of the swap's shift than the rest (f_pot_grad >
+   f_null_grad) for both questions. No prediction for Llama and GLM.
+9. The random control does little: |f_rand| < 0.1 everywhere.
+
+Line 4:
+
+10. Redundancy: the single-token shares over the line's tokens sum to less than the whole line's share, in every final and question.
+11. " up" has the largest single-token share of the line's tokens, in every final and question.
+12. The readout position's own share is >= 0.5 (a check that per-position swapping works).
+13. At the output, the heads/tails lean at the line's tokens before " up" tracks the coin there: r(pair effect, c) > 0.3 at the two
+    tokens before " up" (" it", " came"), in Gemma and Llama.
+
+### Runs
+
+Not yet run: see "Results" when they're in. Estimated cost $200-250 (8 pods for about 4-5 hours).
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

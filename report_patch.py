@@ -43,6 +43,7 @@ import math
 import random
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 import wandb
@@ -51,21 +52,89 @@ from transformers import AutoTokenizer
 
 from analyze import read_jsonl
 from matskit import acts, io
-from matskit.models import input_device, layers as get_layers, peer_copies_ok
+from matskit.models import input_device, layers as get_layers, peer_copies_ok, unembed
 from prompts import build_prompt, outcome_token_ids
 from tournament import load_model, select_pairs
 
 LINE = {"coinflip": "Okay, I'm flipping the coin now ... it came up", "coinflip_ok": "OK, I'm flipping the coin now ... it came up"}
-# arm: (source, positions, blocks). source: whose capture goes in (own / the other order's / the "OK, " prompt's).
+
+
+class Arm(NamedTuple):
+    """A patch: whose capture goes in (own / the other order's / the "OK, " prompt's), where (the positions), at which
+    blocks' inputs, and what part of the source's difference from the prompt's own residual (None: all of it).
+
+    where: "up"; "line" (the coinflip's last line, " up" its last token); ("suffix", k): the k-th position from the line's
+    first token to the end of the prompt (the same tokens in both orders); ("line_except", k): the line without its k-th token.
+    blocks: "all", "early" / "late" (first / second half), or ("frac", f): the single block round(f * n_layers), with
+    everything after it recomputed at the patched position.
+    transform (" up" only; Follow-ups, line 3), with Delta = source - own at each block and u that block's unit direction:
+      pot_grad / null_grad   own + (Delta.u) u / source - (Delta.u) u, u the gradient of the coin's log-odds at " up" with
+                             respect to the residual entering that block at " up" (the prompt's own; coin_grads)
+      pot_lens / null_lens   the same with u the logit lens's gradient there (lens_dirs)
+      rand                   own + |Delta.u_grad| sign(Delta.rho) rho, rho a fixed random unit vector per block: a 1-D shift
+                             of the potent part's size in a random direction"""
+    source: str
+    where: object
+    blocks: object
+    transform: str | None = None
+
+
+# The arms of the earlier runs (README, "Does the Assistant read the coin's ' up'?"): run by default, and by arm set "base".
 ARMS = {
-    "self": ("own", "up", "all"),
-    "swap": ("other", "up", "all"),
-    "ctrl": ("ok", "up", "all"),
-    "swap_early": ("other", "up", "early"),
-    "swap_late": ("other", "up", "late"),
-    "swap_line": ("other", "line", "all"),
-    "ctrl_line": ("ok", "line", "all"),
+    "self": Arm("own", "up", "all"),
+    "swap": Arm("other", "up", "all"),
+    "ctrl": Arm("ok", "up", "all"),
+    "swap_early": Arm("other", "up", "early"),
+    "swap_late": Arm("other", "up", "late"),
+    "swap_line": Arm("other", "line", "all"),
+    "ctrl_line": Arm("ok", "line", "all"),
 }
+VALIDATION_FRACS = (0.5, 0.75, 0.9)  # line 3's single-block checks
+
+
+def arm_specs(sets, n_line, n_suffix):
+    """{name: Arm} for arm sets (Follow-ups): "base" (ARMS), "line3" (the potent / null split of the " up" swap, a random
+    control, and single-block checks of the split), "line4" (every position from the line's first token to the end alone,
+    and the whole line without each of its tokens). "self" is always included."""
+    specs = {"self": ARMS["self"]}
+    for s in sets:
+        if s == "base":
+            specs |= ARMS
+        elif s == "line3":
+            specs |= {f"swap_{t}": Arm("other", "up", "all", t) for t in ("pot_grad", "null_grad", "pot_lens", "null_lens", "rand")}
+            for f in VALIDATION_FRACS:
+                specs |= {f"v{round(100 * f)}_{part}": Arm("other", "up", ("frac", f), t)
+                          for part, t in (("full", None), ("pot", "pot_grad"), ("null", "null_grad"))}
+        elif s == "line4":
+            specs |= {f"pos{k:02d}": Arm("other", ("suffix", k), "all") for k in range(n_suffix)}
+            specs |= {f"loo{k:02d}": Arm("other", ("line_except", k), "all") for k in range(n_line)}
+        else:
+            raise ValueError(f"unknown arm set {s!r}")
+    return specs
+
+
+def arm_blocks(blocks, n_layers):
+    L = list(range(n_layers))
+    if blocks == "all":
+        return L
+    if blocks in ("early", "late"):
+        return L[:n_layers // 2] if blocks == "early" else L[n_layers // 2:]
+    kind, f = blocks
+    assert kind == "frac", blocks
+    return [min(n_layers - 1, round(f * n_layers))]
+
+
+def arm_positions(where, it):
+    """Token positions an arm patches in item it."""
+    if where == "up":
+        return [it["up"]]
+    if where == "line":
+        return list(it["line"])
+    kind, k = where
+    if kind == "suffix":
+        return [it["suffix"][k]]
+    assert kind == "line_except", where
+    return [p for j, p in enumerate(it["line"]) if j != k]
 
 
 def pilot_pairs(n_tasks, n, sweep_pairs, seed):
@@ -177,10 +246,14 @@ def build_items(tok, tasks, pairs, report="coin_report", template_tok=None, **fm
             ok_prefix, ok_line = line_positions(tok, render("coinflip_ok", first, second), LINE["coinflip_ok"])
             assert full[:len(prefix)] == prefix, "the report prompt must extend the coinflip prompt token for token"
             assert ok_line[-1] == line[-1] and len(ok_line) == len(line), "the 'OK, ' line must sit at the same positions"
+            # suffix: the line's first token to the end of the prompt, the same text in both orders
             items.append(dict(pair=p, order=order, a=tasks[a]["id"], b=tasks[b]["id"], ids=full, line=line,
-                              ok_ids=ok_prefix, up=line[-1]))
+                              ok_ids=ok_prefix, up=line[-1], suffix=list(range(line[0], len(full)))))
     for k in range(0, len(items), 2):  # the two orders put " up" at the same index (same tokens, swapped)
-        assert items[k]["up"] == items[k + 1]["up"] and len(items[k]["line"]) == len(items[k + 1]["line"])
+        x, y = items[k], items[k + 1]
+        assert x["up"] == y["up"] and len(x["line"]) == len(y["line"])
+        assert x["suffix"] == y["suffix"] and x["ids"][x["suffix"][0]:] == y["ids"][y["suffix"][0]:], \
+            "the two orders must share the suffix token for token"
     return items
 
 
@@ -249,13 +322,17 @@ def right_pad(seqs, pad_id):
 
 
 @torch.no_grad()
-def forward(model, seqs, pad_id, read_at, capture=None):
+def forward(model, seqs, pad_id, read_at, capture=None, keep_from=None):
     """One right-padded forward. read_at: [B] or [B, K] positions whose next-token log-probs to return (fp32, [B, K, V]
-    gathered later). capture: (layers, positions [B, P]) -> also returns {layer: [B, P, D]} entering each block."""
+    gathered later). capture: (layers, positions [B, P]) -> also returns {layer: [B, P, D]} entering each block.
+    keep_from: the first position whose logits the LM head computes (default: the first of read_at). Forwards that are
+    compared must keep the same window: the LM-head matmul's shape changes its bf16 rounding."""
     ids, mask = right_pad(seqs, pad_id)
     dev = input_device(model)
     read_at = read_at if read_at.dim() == 2 else read_at[:, None]
-    n_keep = int(ids.shape[1] - read_at.min())
+    keep_from = int(read_at.min()) if keep_from is None else keep_from
+    assert keep_from <= int(read_at.min())
+    n_keep = int(ids.shape[1] - keep_from)
     ctx = (acts.capture(model, capture[0], at="pre", reduce=gather_reducer(capture[1])) if capture
            else contextlib.nullcontext({}))
     with ctx as store:
@@ -272,134 +349,317 @@ def outcome(lp, out_ids):
     return (h - t).cpu(), (h.exp() + t.exp()).cpu()
 
 
-def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arms=None):
-    """All arms for a chunk of items (both orders of each pair included). Returns one row per item."""
+def unit(v):
+    return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+
+def coin_grads(model, items, coin_ids):
+    """Per item, ([n_layers, D] fp32 on CPU, coin): the gradient of the coin's log-odds at " up" (log P(" heads") -
+    log P(" tails"); the softmax's normalizer cancels) with respect to the residual entering each block at " up", through
+    everything after it at that position: the direction that, at that depth, moves the coin's own prediction (line 3).
+    The prompt before " up" runs once without gradients (its keys and values cached), then " up" alone with a zero vector
+    added to each block's input, whose gradient this is. The coin read on this path is returned as a check against the
+    batched forward's."""
+    blocks = get_layers(model)
+    model.requires_grad_(False)
+    dev, dtype = input_device(model), next(model.parameters()).dtype
+    out = []
+    for it in items:
+        ids = torch.tensor([it["ids"][:it["up"] + 1]])
+        with torch.no_grad():
+            past = model(input_ids=ids[:, :-1].to(dev), use_cache=True).past_key_values
+        z = {}
+
+        def pre_hook(m, a, kw, layer):
+            h = a[0] if a else kw["hidden_states"]
+            z[layer] = torch.zeros_like(h, dtype=dtype, requires_grad=True)
+            h = h + z[layer]
+            return ((h,) + tuple(a[1:]), kw) if a else (a, {**kw, "hidden_states": h})
+
+        handles = [blocks[l].register_forward_pre_hook(lambda m, a, kw, l=l: pre_hook(m, a, kw, l), with_kwargs=True)
+                   for l in range(len(blocks))]
+        try:
+            with torch.enable_grad():
+                logits = model(input_ids=ids[:, -1:].to(dev), past_key_values=past, use_cache=True).logits[0, -1]
+                y = logits[coin_ids[0]].float() - logits[coin_ids[1]].float()
+                y.backward()
+        finally:
+            for h in handles:
+                h.remove()
+        assert all(z[l].shape[1] == 1 for l in z), "the gradient pass must run on the single position \" up\""
+        out.append((torch.stack([z[l].grad[0, -1].float().cpu() for l in range(len(blocks))]), y.item()))
+    return out
+
+
+def lens_dirs(model, H, token_ids):
+    """Unit gradients of the logit lens's log-odds (token_ids[0] - token_ids[1]) at residuals H [N, D] (line 3's
+    secondary direction). Rows are independent (the norm is per row), so one backward of the sum gives each row's."""
+    h = H.float().to(unembed(model).weight.device).requires_grad_(True)
+    with torch.enable_grad():
+        x = acts.logit_lens(model, h, token_ids=list(token_ids))
+        (x[..., 0] - x[..., 1]).sum().backward()
+    return unit(h.grad.detach().cpu())
+
+
+def rand_dirs(n_layers, dim, seed=0):
+    """A fixed random unit vector per block (line 3's random control)."""
+    return unit(torch.randn(n_layers, dim, generator=torch.Generator().manual_seed(seed)))
+
+
+def mix(own, src, transform, u=None, rho=None):
+    """The residual an arm puts in (see Arm), from own and source [P, D] at one block (fp32); u, rho unit [D]."""
+    if transform is None:
+        return src
+    delta = src - own
+    coef = (delta * u).sum(-1, keepdim=True)
+    if transform in ("pot_grad", "pot_lens"):
+        return own + coef * u
+    if transform in ("null_grad", "null_lens"):
+        return src - coef * u
+    assert transform == "rand", transform
+    return own + coef.abs() * torch.sign((delta * rho).sum(-1, keepdim=True)) * rho
+
+
+def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arms=None, specs=None, lens_pairs=None):
+    """All arms for a chunk of items (both orders of each pair included). Returns one row per item.
+
+    specs: {name: Arm} (default: ARMS, or the names in `arms` of it). lens_pairs: token-id pairs [(a, b), ...] whose
+    log-odds to read at every position of the suffix, entering every block (logit lens) and at the output (line 4); the
+    row then has "lens" [n_layers, P, n_pairs], "out" and "out_mass" [P, n_pairs] (lists, P = len(suffix)).
+    Every forward of a batch keeps logits from the batch's first line token on, so all arms round the LM head alike."""
+    specs = specs if specs is not None else {k: v for k, v in ARMS.items() if arms is None or k in arms}
     L = list(range(n_layers))
-    blocks = {"all": L, "early": L[:n_layers // 2], "late": L[n_layers // 2:]}
+    wide = lens_pairs is not None or any(not isinstance(s.where, str) for s in specs.values())
+    transforms = {s.transform for s in specs.values()}
     order = sorted(range(len(items)), key=lambda k: len(items[k]["ids"]))
     batches = [order[s:s + batch_size] for s in range(0, len(order), batch_size)]
-    cap_own, cap_ok, res = {}, {}, {k: dict(report={}, mass={}) for k in range(len(items))}
-    for batch in batches:  # unpatched: coin at " up", report at the end, captures of the line at every block
+    cap_own, cap_ok, res = {}, {}, {k: dict(report={}, mass={}, coin_arm={}) for k in range(len(items))}
+    u_lens = {}
+    for batch in batches:  # unpatched: coin at " up", report at the end, captures at every block
         its = [items[k] for k in batch]
+        kf = min(it["line"][0] for it in its)
         last = torch.tensor([len(it["ids"]) - 1 for it in its])
         up = torch.tensor([it["up"] for it in its])
-        pos = torch.tensor([it["line"] for it in its])
-        lp, store = forward(model, [it["ids"] for it in its], pad_id, torch.stack([up, last], 1), (L, pos))
-        coin, coin_mass = outcome(lp[:, 0], coin_ids)
-        rep, rep_mass = outcome(lp[:, 1], rep_ids)
-        okpos = torch.tensor([it["line"] for it in its])
-        oklp, okstore = forward(model, [it["ok_ids"] for it in its], pad_id, up, (L, okpos))
+        pos = torch.tensor([it["suffix"] if wide else it["line"] for it in its])
+        read = pos if wide else torch.stack([up, last], 1)
+        lp, store = forward(model, [it["ids"] for it in its], pad_id, read, (L, pos), keep_from=kf)
+        i_up, i_last = (len(its[0]["line"]) - 1, pos.shape[1] - 1) if wide else (0, 1)
+        coin, coin_mass = outcome(lp[:, i_up], coin_ids)
+        rep, rep_mass = outcome(lp[:, i_last], rep_ids)
+        oklp, okstore = forward(model, [it["ok_ids"] for it in its], pad_id, up, (L, torch.tensor([it["line"] for it in its])))
         coin_ok, _ = outcome(oklp[:, 0], coin_ids)
+        if lens_pairs is not None:
+            flat = [t for pr in lens_pairs for t in pr]
+            lens = torch.stack([acts.logit_lens(model, store[l], token_ids=flat) for l in L], 1).cpu()  # [B, L, P, 2n]
+            lens = lens[..., 0::2] - lens[..., 1::2]
+            out = torch.stack([outcome(lp, pr)[0] for pr in lens_pairs], -1)  # [B, P, n]
+            out_mass = torch.stack([outcome(lp, pr)[1] for pr in lens_pairs], -1)
+        n_up = len(its[0]["line"]) - 1  # " up"'s index in the captured positions
+        if {"pot_lens", "null_lens"} & transforms:
+            H = torch.stack([store[l][:, n_up] for l in L], 1)  # [B, L, D]
+            U = lens_dirs(model, H.reshape(-1, H.shape[-1]), coin_ids).reshape(H.shape)
         for r, k in enumerate(batch):
             res[k].update(coin=coin[r].item(), coin_mass=coin_mass[r].item(), coin_ok=coin_ok[r].item())
             res[k]["report"]["none"], res[k]["mass"]["none"] = rep[r].item(), rep_mass[r].item()
+            res[k]["coin_arm"]["none"] = coin[r].item()
             cap_own[k] = torch.stack([store[l][r] for l in L])  # [L, P, D]
             cap_ok[k] = torch.stack([okstore[l][r] for l in L])
+            if lens_pairs is not None:
+                res[k].update(lens=lens[r].tolist(), out=out[r].tolist(), out_mass=out_mass[r].tolist())
+            if {"pot_lens", "null_lens"} & transforms:
+                u_lens[k] = U[r]
+    u_grad, rho = {}, None
+    if {"pot_grad", "null_grad", "rand"} & transforms:
+        for k, (g, y) in zip(range(len(items)), coin_grads(model, items, coin_ids)):
+            u_grad[k] = unit(g)
+            res[k]["coin_grad_path"] = y
+        rho = rand_dirs(n_layers, cap_own[0].shape[-1])
     partner = {k: k + 1 if items[k]["order"] == 0 else k - 1 for k in range(len(items))}  # chunk keeps pairs together
-    for arm, (source, where, which) in ARMS.items():
-        if arms is not None and arm not in arms:  # a run with fewer arms (--arms)
-            continue
+    for arm, spec in specs.items():
+        blocks = arm_blocks(spec.blocks, n_layers)
+        assert spec.transform is None or spec.where == "up", "transforms are for \" up\" only"
         for batch in batches:
             its = [items[k] for k in batch]
-            src = [cap_own[k] if source == "own" else cap_own[partner[k]] if source == "other" else cap_ok[k] for k in batch]
-            sel = slice(-1, None) if where == "up" else slice(None)  # " up" is the line's last token
-            pos = torch.tensor([it["line"][sel] for it in its])
-            values = {l: torch.stack([s[l, sel] for s in src]) for l in blocks[which]}  # [B, P, D]
+            kf = min(it["line"][0] for it in its)
+            pos = torch.tensor([arm_positions(spec.where, it) for it in its])
+            idx = [[p - it["line"][0] for p in arm_positions(spec.where, it)] for it in its]  # into the captures
+            src = [cap_own[k] if spec.source == "own" else cap_own[partner[k]] if spec.source == "other" else cap_ok[k]
+                   for k in batch]
+            values = {}
+            for l in blocks:
+                rows = []
+                for r, k in enumerate(batch):
+                    s = src[r][l, idx[r]]
+                    if spec.transform is not None:
+                        u = (u_lens if spec.transform.endswith("lens") else u_grad)[k][l].float()
+                        s = mix(cap_own[k][l, idx[r]].float(), s.float(), spec.transform, u,
+                                None if rho is None else rho[l]).to(s.dtype)
+                    rows.append(s)
+                values[l] = torch.stack(rows)  # [B, P, D]
             last = torch.tensor([len(it["ids"]) - 1 for it in its])
             up = torch.tensor([it["up"] for it in its])
-            # Read logits from " up" on, as the unpatched pass does: the same LM-head matmul shape, so the same bf16 rounding
-            # (with only the last positions kept, OLMo's self-patch differed by up to 0.125 nats).
             with replace(model, values, pos):
-                lp, _ = forward(model, [it["ids"] for it in its], pad_id, torch.stack([up, last], 1))
+                lp, _ = forward(model, [it["ids"] for it in its], pad_id, torch.stack([up, last], 1), keep_from=kf)
             rep, mass = outcome(lp[:, 1], rep_ids)
+            c_arm, _ = outcome(lp[:, 0], coin_ids)
             for r, k in enumerate(batch):
                 res[k]["report"][arm], res[k]["mass"][arm] = rep[r].item(), mass[r].item()
+                res[k]["coin_arm"][arm] = c_arm[r].item()
     return [dict(pair=items[k]["pair"], order=items[k]["order"], a=items[k]["a"], b=items[k]["b"], **res[k])
             for k in range(len(items))]
+
+
+WORDING_PAIRS = 24  # the earlier wording checks' first pilot pairs
+
+
+@torch.no_grad()
+def choose_wording(model, tok, template_tok, tasks, pairs, question, fmt, n=WORDING_PAIRS):
+    """The pre-registered prefill rule, run in the job: of the question's plain and bold prefills (question,
+    question + "_bold"), the one with the higher median outcome mass over the first n pilot pairs (order 0, one prompt per
+    forward, as scripts/report_wording_check.py). Returns (condition, {condition: median mass}); a median below 0.2 is
+    run but flagged (reported, not interpreted)."""
+    masses = {}
+    for name in (question, question + "_bold"):
+        out_ids = outcome_token_ids(name, tok)
+        ms = []
+        for i, j in pairs[:n]:
+            text = build_prompt(name, tasks[i]["prompt"], tasks[j]["prompt"], template_tok, **fmt)
+            ids = torch.tensor([tok(text, add_special_tokens=False).input_ids], device=input_device(model))
+            lp = torch.log_softmax(model(input_ids=ids, use_cache=False).logits[0, -1].float(), -1)
+            ms.append(lp[out_ids].exp().sum().item())
+        masses[name] = float(sorted(ms)[len(ms) // 2])
+    best = max(masses, key=masses.get)
+    print(f"wording check {question}: " + ", ".join(f"{k} {v:.2f}" for k, v in masses.items()) + f" -> {best}"
+          + ("" if masses[best] >= 0.2 else " (below 0.2: reported, not interpreted)"), flush=True)
+    return best, masses
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
-    ap.add_argument("--limit", type=int, help="first N pairs only (smoke test)")
-    ap.add_argument("--report", nargs="+", help="override the config's report condition; several run one after another "
-                    "in one model load, each its own W&B run")
-    ap.add_argument("--arms", nargs="+", choices=list(ARMS), help="only these arms (default: all; self is always run, "
-                    "for the batching check)")
+    ap.add_argument("--limit", type=int, help="first N pairs only (smoke test; line 4's runs use the first 500)")
+    ap.add_argument("--report", nargs="+", default=[], help="override the config's report condition; several run one after "
+                    "another in one model load, each its own W&B run")
+    ap.add_argument("--report-auto", nargs="+", default=[], metavar="QUESTION",
+                    help="questions whose prefill (plain or bold) the pre-registered mass rule picks in the job "
+                    "(choose_wording); run after the --report conditions")
+    ap.add_argument("--arms", nargs="+", choices=list(ARMS), help="only these of the base arms (default: all; self is "
+                    "always run, for the batching check)")
+    ap.add_argument("--arm-sets", nargs="+", choices=["base", "line3", "line4"],
+                    help="arm sets (arm_specs; default: the config's arm_sets, else base)")
+    ap.add_argument("--lens", action="store_true", help="also read the logit lens over the suffix (line 4); or config lens")
     a = ap.parse_args()
     cfg0 = yaml.safe_load(open(a.config))
-    reports = a.report or [cfg0.get("report", "coin_report")]
+    reports = a.report or ([] if a.report_auto else [cfg0.get("report", "coin_report")])
+    arm_sets = a.arm_sets or cfg0.get("arm_sets", ["base"])
     arms = None if a.arms is None else sorted(set(a.arms) | {"self"}, key=list(ARMS).index)
+    assert arms is None or arm_sets == ["base"], "--arms selects among the base arms only"
+    want_lens = a.lens or cfg0.get("lens", False)
     tasks = read_jsonl(cfg0["tasks_file"])
     sweep = select_pairs(len(tasks), 15000, 0)
     pairs = (pilot_pairs(len(tasks), cfg0["n_pairs"], sweep, cfg0.get("seed", 0)) if cfg0["pairs"] == "pilot"
              else select_pairs(len(tasks), cfg0["n_pairs"], cfg0.get("seed", 0)))
+    wording_pairs = pairs[:WORDING_PAIRS]
     pairs = pairs[:a.limit] if a.limit else pairs
     m = resolve_model(cfg0)
     resolved = {**m, "revisions": [[r, v] for r, v in m.get("revisions", {}).items()]}  # repo names aren't config keys
     tok, template_tok = load_tokenizers(m)
     coin_ids = outcome_token_ids("coinflip", tok)
-    # Prompts before the model, so a tokenization assertion fails before a long load.
-    all_items = {report: build_items(tok, tasks, pairs, report, template_tok, **prompt_format(m)) for report in reports}
+    lens_pairs = [tuple(coin_ids), tuple(outcome_token_ids("coin_report_bold", tok))] if want_lens else None
+    fmt = prompt_format(m)
+    # Prompts before the model, so a tokenization assertion fails before a long load (both prefills of an auto question).
+    auto = [c for q in a.report_auto for c in (q, q + "_bold")]
+    all_items = {report: build_items(tok, tasks, pairs, report, template_tok, **fmt) for report in reports + auto}
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
-    if "model_from" in cfg0 and torch.cuda.device_count() > 1 and not peer_copies_ok():
+    if torch.cuda.device_count() > 1 and not peer_copies_ok():
         raise SystemExit("GPU-to-GPU copies corrupt data on this host (matskit.models.peer_copies_ok)")
     t_load = time.time()
     model = load_model(m["name"], device, dtype, revision=m.get("revision"), max_memory=m.get("max_memory"),
                        loader=m.get("loader"), attn_implementation=m.get("attn_implementation"))
     print(f"loaded {m['name']} in {(time.time() - t_load) / 60:.1f} min", flush=True)
     model.config.use_cache = False
+    model.requires_grad_(False)
     pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
     n_layers = len(get_layers(model))
-    first = all_items[reports[0]]
-    if "model_from" in cfg0:
-        print(f"attention: {model.config._attn_implementation}", flush=True)
-        sanity_check(model, tok, m, uses_bos=tok.bos_token_id is not None and first[0]["ids"][0] == tok.bos_token_id)
+    first = next(iter(all_items.values()))
+    print(f"attention: {model.config._attn_implementation}", flush=True)
+    sanity_check(model, tok, m, uses_bos=tok.bos_token_id is not None and first[0]["ids"][0] == tok.bos_token_id)
+    wording = {}
+    for q in a.report_auto:
+        best, masses = choose_wording(model, tok, template_tok, tasks, wording_pairs, q, fmt)
+        reports.append(best)
+        wording[best] = masses
 
     for report in reports:
         cfg = dict(cfg0)
-        if a.report:
-            cfg["report"], cfg["run_name"] = report, f"{cfg0['run_name']}-{report}"
+        if a.report or a.report_auto:
+            cfg["report"], cfg["run_name"] = report, f"{cfg0['run_name']}-{report}" + (f"-{'-'.join(arm_sets)}"
+                                                                                      if arm_sets != ["base"] else "")
         items = all_items[report]
         rep_ids = outcome_token_ids(report, tok)
+        specs = (arm_specs(arm_sets, len(items[0]["line"]), len(items[0]["suffix"])) if arms is None
+                 else {k: ARMS[k] for k in arms})
+        blocks_of = {k: arm_blocks(s.blocks, n_layers) for k, s in specs.items() if isinstance(s.blocks, tuple)}
+        suffix_tokens = [tok.decode([items[0]["ids"][p]]) for p in items[0]["suffix"]]
         run = wandb.init(project="tournament", group="coin_report", job_type="coin_report", name=cfg["run_name"],
                          tags=cfg.get("tags"), reinit="finish_previous",
-                         config={**cfg, "n_pairs_run": len(pairs), "arms": arms or list(ARMS),
+                         config={**cfg, "n_pairs_run": len(pairs), "arms": list(specs), "arm_sets": arm_sets,
+                                 "single_blocks": blocks_of, "suffix_tokens": suffix_tokens, "n_layers": n_layers,
+                                 "lens": want_lens, "wording_check": wording.get(report),
                                  **({"model_resolved": resolved} if "model_from" in cfg else {})})
         out = Path("outputs/coin_report") / cfg["family"] / run.id
         out.mkdir(parents=True, exist_ok=True)
         print(f"\n[{report}] {len(pairs)} pairs, {len(items)} prompts, {n_layers} blocks, line of "
-              f"{len(items[0]['line'])} tokens, arms {arms or list(ARMS)}", flush=True)
+              f"{len(items[0]['line'])} tokens, suffix {suffix_tokens}, {len(specs)} arms {list(specs)}", flush=True)
         print("example prompt:\n" + tok.decode(items[0]["ids"]), flush=True)
 
         # Batch-shape check: the unpatched report and coin of a few prompts alone vs in a batch.
         probe = items[:2 * min(4, len(pairs))]
         alone = []  # (coin, report) log-odds of each prompt in a batch of one
         for it in probe:
-            lp, _ = forward(model, [it["ids"]], pad_id, torch.tensor([[it["up"], len(it["ids"]) - 1]]))
+            lp, _ = forward(model, [it["ids"]], pad_id, torch.tensor([[it["up"], len(it["ids"]) - 1]]),
+                            keep_from=it["line"][0])
             alone.append([outcome(lp[0, 0], coin_ids)[0].item(), outcome(lp[0, 1], rep_ids)[0].item()])
-        rows = run_chunk(model, probe, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], arms)
+        rows = run_chunk(model, probe, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], specs=specs,
+                         lens_pairs=lens_pairs)
         d_coin = [abs(r["coin"] - al[0]) for r, al in zip(rows, alone)]
         d_rep = [abs(r["report"]["none"] - al[1]) for r, al in zip(rows, alone)]
         d_self = [abs(r["report"]["self"] - r["report"]["none"]) for r in rows]
-        print(f"batching check: |report diff| max {max(d_rep):.3f}, |coin diff| max {max(d_coin):.3f}; "
-              f"self-patch |diff| max {max(d_self):.3g}", flush=True)
-        run.summary.update({"batch_report_max": max(d_rep), "batch_coin_max": max(d_coin), "self_patch_max": max(d_self)})
+        checks = {"batch_report_max": max(d_rep), "batch_coin_max": max(d_coin), "self_patch_max": max(d_self)}
+        if "coin_grad_path" in rows[0]:  # the gradient pass's own coin (cached prefix, " up" alone) vs the batched one
+            checks["grad_path_coin_max"] = max(abs(r["coin_grad_path"] - r["coin"]) for r in rows)
+        if want_lens:  # the lens entering block L-1 is not the output; the output read at " up" must be the coin
+            checks["out_up_vs_coin_max"] = max(abs(r["out"][len(items[0]["line"]) - 1][0] - r["coin"]) for r in rows)
+        print("batching check: " + ", ".join(f"{k} {v:.3g}" for k, v in checks.items()), flush=True)
+        run.summary.update(checks)
 
         path = out / "rows.jsonl"
         chunk = cfg.get("chunk_pairs", 64)
         t0 = time.time()
         for s in range(0, len(pairs), chunk):
             part = items[2 * s:2 * (s + chunk)]
-            for row in run_chunk(model, part, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], arms):
-                if not all(map(math.isfinite, [row["coin"], *row["report"].values()])):
+            lens_rows = []
+            for row in run_chunk(model, part, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], specs=specs,
+                                 lens_pairs=lens_pairs):
+                if not all(map(math.isfinite, [row["coin"], *row["report"].values(), *row["coin_arm"].values()])):
                     raise SystemExit(f"non-finite log-odds in pair {row['pair']}, order {row['order']}: {row}")
+                if want_lens:  # big arrays go to an npz per chunk, the rest to rows.jsonl
+                    lens_rows.append((row["pair"], row["order"], row.pop("lens"), row.pop("out"), row.pop("out_mass")))
                 io.append_jsonl(path, row)
+            if lens_rows:
+                import numpy as np
+                np.savez_compressed(out / f"lens_{s:05d}.npz", pair=np.array([x[0] for x in lens_rows]),
+                                    order=np.array([x[1] for x in lens_rows]),
+                                    lens=np.array([x[2] for x in lens_rows], dtype=np.float32),
+                                    out=np.array([x[3] for x in lens_rows], dtype=np.float32),
+                                    out_mass=np.array([x[4] for x in lens_rows], dtype=np.float32))
             n = min(s + chunk, len(pairs))
             rate = n / (time.time() - t0)
             print(f"  {n}/{len(pairs)} pairs, {rate:.2f} pairs/s, ETA {(len(pairs) - n) / rate / 60:.1f} min", flush=True)
         run.save(str(path), base_path=str(out), policy="now")
+        for f in sorted(out.glob("lens_*.npz")):
+            run.save(str(f), base_path=str(out), policy="now")
         run.finish()
         print(f"wrote {path}", flush=True)
 

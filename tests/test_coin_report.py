@@ -19,7 +19,8 @@ def write_rows(path, kappa=0.0, shrink=0.0, n=600, seed=0):
             c_ok = 0.3 + s * 0.8 * c[p]
             r = 0.5 + s * (0.8 * c[p] + x[p]) + rng.normal(0, 0.05)
             report, mass = {"none": r}, {"none": 1.0}
-            for arm, (source, _, _) in ARMS.items():
+            for arm, spec in ARMS.items():
+                source = spec.source
                 c_src = {"own": c_o, "other": c_other, "ok": c_ok}[source]
                 report[arm] = r * (1 - shrink * (source != "own")) + kappa * (c_src - c_o) + rng.normal(0, 0.01)
                 mass[arm] = 1.0
@@ -43,3 +44,18 @@ def test_shrinking_is_not_kappa(tmp_path):
     s = stats(D, np.arange(len(D["c"])), {})
     assert s["swap: slope(d on coin)"] < -0.2  # the naive slope can't tell shrinkage from reading " up"
     assert abs(s["kappa (swap+ctrl)"]) < 0.02 and abs(s["lambda (swap+ctrl)"] + 0.4) < 0.02
+
+
+
+def test_share_r_and_bias_shrink_tell_content_from_disruption(tmp_path):
+    """Reading " up" (kappa): the swap reverses part of the answer's pair effect and leaves its heads lean alone.
+    Shrinking the answer: share_r = shrink / 2 and the heads lean shrinks by the same factor."""
+    write_rows(tmp_path / "k.jsonl", kappa=0.3)
+    D = load(tmp_path / "k.jsonl")
+    s = stats(D, np.arange(len(D["c"])), {})
+    # r = s (0.8 c + x), d = -2 kappa c: share_r = kappa cov(c, r) / var(r) = 0.3 * 0.8 / 1.64
+    assert abs(s["swap: share_r"] - 0.3 * 0.8 / 1.64) < 0.02 and abs(s["swap: bias shrink"]) < 0.02
+    write_rows(tmp_path / "s.jsonl", shrink=0.2)
+    D = load(tmp_path / "s.jsonl")
+    s = stats(D, np.arange(len(D["c"])), {})
+    assert abs(s["swap: share_r"] - 0.1) < 0.01 and abs(s["swap: bias shrink"] - 0.2) < 0.01

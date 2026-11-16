@@ -1,0 +1,15 @@
+# Follow-ups on the coin's " up" (README, "Follow-ups on the coin's ' up'"): final stage, lines 2-4.
+# The 1,000 pilot pairs outside the sweep (the earlier report runs' pairs); line 4's per-position arms on the first 500.
+# Same GPU type as the earlier report runs of this family (1x H200), so finals and bases compare like for like.
+family: llama-70b
+run_name: up-followups-llama-70b
+tags: [llama-70b, up_followups]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: unsloth/Llama-3.3-70B-Instruct
+  max_memory: {0: 139GiB}

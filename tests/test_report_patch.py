@@ -7,7 +7,8 @@ from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
 
 import prompts
 from analyze import read_jsonl
-from report_patch import ARMS, build_items, forward, outcome, run_chunk
+from report_patch import (ARMS, arm_blocks, arm_specs, build_items, coin_grads, forward, lens_dirs, mix,
+                          outcome, rand_dirs, run_chunk, unit)
 
 LLAMA = "unsloth/Llama-3.3-70B-Instruct"
 
@@ -70,7 +71,8 @@ def test_swap_puts_the_other_orders_residual_at_up(setup):
                                     "coin_report_short_land", "coin_report_short_land_bold",
                                     "coin_report_short_coin", "coin_report_short_coin_bold",
                                     "coin_predict", "coin_predict_bold", "coin_predict_think", "coin_predict_think_bold",
-                                    "coin_predict_my", "coin_predict_my_bold"])
+                                    "coin_predict_my", "coin_predict_my_bold", "coin_choose_ab", "coin_choose_ht",
+                                    "coin_choose_ht_bold"])
 def test_report_variants_extend_the_coinflip(setup, report):
     tok, _, _ = setup
     tasks = [t for t in read_jsonl("data/tasks_n300_max500_seed0.jsonl") if len(t["prompt"]) < 120][:2]
@@ -81,3 +83,98 @@ def test_report_variants_extend_the_coinflip(setup, report):
     if report.startswith(("coin_report_short", "coin_predict")):  # the question doesn't name the outcomes again
         question = text[text.index("it came up. But before"):]
         assert "heads" not in question.lower() and "tails" not in question.lower(), question
+
+
+
+def test_suffix_is_shared_and_starts_the_line(setup):
+    tok, items, _ = setup
+    for it in items:
+        assert it["suffix"][0] == it["line"][0] and it["suffix"][-1] == len(it["ids"]) - 1
+        assert it["suffix"][len(it["line"]) - 1] == it["up"]
+
+
+def test_coin_grads_match_a_full_forward_gradient(setup):
+    """The cached-prefix gradient at " up" equals autograd through a full forward of the coinflip prompt."""
+    tok, items, model = setup
+    coin_ids = prompts.outcome_token_ids("coinflip", tok)
+    it = items[0]
+    (g, y), = coin_grads(model, [it], coin_ids)
+    ids = torch.tensor([it["ids"][:it["up"] + 1]])
+    from matskit.models import layers as get_layers
+    blocks, z = get_layers(model), {}
+
+    def hook(m, a, kw, l):
+        h = a[0] if a else kw["hidden_states"]
+        z[l] = torch.zeros(h.shape[-1], requires_grad=True)
+        h = h.clone()
+        h[0, -1] = h[0, -1] + z[l]
+        return ((h,) + tuple(a[1:]), kw) if a else (a, {**kw, "hidden_states": h})
+
+    hs = [b.register_forward_pre_hook(lambda m, a, kw, l=l: hook(m, a, kw, l), with_kwargs=True) for l, b in enumerate(blocks)]
+    try:
+        logits = model(input_ids=ids, use_cache=False).logits[0, -1]
+        yy = logits[coin_ids[0]] - logits[coin_ids[1]]
+        yy.backward()
+    finally:
+        for h in hs:
+            h.remove()
+    assert y == pytest.approx(yy.item(), abs=1e-4)
+    for l in range(len(blocks)):
+        torch.testing.assert_close(g[l], z[l].grad, rtol=1e-3, atol=1e-5)
+    assert g.abs().sum() > 0
+
+
+def test_mix_splits_the_swap_into_potent_and_null_parts():
+    torch.manual_seed(0)
+    own, src = torch.randn(1, 8), torch.randn(1, 8)
+    u, rho = unit(torch.randn(8)), unit(torch.randn(8))
+    pot, null = mix(own, src, "pot_grad", u), mix(own, src, "null_grad", u)
+    torch.testing.assert_close(pot + null - own, src)  # the two parts add up to the swap
+    torch.testing.assert_close(((pot - own) * u).sum(), ((src - own) * u).sum())  # pot moves own along u only
+    torch.testing.assert_close(((null - own) * u).sum(), torch.tensor(0.0), atol=1e-6, rtol=0)
+    rnd = mix(own, src, "rand", u, rho)
+    torch.testing.assert_close((rnd - own).norm(), ((src - own) * u).sum().abs(), rtol=1e-5, atol=1e-6)  # matched size
+    assert mix(own, src, None) is src
+
+
+def test_lens_dir_raises_the_lens_log_odds(setup):
+    from matskit import acts
+    tok, items, model = setup
+    coin_ids = prompts.outcome_token_ids("coinflip", tok)
+    H = torch.randn(3, model.config.hidden_size)
+    U = lens_dirs(model, H, coin_ids)
+    f = lambda h: (lambda x: x[..., 0] - x[..., 1])(acts.logit_lens(model, h, token_ids=coin_ids))
+    eps = 1e-3 * H.norm(dim=-1, keepdim=True)
+    assert (f(H + eps * U) > f(H)).all() and (f(H - eps * U) < f(H)).all()
+
+
+def test_followup_arms(setup):
+    """line3 and line4 arm sets: self is exact; pos at " up" is the swap; the potent and null parts move the report;
+    a single-block arm patches one block; the lens readout lines up with the coin at " up"."""
+    tok, items, model = setup
+    coin_ids = prompts.outcome_token_ids("coinflip", tok)
+    out_ids = prompts.outcome_token_ids("coin_report", tok)
+    n_line, n_suffix = len(items[0]["line"]), len(items[0]["suffix"])
+    specs = arm_specs(["base", "line3", "line4"], n_line, n_suffix)
+    assert {f"pos{k:02d}" for k in range(n_suffix)} <= set(specs) and f"loo{n_line - 1:02d}" in specs
+    assert arm_blocks(specs["v90_full"].blocks, 10) == [9] and arm_blocks(specs["v50_pot"].blocks, 10) == [5]
+    lens_pairs = [tuple(coin_ids), tuple(out_ids)]
+    rows = run_chunk(model, items, tok.eos_token_id, coin_ids, out_ids, 2, batch_size=3, specs=specs, lens_pairs=lens_pairs)
+    for r in rows:
+        assert r["report"]["self"] == pytest.approx(r["report"]["none"], abs=1e-5)
+        assert r["report"][f"pos{n_line - 1:02d}"] == pytest.approx(r["report"]["swap"], abs=1e-5)  # the same patch
+        assert r["coin_grad_path"] == pytest.approx(r["coin"], abs=1e-4)
+        assert len(r["lens"]) == 2 and len(r["lens"][0]) == n_suffix and len(r["out"]) == n_suffix
+        assert r["out"][n_line - 1][0] == pytest.approx(r["coin"], abs=1e-5)  # the output read at " up" is the coin
+        # swapping all blocks' " up" makes the coin read at " up" the other order's (up to the last block's own attention)
+        assert r["coin_arm"]["self"] == pytest.approx(r["coin"], abs=1e-5)
+    # every arm moves the coin read at " up" (this random model's report barely reads " up" at all: the swap moves it
+    # by ~3e-4 nats), and the potent and null parts each move it
+    for arm in ("swap_pot_grad", "swap_null_grad", "swap_pot_lens", "swap_rand", "v50_full", "v50_pot", "loo00"):
+        assert max(abs(r["coin_arm"][arm] - r["coin"]) for r in rows) > 1e-3, arm
+    # positions after " up" can't move the coin there; the readout position itself moves the report a lot
+    for k in range(n_line, n_suffix):
+        assert all(r["coin_arm"][f"pos{k:02d}"] == r["coin"] for r in rows)
+    assert max(abs(r["report"][f"pos{n_suffix - 1:02d}"] - r["report"]["none"]) for r in rows) > 1.0
+    # the whole line without its last token is the line minus " up": it differs from the whole-line swap
+    assert max(abs(r["report"][f"loo{n_line - 1:02d}"] - r["report"]["swap_line"]) for r in rows) > 1e-6

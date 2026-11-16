@@ -74,7 +74,7 @@ def load(path):
     for r in rows:
         by.setdefault(r["pair"], {})[r["order"]] = r
     pairs = sorted(p for p, o in by.items() if set(o) == {0, 1})
-    arms = ["none", *(a for a in ARMS if a in rows[0]["report"])]  # a run may skip arms (report_patch.py --arms)
+    arms = ["none", *(a for a in rows[0]["report"] if a != "none")]  # a run's arms (report_patch.py --arms / --arm-sets)
     o0, o1 = [by[p][0] for p in pairs], [by[p][1] for p in pairs]
     get = lambda rs, f: np.array([f(r) for r in rs])
     D = dict(pair=np.array(pairs), a=get(o0, lambda r: r["a"]), b=get(o0, lambda r: r["b"]))
@@ -83,11 +83,34 @@ def load(path):
     D["r_o"] = {x: np.stack([get(o0, lambda r: r["report"][x]), get(o1, lambda r: r["report"][x])], 1) for x in arms}
     D["mass"] = {x: np.concatenate([get(o0, lambda r: r["mass"][x]), get(o1, lambda r: r["mass"][x])]) for x in arms}
     D["coin_mass"] = np.concatenate([get(o0, lambda r: r["coin_mass"]), get(o1, lambda r: r["coin_mass"])])
+    if "coin_arm" in rows[0]:  # the coin read at " up" in each arm (Follow-ups)
+        D["coin_arm_o"] = {x: np.stack([get(o0, lambda r: r["coin_arm"][x]), get(o1, lambda r: r["coin_arm"][x])], 1)
+                           for x in arms}
     pair_eff = lambda m: (m[:, 0] - m[:, 1]) / 2
     D["c"], D["c_ok"] = pair_eff(D["coin_o"]), pair_eff(D["coin_ok_o"])
     D["r"] = {x: pair_eff(m) for x, m in D["r_o"].items()}
+    D["bias"] = {x: m.mean(1) for x, m in D["r_o"].items()}  # the order-averaged part: the answer's heads lean
+    if "coin_arm_o" in D:
+        D["c_arm"] = {x: pair_eff(m) for x, m in D["coin_arm_o"].items()}
     D["arms"] = arms[1:]
     return D
+
+
+def share_r(d, r0):
+    """The coin-free share (Follow-ups, line 1): the fraction of the answer's own pair effect r0 that a patch reverses,
+    -slope(d on r0) / 2. If the answer reads a part s of its pair effect from the patched position, in a code relative to
+    the order (heads/tails, A/B), the other order's state there moves it by d = -2 s r0. It equals the coin-based share
+    times r(answer, coin)^2 when the patch only moves the coin-aligned part. A patch that only disrupts (shrinks the
+    answer by lambda) gives lambda / 2 too; bias_shrink tells the two apart."""
+    return -slope(r0, d) / 2
+
+
+def bias_shrink(db, b0):
+    """How much a patch shrinks the order-averaged part of the answer (its heads lean b0): -sum(db b0) / sum(b0^2). A
+    patch bringing in the other order's state can't move that part through content (both orders share it), but a patch
+    that disrupts the answer shrinks it as it shrinks the pair effect. So with pure disruption bias_shrink = 2 share_r,
+    and with pure content bias_shrink = 0."""
+    return -float(np.sum(db * b0) / np.sum(b0 ** 2))
 
 
 def regression(D, idx, arms=("swap", "ctrl")):
@@ -116,7 +139,8 @@ def stats(D, idx, extra):
         s[f"r(coin, {name})"] = pearson(c, v[idx])
     for arm in ARMS:
         if arm not in D["arms"]:  # not run: its statistics are missing
-            for k in ("mean |d|", "r(d, coin)", "slope(d on coin)", "share", "r(report_patched, coin)"):
+            for k in ("mean |d|", "r(d, coin)", "slope(d on coin)", "share", "r(report_patched, coin)", "share_r",
+                      "bias shrink"):
                 s[f"{arm}: {k}"] = float("nan")
             continue
         d = D["r"][arm][idx] - r0
@@ -125,6 +149,8 @@ def stats(D, idx, extra):
         s[f"{arm}: slope(d on coin)"] = slope(c, d)
         s[f"{arm}: share"] = -slope(c, d) / (2 * slope(c, r0))
         s[f"{arm}: r(report_patched, coin)"] = pearson(D["r"][arm][idx], c)
+        s[f"{arm}: share_r"] = share_r(d, r0)
+        s[f"{arm}: bias shrink"] = bias_shrink(D["bias"][arm][idx] - D["bias"]["none"][idx], D["bias"]["none"][idx])
     s["ctrl: r(d, c_ok - c)"] = pearson(D["r"]["ctrl"][idx] - r0, D["c_ok"][idx] - c)
     s["kappa (swap+ctrl)"], s["lambda (swap+ctrl)"] = regression(D, idx)
     s["kappa (swap_line+ctrl_line)"], s["lambda (swap_line+ctrl_line)"] = (

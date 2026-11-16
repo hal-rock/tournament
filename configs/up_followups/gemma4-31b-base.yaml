@@ -1,0 +1,15 @@
+# Follow-ups on the coin's " up" (README, "Follow-ups on the coin's ' up'"): base, line 1 (and line 3's arms, read only if line 1 finds a path). The instruct template, as in the sweep (jrl62npf).
+# The 1,000 pilot pairs outside the sweep (the earlier report runs' pairs); line 4's per-position arms on the first 500.
+# Same GPU type as the earlier report runs of this family (1x H100 SXM), so finals and bases compare like for like.
+family: gemma4-31b-base
+run_name: up-followups-gemma4-31b-base
+tags: [gemma4-31b-base, up_followups]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 32
+chunk_pairs: 64
+model:
+  name: google/gemma-4-31B
+  chat_template_from: google/gemma-4-31B-it

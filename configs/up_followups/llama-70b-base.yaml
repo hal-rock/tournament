@@ -1,0 +1,16 @@
+# Follow-ups on the coin's " up" (README, "Follow-ups on the coin's ' up'"): base (3.1; 3.3 Instruct was post-trained from it), line 1 (and line 3's arms, read only if line 1 finds a path). The 3.3 Instruct template, as in the sweep (tvlqj8a0); the base's chat-marker embeddings are exactly zero (CLAUDE.md).
+# The 1,000 pilot pairs outside the sweep (the earlier report runs' pairs); line 4's per-position arms on the first 500.
+# Same GPU type as the earlier report runs of this family (1x H200), so finals and bases compare like for like.
+family: llama-70b-base
+run_name: up-followups-llama-70b-base
+tags: [llama-70b-base, up_followups]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: unsloth/Llama-3.1-70B
+  chat_template_from: unsloth/Llama-3.3-70B-Instruct
+  max_memory: {0: 139GiB}

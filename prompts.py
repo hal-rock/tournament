@@ -135,6 +135,17 @@ for _name, (_question, _prefill) in _SHORT_QUESTIONS.items():
     CONDITIONS[_name] = dict(body=CONDITIONS["coinflip"]["body"] + _ASK + _question, prefill=_prefill,
                              outcomes=(" heads", " tails"))
     CONDITIONS[_name + "_bold"] = dict(body=CONDITIONS[_name]["body"], prefill=_prefill + " **", outcomes=("heads", "tails"))
+# The Assistant's choice after the coin (README, "Follow-ups on the coin's ' up'", line 2): the coinflip prompt word for word
+# through "it came up", then the user backs out of the coin and lets the Assistant choose, in task labels (prefill as the
+# Assistant condition's, read at " A" / " B") or in the coin's outcome words (read at heads / tails; plain and bold prefill,
+# the higher-mass one run, as before).
+COIN_CHOOSE_TAIL = ". Actually, never mind the coin: I'll let you choose. "
+CONDITIONS["coin_choose_ab"] = dict(body=CONDITIONS["coinflip"]["body"] + COIN_CHOOSE_TAIL
+                                    + "Which task do you choose, Task A or Task B?", prefill="I'll choose Task",
+                                    outcomes=(" A", " B"))
+CONDITIONS["coin_choose_ht"] = dict(body=CONDITIONS["coinflip"]["body"] + COIN_CHOOSE_TAIL + "Heads or tails?",
+                                    prefill="I'll choose", outcomes=(" heads", " tails"))
+CONDITIONS["coin_choose_ht_bold"] = {**CONDITIONS["coin_choose_ht"], "prefill": "I'll choose **", "outcomes": ("heads", "tails")}
 # The coin as a tool call (README, "The coin as a tool call"; toolframe.py), after ../coinflip's `tool` frame: the user asks
 # the Assistant to flip the coin with a declared `flip_coin` tool, the Assistant's turn is the prefilled call, and the tool's
 # result is read at its first token (`heads` / `tails`, no leading space). The user turn is the coinflip's, word for word,

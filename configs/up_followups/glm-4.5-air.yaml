@@ -1,0 +1,16 @@
+# Follow-ups on the coin's " up" (README, "Follow-ups on the coin's ' up'"): final stage, lines 2-4.
+# The 1,000 pilot pairs outside the sweep (the earlier report runs' pairs); line 4's per-position arms on the first 500.
+# 3x H100 SXM, as the hope run's GLM (no H200 or B200 pair in stock on 2026-11-16; the earlier report runs used 2x H200):
+# GLM's final and base on the same type, so they compare like for like.
+family: glm-4.5-air
+run_name: up-followups-glm-4.5-air
+tags: [glm-4.5-air, up_followups]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: zai-org/GLM-4.5-Air
+  max_memory: {0: 69GiB, 1: 69GiB, 2: 72GiB}
