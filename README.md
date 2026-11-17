@@ -6694,13 +6694,13 @@ CSVs there).
 | Gemma 4 31B-it | 1x H100 | `9k9n2joh` / `uum0xpyb` | `1g6ynlqi` / `nwxny0n5` | `ynpzr0g6` / `aq86iamy` |
 | Gemma 4 31B base | 1x H100 | `bu0qz0s7` / `ld8yawcr` | | |
 | Llama 3.3 70B | 1x H200 | `m3af5pwr` / `ltk5k1pt` | `7krslsl2` / `66j1j4bl` | `67q7exgw` / `my7xmmbj` |
-| Llama 3.1 70B base | 1x H200 | `pa8y5knu` / pending | | |
+| Llama 3.1 70B base | 1x H200 | `pa8y5knu` / `ry8t9g54` (rerun) | | |
 | GLM-4.5-Air | 3x H100 | `iogns0kl` / `50q6l8w9` | `38xrpaxd` / `p73tp9kq` | `avflmlxa` / `vnzwc4z2` |
 | GLM-4.5-Air base | 3x H100 | `dhn2nk82` / `uvy3x8mf` | | |
 
-About $182 of GPU in all.
-- **The Llama base's guess was lost:** its host died 448 pairs into the run, and the rows lived only on the pod. It's being
-  rerun as pre-registered (see the next section's runs), on another H200.
+About $195 of GPU in all (including the Llama base guess rerun).
+- **The Llama base's guess was lost:** its host died 448 pairs into the run, and the rows lived only on the pod. It was rerun
+  as pre-registered on another H200 (`ry8t9g54`, 2026-11-17, on the next section's Llama pod).
 - **Operational changes, none of which changes what's computed:**
   - GLM's final reloaded with a different memory split (70/70/67 GiB): two of its three loads ran out of memory on GPU 2.
   - `report_patch.py` builds each arm's values from stacked captures, identical output (max |diff| 0 on the tiny model). On
@@ -6730,7 +6730,7 @@ About $182 of GPU in all.
 | Llama 3.3 70B | final | preference | 1.00 | 8.14 | ok | 0.2% [0.2, 0.3] | 0.0% | 0.2% | 0.00 | yes |
 | | base | preference | 0.66 | 0.15 | fails | 2.2% | 2.0% | 0.2% [-0.8, 1.2] | 0.00 | not interpreted |
 | | final | guess | 1.00 | 6.09 | ok | 1.3% [1.2, 1.4] | 0.0% | 1.3% | 0.00 | yes |
-| | base | guess | | | | pending | | | | |
+| | base | guess | 0.67 | 0.10 | fails | 8.3% | 7.1% | 1.2% [-0.6, 2.9] | 0.01 | not interpreted |
 | GLM-4.5-Air | final | preference | 0.97 | 2.47 | ok | 1.3% [1.1, 1.5] | 0.1% | 1.1% | 0.00 | yes |
 | | base | preference | 0.79 | 0.21 | fails | 5.9% | 3.8% | 2.1% | 0.01 | not interpreted |
 | | final | guess | 0.95 | 1.34 | ok | 3.3% [2.9, 3.8] | 0.5% | 2.8% | 0.03 | yes |
@@ -6825,10 +6825,9 @@ About $182 of GPU in all.
   - Through the lens the peaks are larger, up to 1.6x in Llama and 4.7x in GLM, but lens values aren't on the output's scale.
 
 **Predictions:**
-1. Each base's share_r is below its final's: holds for the one interpretable base cell (Gemma preference, 1.2% vs 2.4%);
-   the Llama base guess is pending.
-2. The Llama and GLM bases don't read " up": not testable for GLM (both cells fail the gate) or Llama's preference (fails
-   the gate); Llama's guess is pending.
+1. Each base's share_r is below its final's: **holds** for the one interpretable base cell (Gemma preference, 1.2% vs 2.4%);
+   the other five base cells fail the gate.
+2. The Llama and GLM bases don't read " up": **not testable**. All four of their cells fail the variance gate.
 3. Gemma's base reads " up" on >= 1 question, by less than its final: **holds** (preference).
 4. The A/B choice reads nothing (|share| < 1%): **holds** in all three.
 5. The heads/tails choice reads " up" in Gemma and GLM within 2x of the preference's: **holds for Gemma** (3.7% vs 3.6%); GLM's

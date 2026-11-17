@@ -375,10 +375,13 @@ def report(all_runs, stats, data):
         print(f"  {name}: {status}")
 
 
-def verdict(ok, missing=(), notes=()):
-    """holds / fails, or incomplete while a required cell is missing; notes (e.g. a gated-out cell) are appended."""
+def verdict(ok, missing=(), notes=(), testable=True):
+    """holds / fails, or incomplete while a required cell is missing, or not testable when every cell it names fails a
+    gate; notes (e.g. a gated-out cell) are appended."""
     if missing:
         return "incomplete (missing " + ", ".join(map(str, missing)) + ")"
+    if not testable:
+        return "not testable (" + "; ".join(notes) + ")"
     return ("holds" if ok else "fails") + ("" if not notes else " (" + "; ".join(notes) + ")")
 
 
@@ -395,13 +398,16 @@ def score_predictions(rows1, rows2, rows3, sums, before_r):
         return missing, gated, [f"{k[0]} base {k[2]} fails the gate: not interpreted" for k in gated]
 
     missing, gated, notes = cells1(FINALS, ("final", "base"))
+    n_base = len(FINALS) * len(QS)
     ok = all(b1[f, "base", q]["swap: share_r"] < b1[f, "final", q]["swap: share_r"]
              for f in FINALS for q in QS if (f, "base", q) not in gated) if not missing else False
-    out.append(("1 each base's share_r below its final's, both questions", verdict(ok, missing, notes)))
+    out.append(("1 each base's share_r below its final's, both questions",
+                verdict(ok, missing, notes, testable=len(gated) < n_base)))
     missing, gated, notes = cells1(("llama-70b", "glm-4.5-air"), ("base",))
     ok = not missing and not any(b1[f, "base", q]["reads"] for f in ("llama-70b", "glm-4.5-air") for q in QS
                                  if (f, "base", q) not in gated)
-    out.append(("2 the Llama and GLM bases don't read ' up' on either question", verdict(ok, missing, notes)))
+    out.append(("2 the Llama and GLM bases don't read ' up' on either question",
+                verdict(ok, missing, notes, testable=len(gated) < 4)))
     missing, gated, notes = cells1(("gemma4-31b",), ("final", "base"))
     ok = not missing and any(b1["gemma4-31b", "base", q]["reads"]
                              and b1["gemma4-31b", "base", q]["swap: share_r"] < b1["gemma4-31b", "final", q]["swap: share_r"]
