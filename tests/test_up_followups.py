@@ -70,7 +70,7 @@ def test_report_runs_on_tiny_model_rows(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr().out
     for section in ("Line 1", "Line 2", "Line 3", "Line 4: across", "logit lens", "Pre-registered predictions"):
         assert section in out, section
-    assert sum(out.count(f": {v}") for v in ("holds", "fails", "incomplete")) == 13
+    assert sum(out.count(f": {v}") for v in ("holds", "fails", "incomplete", "not testable")) == 13
     # the per-position swap at " up" is the " up" swap: the same share in the line-4 run as its own swap would give
     S4 = stats["gemma4-31b", "coin_report", "line4"]
     n_line = len(build_items(tok, tasks, pairs[:1], "coin_report_bold")[0]["line"])
