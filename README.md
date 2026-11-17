@@ -6684,9 +6684,193 @@ Line 4:
 13. At the output, the heads/tails lean at the line's tokens before " up" tracks the coin there: r(pair effect, c) > 0.3 at the two
     tokens before " up" (" it", " came"), in Gemma and Llama.
 
-### Runs
+### Runs (2026-11-16)
 
-Not yet run: see "Results" when they're in. Estimated cost $200-250 (8 pods for about 4-5 hours).
+W&B group `coin_report`, tag `up_followups`; analysis `up_followups.py` (`outputs/coin_report/up_followups/summary.txt`,
+CSVs there).
+
+| model | GPU | line 3 (+ lens): preference / guess | line 2: A/B / heads-tails choice | line 4: preference / guess |
+|---|---|---|---|---|
+| Gemma 4 31B-it | 1x H100 | `9k9n2joh` / `uum0xpyb` | `1g6ynlqi` / `nwxny0n5` | `ynpzr0g6` / `aq86iamy` |
+| Gemma 4 31B base | 1x H100 | `bu0qz0s7` / `ld8yawcr` | | |
+| Llama 3.3 70B | 1x H200 | `m3af5pwr` / `ltk5k1pt` | `7krslsl2` / `66j1j4bl` | `67q7exgw` / `my7xmmbj` |
+| Llama 3.1 70B base | 1x H200 | `pa8y5knu` / pending | | |
+| GLM-4.5-Air | 3x H100 | `iogns0kl` / `50q6l8w9` | `38xrpaxd` / `p73tp9kq` | `avflmlxa` / `vnzwc4z2` |
+| GLM-4.5-Air base | 3x H100 | `dhn2nk82` / `uvy3x8mf` | | |
+
+About $182 of GPU in all.
+- **The Llama base's guess was lost:** its host died 448 pairs into the run, and the rows lived only on the pod. It's being
+  rerun as pre-registered (see the next section's runs), on another H200.
+- **Operational changes, none of which changes what's computed:**
+  - GLM's final reloaded with a different memory split (70/70/67 GiB): two of its three loads ran out of memory on GPU 2.
+  - `report_patch.py` builds each arm's values from stacked captures, identical output (max |diff| 0 on the tiny model). On
+    a busy host the per-row version ran 6x slower.
+- **The wording rule picked** bold for every base's preference (mass 0.67-0.88), bold for Gemma's guess (0.93), plain for
+  GLM's (0.79 vs 0.78) and Llama's (0.63 vs 0.62). For the heads/tails choice it picked bold in all three finals: Gemma
+  0.62, Llama 0.99, GLM 0.197 (below 0.2: run, not interpreted).
+
+**Checks.**
+- The self-patch changes nothing (exactly 0) in every run.
+- The output at " up" in the lens readout equals the coin exactly.
+- The gradient pass's own coin agrees with the batched coin to within the batch-shape noise (<= 0.25 nats; Gemma 1.12, its
+  usual drift).
+
+### Results
+
+**Line 1: base models.**
+
+![line 1](figures/up_line1_bases.png)
+
+| model | stage | question | mass | answer SD (pair, nats) | gate | share_r, swap | share_r, ctrl | swap - ctrl | bias shrink | reads " up"? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Gemma 4 31B | final | preference | 0.99 | 9.89 | ok | 2.4% [2.3, 2.6] | 0.0% | 2.4% [2.3, 2.5] | 0.02 | yes |
+| | base | preference | 0.85 | 0.43 | ok | **1.2% [0.8, 1.6]** | 0.4% | **0.8% [0.4, 1.2]** | 0.01 | **yes** |
+| | final | guess | 0.92 | 6.63 | ok | 4.7% [4.4, 4.9] | 0.1% | 4.6% [4.3, 4.9] | 0.00 | yes |
+| | base | guess | 0.92 | 0.12 | fails | 9.7% | 4.1% | 5.6% | 0.00 | not interpreted |
+| Llama 3.3 70B | final | preference | 1.00 | 8.14 | ok | 0.2% [0.2, 0.3] | 0.0% | 0.2% | 0.00 | yes |
+| | base | preference | 0.66 | 0.15 | fails | 2.2% | 2.0% | 0.2% [-0.8, 1.2] | 0.00 | not interpreted |
+| | final | guess | 1.00 | 6.09 | ok | 1.3% [1.2, 1.4] | 0.0% | 1.3% | 0.00 | yes |
+| | base | guess | | | | pending | | | | |
+| GLM-4.5-Air | final | preference | 0.97 | 2.47 | ok | 1.3% [1.1, 1.5] | 0.1% | 1.1% | 0.00 | yes |
+| | base | preference | 0.79 | 0.21 | fails | 5.9% | 3.8% | 2.1% | 0.01 | not interpreted |
+| | final | guess | 0.95 | 1.34 | ok | 3.3% [2.9, 3.8] | 0.5% | 2.8% | 0.03 | yes |
+| | base | guess | 0.79 | 0.16 | fails | 7.8% | 8.2% | -0.4% | 0.01 | not interpreted |
+
+- The bases' answers barely vary with the pair: their pair SD is 0.12-0.43 nats, against 1.3-9.9 in the finals. Only
+  Gemma base's preference passes the pre-registered gate.
+- That answer reads " up". Swapping " up" reverses 1.2% of its pair effect against 0.4% for the same-mapping control,
+  with no sign of disruption (bias shrink 0.01). That is half its final's 2.4%, though its coin barely varies (pair SD 0.14
+  nats).
+- Where the gate fails, the control "reverses" about as much as the swap (2-8%): a near-flat answer moves with any
+  foreign activation, and these cells say nothing.
+
+**Line 2: the Assistant's choice after the coin.**
+
+![line 2](figures/up_line2_choice.png)
+
+| model | answer | mass | r(answer, A) | swap " up": r(d, c) | share | κ |
+|---|---|---|---|---|---|---|
+| Gemma 4 31B | preference (heads/tails) | 0.99 | 0.91 | -0.97 | 3.6% [3.4, 3.7] | 0.057 |
+| | choice, heads/tails | 0.47 | 0.94 | **-0.97** | **3.7% [3.6, 3.9]** | 0.054 |
+| | choice, A/B | 1.00 | 0.91 | -0.05 | 0.0% | 0.000 |
+| Llama 3.3 70B | preference (heads/tails) | 1.00 | 0.93 | -0.40 | 0.3% [0.3, 0.4] | 0.014 |
+| | choice, heads/tails | 0.99 | 0.94 | -0.19 | 0.1% [0.1, 0.2] | 0.005 |
+| | choice, A/B | 1.00 | 0.93 | +0.03 | 0.0% | -0.003 |
+| GLM-4.5-Air | preference (heads/tails) | 0.97 | 0.88 | -0.42 | 1.6% [1.4, 1.9] | 0.050 |
+| | choice, heads/tails | 0.09 | 0.94 | -0.35 | 1.4% | 0.026 (not interpreted: mass) |
+| | choice, A/B | 1.00 | 0.94 | +0.01 | 0.0% | -0.006 |
+
+- Both choices track the Assistant (r 0.91-0.94).
+- The A/B choice never reads " up", as the A/B report didn't.
+- The heads/tails choice reads it as the heads/tails preference does: as much in Gemma (3.7% vs 3.6%), a little in
+  Llama (0.1% vs 0.3%).
+
+**Line 3: the output-potent part of " up".**
+
+![line 3](figures/up_line3_split.png)
+
+| model | question | split check (g_pot / g_null at 75%, 90%) | f potent (gradient) | f rest | f random 1-D | f potent (lens) |
+|---|---|---|---|---|---|---|
+| Gemma 4 31B | preference | **fails** (0.53 / 0.63, 0.57 / 0.48) | 0.13 | 0.54 | 0.02 | -0.04 |
+| | guess | **fails** | 0.09 | 0.63 | 0.02 | 0.04 |
+| Llama 3.3 70B | preference | ok (0.86 / 0.19, 0.90 / 0.19) | 0.40 [0.35, 0.45] | 0.59 | 0.34 [0.29, 0.39] | 0.36 |
+| | guess | ok | 0.24 [0.21, 0.26] | 0.76 | 0.10 [0.08, 0.13] | 0.13 |
+| GLM-4.5-Air | preference | ok (0.97 / 0.05, 0.99 / 0.02) | 0.40 [0.36, 0.45] | 0.58 | 0.40 [0.35, 0.45] | 0.46 |
+| | guess | ok | 0.41 [0.36, 0.47] | 0.62 | 0.34 [0.29, 0.39] | 0.38 |
+| Gemma 4 31B base | preference (reads " up") | ok (0.91 / 0.12, 0.93 / 0.12) | 0.41 [0.35, 0.46] | 0.56 | 0.36 [0.31, 0.41] | 0.46 |
+
+- **Where the check passes,** the potent and null parts add up (f_pot + f_null 0.96-1.03). The coin's own heads/tails
+  direction carries 24-41% of the swap's effect on the answer, and the rest of " up"'s state 56-76%.
+- **A random direction does about as well.** A random direction, with the potent part's size and its sign taken from the
+  swap, reproduces 10-40%: nearly as much as the potent direction in every passing cell but Llama's guess (0.24 vs 0.10).
+- **Gemma's check fails.** A single gradient direction carries only about 55% of its coin's change when patched at one
+  late block (its coin swings about 10 nats), so its row is reported, not interpreted.
+
+**Line 4: across the line** (first 500 pairs).
+
+![positions](figures/up_line4_positions.png)
+
+| model | question | whole line | sum of its single tokens | largest single token | " up" | readout position |
+|---|---|---|---|---|---|---|
+| Gemma 4 31B | preference | 10.7% [9.6, 12.2] | 10.9% [9.8, 12.1] | " up" 3.7% | 3.7% | 98% |
+| | guess | 17.6% [16.3, 19.0] | 20.0% [18.5, 21.6] | " up" 6.9% | 6.9% | 98% |
+| Llama 3.3 70B | preference | 4.8% [4.3, 5.4] | 4.5% [3.7, 5.4] | " it" 1.6% | 0.3% | 98% |
+| | guess | 21.8% [20.3, 23.5] | 19.7% [18.1, 21.4] | " it" 6.9% | 1.4% | 98% |
+| GLM-4.5-Air | preference | 7.6% [6.8, 8.5] | 8.4% [5.5, 11.1] | "," 3.1% | 1.8% | 83% |
+| | guess | 15.6% [13.9, 17.2] | 22.5% [16.0, 29.8] | "," 10.8% | 3.8% | 75% |
+
+- Single tokens' shares add up to about the whole line's: not redundancy.
+- Besides " up", the order information sits at a few tokens. "Okay" and the "," after it (the first tokens after the task
+  list) carry the most in GLM. " it" and " the" carry the most in Llama (each above " up"). In Gemma, "," and " the" are next
+  after " up". "flipping", "coin" and "now" carry about nothing in any model.
+- After " up", the preference question's own " heads" / " tails" carry 14-28% (they restate the outcome words). A few
+  template tokens carry 1-10%: Llama's turn header 6% for the guess, GLM's newline after its assistant marker 3-10%. The
+  prefill carries most of the rest.
+
+![lens](figures/up_line4_lens.png)
+
+![lens slopes](figures/up_line4_lens_slopes.png)
+
+- **The lens (correlation with the coin at " up"):** at the output, the heads - tails lean tracks the coin at line tokens
+  where neither word is a likely next token: at " it" / " came", r 0.41 / 0.79 (Gemma), 0.63 / 0.76 (Llama), 0.93 / 0.94 (GLM).
+  - Over all positions with output heads/tails mass < 0.01, r > 0.3 at 36% (Gemma), 64% (Llama) and 37% (GLM).
+  - Through the lens it appears from about the middle of the network (blocks ~40/60, ~39/80, ~23/46), spreads over most
+    of the line and question in Llama, and is negative in Gemma at "which way" late.
+- **Exploratory, added at Hal's request after the data (`scripts/lens_slopes.py`):** the same lean's size, as its slope on
+  the Assistant's A_i - A_j.
+  - The coin's own slope at " up" is 0.32 (Gemma), 0.12 (Llama) and 0.10 (GLM) nats per nat; the A/B choice's after the coin
+    is 0.92, 0.73 and 0.87.
+  - At the output, the line's other tokens carry 0.1-0.4x the coin's slope in Gemma and Llama. In GLM, " it" carries 2.0x
+    and "," and " came" 1.1x.
+  - Through the lens the peaks are larger, up to 1.6x in Llama and 4.7x in GLM, but lens values aren't on the output's scale.
+
+**Predictions:**
+1. Each base's share_r is below its final's: holds for the one interpretable base cell (Gemma preference, 1.2% vs 2.4%);
+   the Llama base guess is pending.
+2. The Llama and GLM bases don't read " up": not testable for GLM (both cells fail the gate) or Llama's preference (fails
+   the gate); Llama's guess is pending.
+3. Gemma's base reads " up" on >= 1 question, by less than its final: **holds** (preference).
+4. The A/B choice reads nothing (|share| < 1%): **holds** in all three.
+5. The heads/tails choice reads " up" in Gemma and GLM within 2x of the preference's: **holds for Gemma** (3.7% vs 3.6%); GLM's
+   cell isn't interpreted (mass 0.09).
+6. Both choices track the Assistant (r >= 0.8): **holds** (0.91-0.94).
+7. The split's check holds in every final: **fails** (Gemma).
+8. Gemma: f_pot > f_null: **not testable** (its check fails).
+9. |f_rand| < 0.1 everywhere: **fails** (0.10-0.40 where the check passes).
+10. Single-token shares sum to less than the whole line's (redundancy): **fails**. They add up, or exceed it (Gemma, GLM).
+11. " up" has the largest single-token share in the line: **fails** (only in Gemma).
+12. The readout position's share >= 0.5: **holds** (75-98%).
+13. The output's lean at " it" / " came" tracks the coin (r > 0.3) in Gemma and Llama: **holds**.
+
+### Findings
+
+1. **A base model's Assistant-turn answer can read " up":** Gemma's base, the one base whose answer varies enough to test,
+   reverses 1.2% of its preference when " up" is swapped, half its final's share, though its own coin at " up" barely
+   varies. That fits Hal's option (2): order information the later answer uses is at " up" before post-training, without
+   showing in the coin's prediction there. One model and one question; the other bases' answers are too flat to tell.
+2. **The " up" path follows the answer's words, not what kind of answer it is.** A choice in heads/tails words reads it as
+   the preference does (Gemma 3.7% vs 3.6%); a choice in task labels never does, in any model.
+3. **The answer doesn't read the coin's own prediction direction at " up" any more than an arbitrary direction.** The
+   output-potent direction carries a quarter to two fifths of the swap's effect, the rest of " up"'s state the majority,
+   and a same-size shift along a random direction (signed by the swap) about as much as the potent one. This counts
+   against a plain priming account ("the predicted 'heads' primes 'heads'"); " up"'s order information is read broadly.
+   It does not single out a specific output-null "plan" direction either.
+4. **The whole line's larger share comes from several tokens that each carry some of it**, mostly the line's first tokens
+   and " it" / " the", and their shares add up. The middle of the line ("flipping the coin now") carries none.
+5. **The heads/tails lean is not only at " up".** From about mid-depth, the heads - tails log-odds at many tokens of the
+   line, the question and the Assistant's turn lean toward the outcome that gives the Assistant its preferred task, at
+   tokens where neither word is a likely next token. At the output it is a small fraction of the coin's lean in Gemma and
+   Llama and as large or larger in GLM; all of it is small next to the Assistant's own choice.
+
+### Caveats (from the results)
+
+- Only one base cell passes the gate, so line 1's base result rests on Gemma's preference alone.
+- Line 3's random arm is not an empty control: its sign comes from the swap, so it is a rescaled partial swap along a random
+  direction. That makes it the right comparison for "is the coin's direction special", not a null at 0, as predicted.
+- Gemma's line 3 can't be read (the split check fails), and Gemma has the clearest " up" path of the three.
+- Line 4's lens slopes are exploratory; lens values away from the output are on their own scale.
+- GLM ran on 3x H100 (the earlier GLM runs on 2x H200); finals and bases share GPU types within each family.
+- 1,000 pilot pairs (line 4: 500); CIs cover pair sampling only.
 
 ## Pushing the heads/tails lean at " up" and around it: does a base model read it?
 
