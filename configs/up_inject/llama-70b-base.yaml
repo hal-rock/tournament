@@ -1,0 +1,25 @@
+# Pushing the heads/tails lean (README, "Pushing the heads/tails lean at ' up' and around it"): the base of llama-70b.
+# The preference report (coin_report_bold), the 1,000 pilot pairs; pushes of the model's own lens heads - tails lean
+# at the seven tokens below, at every block from the final's onset (block 39), +/- 1 nat, three random
+# directions, and the final's own lean transplanted (configs/up_inject/transplant_llama-70b.json).
+family: llama-70b-base
+run_name: up-inject-llama-70b-base
+tags: [llama-70b-base, up_inject]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: unsloth/Llama-3.1-70B
+  chat_template_from: unsloth/Llama-3.3-70B-Instruct
+  max_memory: {0: 139GiB}
+report: coin_report_bold
+arm_sets: [inject]
+inject:
+  tokens: [",", " the", " ...", " it", " came", " up", "."]
+  onset: 39
+  dose: 1.0
+  seeds: [0, 1, 2]
+  transplant: configs/up_inject/transplant_llama-70b.json

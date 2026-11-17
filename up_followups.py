@@ -37,6 +37,7 @@ N_BOOT = 1000
 FINALS = {"gemma4-31b": "Gemma 4 31B", "llama-70b": "Llama 3.3 70B", "glm-4.5-air": "GLM-4.5-Air"}
 QUESTION = {"coin_report": "preference", "coin_predict_think": "guess", "coin_choose_ab": "choice (A/B)",
             "coin_choose_ht": "choice (heads/tails)"}
+LABEL = {**FINALS, **{f + "-base": FINALS[f].replace("Llama 3.3", "Llama 3.1") + " base" for f in FINALS}}
 LINE3_ARMS = ("swap_pot_grad", "swap_null_grad", "swap_pot_lens", "swap_null_lens", "swap_rand")
 VFRACS = (50, 75, 90)
 
@@ -436,10 +437,17 @@ def score_predictions(rows1, rows2, rows3, sums, before_r):
                                                                     missing)))
     g = [("gemma4-31b", q) for q in QS]
     missing8 = [k for k in g if k not in b3]
-    out.append(("8 Gemma: f_pot_grad > f_null_grad, both questions",
-                verdict(not missing8 and all(b3[k]["swap_pot_grad: f"] > b3[k]["swap_null_grad: f"] for k in g), missing8)))
-    out.append(("9 |f_rand| < 0.1 everywhere", verdict(not missing and all(abs(r["swap_rand: f"]) < 0.1 for r in rows3),
-                                                       missing)))
+    if not missing8 and not all(b3[k]["split_check"] for k in g):  # pre-registered: then reported, not interpreted
+        out.append(("8 Gemma: f_pot_grad > f_null_grad, both questions",
+                    "not testable (Gemma's split check fails: its line-3 arms are reported, not interpreted)"))
+    else:
+        out.append(("8 Gemma: f_pot_grad > f_null_grad, both questions",
+                    verdict(not missing8 and all(b3[k]["swap_pot_grad: f"] > b3[k]["swap_null_grad: f"] for k in g),
+                            missing8)))
+    checked = [r for r in rows3 if r["split_check"]]
+    out.append(("9 |f_rand| < 0.1 everywhere", verdict(
+        not missing and all(abs(r["swap_rand: f"]) < 0.1 for r in checked), missing,
+        [f"{r['family']} {r['question']}: split check fails, not counted" for r in rows3 if not r["split_check"]])))
 
     b4 = {(r["family"], r["question"]): r for r in sums}
     missing = [k for k in need if k not in b4]
@@ -526,7 +534,7 @@ def plot_line3(rows):
         ax.axhline(0, color=ps.BASELINE, lw=0.8)
         ax.axhline(1, color=ps.GRID, lw=0.8, ls="--")
         ax.set_xticks(range(len(LINE3_ARMS)), [labels[a] for a in LINE3_ARMS], rotation=45, ha="right", fontsize=8)
-        ax.set_title(f"{FINALS.get(fam, fam)}\n{q}{'' if r['split_check'] else ' (check fails)'}", fontsize=9)
+        ax.set_title(f"{LABEL[fam]}\n{q}{'' if r['split_check'] else ' (check fails)'}", fontsize=9)
     axes[0][0].set_ylabel("part of the swap's shift in the answer\nreproduced (slope on the full swap's)")
     fig.suptitle("Line 3: is it the coin's output-potent direction at \" up\" that the answer reads?", fontsize=11)
     fig.tight_layout()
@@ -562,7 +570,7 @@ def plot_line4_positions(rows):
 def plot_lens(maps):
     if not maps:
         return
-    keys = sorted(maps, key=lambda k: (list(FINALS).index(k[0]), k[1]))
+    keys = sorted(maps, key=lambda k: (list(FINALS).index(k[0]), ("coin_report", "coin_predict_think").index(k[1])))
     fig, axes = plt.subplots(len(keys), 1, figsize=(12, 3.4 * len(keys)), squeeze=False)
     for ax, key in zip(axes[:, 0], keys):
         r_lens, r_out, tokens, mass = maps[key]
@@ -577,7 +585,7 @@ def plot_lens(maps):
                      f"   (▼: heads/tails mass >= 0.01 at the output)", fontsize=9)
         fig.colorbar(im, ax=ax, fraction=0.02, pad=0.01)
     fig.suptitle("Line 4: does the heads/tails lean track the coin at every position? (logit lens and output)", fontsize=11)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.985))
     ps.save(fig, "up_line4_lens")
 
 

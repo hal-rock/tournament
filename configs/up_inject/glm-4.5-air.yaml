@@ -1,0 +1,26 @@
+# Pushing the heads/tails lean (README, "Pushing the heads/tails lean at ' up' and around it"): the final of glm-4.5-air.
+# The preference report (coin_report_bold), the 1,000 pilot pairs; pushes of the model's own lens heads - tails lean
+# at the seven tokens below, at every block from the final's onset (block 23), +/- 1 nat, three random
+# directions, and the final's own lean transplanted (configs/up_inject/transplant_glm-4.5-air.json).
+family: glm-4.5-air
+run_name: up-inject-glm-4.5-air
+tags: [glm-4.5-air, up_inject]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: zai-org/GLM-4.5-Air
+  # 70/70/67, not the hope run's 69/69/72: loading the weights ran out of memory on GPU 2 (expert merging, 2.75 GiB) in
+  # two of three loads on 2026-11-16; a placement change only, the same computation.
+  max_memory: {0: 70GiB, 1: 70GiB, 2: 67GiB}
+report: coin_report_bold
+arm_sets: [inject]
+inject:
+  tokens: [",", " the", " ...", " it", " came", " up", "."]
+  onset: 23
+  dose: 1.0
+  seeds: [0, 1, 2]
+  transplant: configs/up_inject/transplant_glm-4.5-air.json

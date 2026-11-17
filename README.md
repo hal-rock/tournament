@@ -6688,6 +6688,63 @@ Line 4:
 
 Not yet run: see "Results" when they're in. Estimated cost $200-250 (8 pods for about 4-5 hours).
 
+## Pushing the heads/tails lean at " up" and around it: does a base model read it?
+
+In the finals, the heads - tails log-odds at " up" and at the tokens around it lean toward the outcome that assigns the
+Assistant's preferred task, from about the middle of the network on (line 4's lens; `scripts/lens_slopes.py`), and swapping
+" up" moves the Assistant's later heads/tails answer. Hal's question (2026-11-16): is the mechanism that picks up that lean
+already in the base model? If the base's activations at those tokens are pushed to show the same lean, does its later
+answer move toward the final Assistant's preferred task? And in the finals, is the lean at the tokens around " up" read
+too, as at " up"?
+
+### Design (written 2026-11-16, before any data)
+
+- **Models:** the three families' finals and bases (Gemma 4 31B, Llama 3.3 70B / 3.1 70B base, GLM-4.5-Air), each final and
+  its base on the same GPU type (Hal: GPU types may differ from the earlier rounds). The preference report only
+  (`coin_report_bold`; the bases' mass rule picked bold for it in every family), the 1,000 pilot pairs.
+- **Pushed tokens:** ",", " the", " ...", " it", " came" (their first occurrence in "Okay, I'm flipping the coin now ... it
+  came up"), " up", and the "." after it: the tokens that carried the most in line 4 and in the lean slopes.
+- **Pushed blocks:** every block from the final's onset to the last (Hal: not one block): the shallowest block from which
+  the final's lens lean at " up" correlates >= 0.5 with its output coin, from the follow-ups' line-3 runs: 40 of 60 (Gemma),
+  39 of 80 (Llama), 23 of 46 (GLM). The base is pushed from the same block.
+- **The push** (`report_patch.py`, arm set `inject`): at each pushed token and block, the residual entering the block is
+  replaced with its own unpatched value plus (dose / |g|) v, g the gradient of the model's own logit-lens log-odds
+  (" heads" - " tails") there, so to first order the lens lean there moves by the dose, at every block alike (a replacement
+  each block, so pushes don't pile up through the stream). Each model's own direction, never the other model's vector.
+- **Arms:**
+  - `push_up_pos` / `_neg`: " up" alone, +1 / -1 nat; `push_ctx_*`: the six other tokens together; `push_all_*`: all seven;
+    `push_kNN_*`: each of the six alone (exploratory).
+  - `rand<s>_all_*` (s = 0, 1, 2): all seven tokens, v a fixed random unit vector per block and token, with the same step
+    size as `push_all`: a push of the same size in a direction that carries no heads/tails meaning.
+  - `transplant_all`: all seven tokens pushed along g by the final's own lean, slope(token, block) x (A_first - A_second),
+    with the final's lean slopes and Assistant utilities from its follow-ups run and sweep
+    (`configs/up_inject/transplant_<family>.json`, `scripts/inject_tables.py`). The base gets its final's lean; the final
+    gets its own lean again (doubled).
+- **Measures:**
+  - **Reading gain** G = mean over prompts of (answer(+) - answer(-)) / 2 for a +/- 1-nat push: nats of the answer's
+    heads - tails log-odds per nat of lean pushed. Positive: the answer follows the pushed heads/tails lean. 95% CIs by
+    bootstrap over pairs. The same for the random arms (one G per seed).
+  - **Transplant:** d = answer(transplant) - answer(unpatched), as a pair effect; its slope on the final's A_i - A_j, and that
+    slope as a fraction of the final's own answer slope on A_i - A_j (the size of its coinflip-like answer).
+  - Checks: `push_check`, the realized lens change at the pushed cells divided by the dose (median; the first-order step);
+    the coin at " up" moved by the pushes that include " up" (reported); self-patch exactly 0.
+- **Gate:** an arm is interpreted where its push_check median lies in [0.5, 2] and the answer's median mass is >= 0.2.
+- **Also on the Llama base pod:** the follow-ups' Llama base guess (line 1), rerun as pre-registered there; its first run was
+  lost with its host.
+
+### Predictions (written 2026-11-16, before any data)
+
+1. **The finals read the pushed lean, at " up" and around it:** G_up and G_ctx > 0 with CIs above 0 in all three finals.
+2. **It's the heads/tails direction, not any push:** in each final, every random seed's |G| is below a quarter of G_all.
+3. **The bases read it too:** G_up > 0 with its CI above 0 in all three bases.
+4. **More weakly:** each base's G_all is below its final's.
+5. **The transplant moves each base's answer toward its final Assistant's preferred task** (slope on A_i - A_j above 0, CI
+   above 0).
+
+### Runs
+
+Not yet run.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

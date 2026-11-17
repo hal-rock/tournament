@@ -72,11 +72,20 @@ class Arm(NamedTuple):
                              respect to the residual entering that block at " up" (the prompt's own; coin_grads)
       pot_lens / null_lens   the same with u the logit lens's gradient there (lens_dirs)
       rand                   own + |Delta.u_grad| sign(Delta.rho) rho, rho a fixed random unit vector per block: a 1-D shift
-                             of the potent part's size in a random direction"""
+                             of the potent part's size in a random direction
+    Pushes (README, "Pushing the heads/tails lean"; source "own", where ("tokens", ks), blocks ("from", l0)): at each patched
+    position and block, own + (dose / |g|) v, g the gradient of the model's own logit-lens log-odds (" heads" - " tails")
+    there, so to first order the lens lean moves by dose nats:
+      push_lens       v = g / |g|, dose = the arm's dose (+ or - nats)
+      push_rand<s>    v = a fixed random unit vector (seed s) per block and position, with push_lens's step size: the same
+                      push in a direction that carries no heads/tails meaning
+      transplant      v = g / |g|, dose per prompt = the final's lean slope there x (A_first - A_second): the final model's
+                      own coinflip-style lean at that position and depth, in nats (positive pushes toward the first task)"""
     source: str
     where: object
     blocks: object
     transform: str | None = None
+    dose: float | None = None
 
 
 # The arms of the earlier runs (README, "Does the Assistant read the coin's ' up'?"): run by default, and by arm set "base".
@@ -92,12 +101,26 @@ ARMS = {
 VALIDATION_FRACS = (0.5, 0.75, 0.9)  # line 3's single-block checks
 
 
-def arm_specs(sets, n_line, n_suffix):
+def arm_specs(sets, n_line, n_suffix, inject=None):
     """{name: Arm} for arm sets (Follow-ups): "base" (ARMS), "line3" (the potent / null split of the " up" swap, a random
     control, and single-block checks of the split), "line4" (every position from the line's first token to the end alone,
-    and the whole line without each of its tokens). "self" is always included."""
+    and the whole line without each of its tokens), "inject" (pushes of the heads/tails lean, see Arm; needs inject =
+    {"up": suffix index of " up", "ctx": [the other pushed tokens' suffix indices], "onset": l0, "dose": nats,
+    "seeds": [random-direction seeds]}). "self" is always included."""
     specs = {"self": ARMS["self"]}
     for s in sets:
+        if s == "inject":
+            up, ctx, l0, dose = inject["up"], tuple(inject["ctx"]), inject["onset"], inject["dose"]
+            groups = {"up": (up,), "ctx": ctx, "all": tuple(sorted((up, *ctx)))} | {f"k{k:02d}": (k,) for k in ctx}
+            for g, ks in groups.items():
+                for sign, tag in ((1, "pos"), (-1, "neg")):
+                    specs[f"push_{g}_{tag}"] = Arm("own", ("tokens", ks), ("from", l0), "push_lens", sign * dose)
+            for seed in inject["seeds"]:
+                for sign, tag in ((1, "pos"), (-1, "neg")):
+                    specs[f"rand{seed}_all_{tag}"] = Arm("own", ("tokens", groups["all"]), ("from", l0), f"push_rand{seed}",
+                                                         sign * dose)
+            specs["transplant_all"] = Arm("own", ("tokens", groups["all"]), ("from", l0), "transplant")
+            continue
         if s == "base":
             specs |= ARMS
         elif s == "line3":
@@ -120,6 +143,8 @@ def arm_blocks(blocks, n_layers):
     if blocks in ("early", "late"):
         return L[:n_layers // 2] if blocks == "early" else L[n_layers // 2:]
     kind, f = blocks
+    if kind == "from":
+        return L[f:]
     assert kind == "frac", blocks
     return [min(n_layers - 1, round(f * n_layers))]
 
@@ -133,6 +158,8 @@ def arm_positions(where, it):
     kind, k = where
     if kind == "suffix":
         return [it["suffix"][k]]
+    if kind == "tokens":
+        return [it["suffix"][j] for j in k]
     assert kind == "line_except", where
     return [p for j, p in enumerate(it["line"]) if j != k]
 
@@ -391,14 +418,19 @@ def coin_grads(model, items, coin_ids):
     return out
 
 
-def lens_dirs(model, H, token_ids):
-    """Unit gradients of the logit lens's log-odds (token_ids[0] - token_ids[1]) at residuals H [N, D] (line 3's
-    secondary direction). Rows are independent (the norm is per row), so one backward of the sum gives each row's."""
+def lens_grads(model, H, token_ids):
+    """Gradients [N, D] (fp32, CPU) of the logit lens's log-odds (token_ids[0] - token_ids[1]) at residuals H [N, D]. Rows
+    are independent (the norm is per row), so one backward of the sum gives each row's."""
     h = H.float().to(unembed(model).weight.device).requires_grad_(True)
     with torch.enable_grad():
         x = acts.logit_lens(model, h, token_ids=list(token_ids))
         (x[..., 0] - x[..., 1]).sum().backward()
-    return unit(h.grad.detach().cpu())
+    return h.grad.detach().cpu()
+
+
+def lens_dirs(model, H, token_ids):
+    """Unit gradients of the logit lens's log-odds at residuals H [N, D] (line 3's secondary direction)."""
+    return unit(lens_grads(model, H, token_ids))
 
 
 def rand_dirs(n_layers, dim, seed=0):
@@ -420,13 +452,30 @@ def mix(own, src, transform, u=None, rho=None):
     return own + coef.abs() * torch.sign((delta * rho).sum(-1, keepdim=True)) * rho
 
 
-def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arms=None, specs=None, lens_pairs=None):
+INJECT_TRANSFORMS = ("push_lens", "push_rand", "transplant")
+
+
+def is_push(spec):
+    return spec.transform is not None and spec.transform.startswith(INJECT_TRANSFORMS)
+
+
+def rand_cells(seed, n_layers, n_pos, dim):
+    """push_rand's directions: a fixed random unit vector per block and pushed position (seed s)."""
+    return unit(torch.randn(n_layers, n_pos, dim, generator=torch.Generator().manual_seed(1000 + seed)))
+
+
+def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arms=None, specs=None, lens_pairs=None,
+              transplant=None):
     """All arms for a chunk of items (both orders of each pair included). Returns one row per item.
 
     specs: {name: Arm} (default: ARMS, or the names in `arms` of it). lens_pairs: token-id pairs [(a, b), ...] whose
     log-odds to read at every position of the suffix, entering every block (logit lens) and at the output (line 4); the
     row then has "lens" [n_layers, P, n_pairs], "out" and "out_mass" [P, n_pairs] (lists, P = len(suffix)).
-    Every forward of a batch keeps logits from the batch's first line token on, so all arms round the LM head alike."""
+    Every forward of a batch keeps logits from the batch's first line token on, so all arms round the LM head alike.
+    transplant: for a "transplant" arm, {"A": {task id: the final Assistant's utility}, "slope": [n_layers, P] tensor, the
+    final's lean slope at each block and pushed position (sorted suffix indices of the pushed tokens; 0 below the onset)}.
+    Push arms (Arm) add "push_check" to the row: per arm with push_lens, the median over its cells of the realized change in
+    the lens log-odds divided by the dose (1 if the first-order step is exact)."""
     specs = specs if specs is not None else {k: v for k, v in ARMS.items() if arms is None or k in arms}
     L = list(range(n_layers))
     wide = lens_pairs is not None or any(not isinstance(s.where, str) for s in specs.values())
@@ -434,7 +483,12 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
     order = sorted(range(len(items)), key=lambda k: len(items[k]["ids"]))
     batches = [order[s:s + batch_size] for s in range(0, len(order), batch_size)]
     cap_own, cap_ok, res = {}, {}, {k: dict(report={}, mass={}, coin_arm={}) for k in range(len(items))}
-    u_lens = {}
+    u_lens, g_inj = {}, {}
+    pushes = [s for s in specs.values() if is_push(s)]
+    if pushes:  # the pushed cells: suffix indices (= capture indices) and the first pushed block
+        inj_ks = sorted({k for s in pushes for k in s.where[1]})
+        inj_l0 = min(s.blocks[1] for s in pushes)
+        assert all(s.where[0] == "tokens" and s.blocks[0] == "from" for s in pushes)
     for batch in batches:  # unpatched: coin at " up", report at the end, captures at every block
         its = [items[k] for k in batch]
         kf = min(it["line"][0] for it in its)
@@ -458,7 +512,12 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
         if {"pot_lens", "null_lens"} & transforms:
             H = torch.stack([store[l][:, n_up] for l in L], 1)  # [B, L, D]
             U = lens_dirs(model, H.reshape(-1, H.shape[-1]), coin_ids).reshape(H.shape)
+        if pushes:  # the lens's log-odds gradient at every pushed cell, [B, nb, P, D] fp32
+            H = torch.stack([store[l][:, inj_ks] for l in range(inj_l0, n_layers)], 1)
+            G = lens_grads(model, H.reshape(-1, H.shape[-1]), coin_ids).reshape(H.shape)
         for r, k in enumerate(batch):
+            if pushes:
+                g_inj[k] = G[r]
             res[k].update(coin=coin[r].item(), coin_mass=coin_mass[r].item(), coin_ok=coin_ok[r].item())
             res[k]["report"]["none"], res[k]["mass"]["none"] = rep[r].item(), rep_mass[r].item()
             res[k]["coin_arm"]["none"] = coin[r].item()
@@ -476,7 +535,13 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
         rho = rand_dirs(n_layers, cap_own[0].shape[-1])
     partner = {k: k + 1 if items[k]["order"] == 0 else k - 1 for k in range(len(items))}  # chunk keeps pairs together
     for spec in specs.values():
-        assert spec.transform is None or spec.where == "up", "transforms are for \" up\" only"
+        assert spec.transform is None or is_push(spec) or spec.where == "up", "swap transforms are for \" up\" only"
+    rand_v = {}
+    for s in pushes:
+        if s.transform.startswith("push_rand"):
+            seed = int(s.transform.removeprefix("push_rand"))
+            rand_v.setdefault(seed, rand_cells(seed, n_layers, len(inj_ks), cap_own[0].shape[-1]))
+    checks = {k: {} for k in range(len(items))}
     # Batches outer, arms inner: each batch's captures are stacked once ([B, L, P, D]) and every arm slices them, so
     # building an arm's values is a few tensor ops rather than one per block and row (on a busy host's CPU the per-row
     # version left the GPU at 31%: Llama 3.1 base, 2026-11-16). The values are the same tensors as before.
@@ -496,7 +561,25 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
             cols = [p - its[0]["line"][0] for p in arm_positions(spec.where, its[0])]  # into the captures
             assert all([p - it["line"][0] for p in arm_positions(spec.where, it)] == cols for it in its)
             S = stacked[spec.source][:, blocks][:, :, cols]  # [B, nb, P, D]
-            if spec.transform is not None:
+            if is_push(spec):
+                jj, bi = [inj_ks.index(c) for c in cols], [l - inj_l0 for l in blocks]
+                G = torch.stack([g_inj[k] for k in batch])[:, bi][:, :, jj]  # [B, nb, P, D]
+                gn = G.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+                own = S.float()
+                if spec.transform == "transplant":
+                    adiff = torch.tensor([transplant["A"][it["a"]] - transplant["A"][it["b"]] for it in its])
+                    dose = transplant["slope"][blocks][:, jj][None, :, :, None] * adiff[:, None, None, None]
+                else:
+                    dose = spec.dose
+                v = rand_v[int(spec.transform.removeprefix("push_rand"))][blocks][:, jj][None] \
+                    if spec.transform.startswith("push_rand") else G / gn
+                S = (own + dose / gn * v).to(S.dtype)
+                if spec.transform == "push_lens":  # realized lens change / dose, to check the first-order step
+                    f = lambda h: (lambda x: x[..., 0] - x[..., 1])(acts.logit_lens(model, h, token_ids=list(coin_ids)))
+                    ratio = ((f(S) - f(own.to(S.dtype))) / dose).reshape(len(batch), -1).median(1).values.cpu()
+                    for r, k in enumerate(batch):
+                        checks[k][arm] = ratio[r].item()
+            elif spec.transform is not None:
                 U = dirs["lens" if spec.transform.endswith("lens") else "grad"][:, blocks].float()[:, :, None, :]
                 R = None if rho is None else rho[blocks][None, :, None, :]
                 S = mix(stacked["own"][:, blocks][:, :, cols].float(), S.float(), spec.transform, U, R).to(S.dtype)
@@ -508,8 +591,46 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
             for r, k in enumerate(batch):
                 res[k]["report"][arm], res[k]["mass"][arm] = rep[r].item(), mass[r].item()
                 res[k]["coin_arm"][arm] = c_arm[r].item()
-    return [dict(pair=items[k]["pair"], order=items[k]["order"], a=items[k]["a"], b=items[k]["b"], **res[k])
-            for k in range(len(items))]
+    return [dict(pair=items[k]["pair"], order=items[k]["order"], a=items[k]["a"], b=items[k]["b"], **res[k],
+                 **({"push_check": checks[k]} if checks[k] else {})) for k in range(len(items))]
+
+
+def inject_positions(tok, it, tokens):
+    """Suffix indices of the pushed tokens: " up" (the line's last), "." (the token right after it), and every other one
+    the first time it occurs in the coin line (the same tokens in every item: the line and question are fixed text)."""
+    dec = [tok.decode([it["ids"][p]]) for p in it["suffix"]]
+    n_line = len(it["line"])
+    out = {}
+    for t in tokens:
+        if t == " up":
+            k = n_line - 1
+        elif t == ".":
+            k = n_line
+        else:
+            k = dec[:n_line].index(t)
+        assert dec[k] == t, (t, dec[k])
+        out[t] = k
+    return out
+
+
+def inject_spec(icfg, tok, items, n_layers):
+    """(arm_specs' inject dict, run_chunk's transplant dict) from a config's `inject:` block: tokens (pushed), onset (the
+    first pushed block), dose (nats), seeds (random directions), transplant (a JSON file: the final's per-task Assistant
+    utilities "A" and its lean slope per token and block, "slope": {token: [one per block from the onset]})."""
+    ks = inject_positions(tok, items[0], icfg["tokens"])
+    assert all(inject_positions(tok, it, icfg["tokens"]) == ks for it in items[:8])
+    up = ks[" up"]
+    inject = dict(up=up, ctx=sorted(k for t, k in ks.items() if t != " up"), onset=icfg["onset"], dose=icfg["dose"],
+                  seeds=icfg.get("seeds", [0, 1, 2]))
+    import json
+    tp = json.load(open(icfg["transplant"]))
+    assert tp["onset"] == icfg["onset"] and set(tp["slope"]) == set(icfg["tokens"]), "transplant table must match"
+    order = sorted(ks, key=ks.get)  # tokens in suffix order, as run_chunk's sorted pushed indices
+    slope = torch.zeros(n_layers, len(order))
+    for j, t in enumerate(order):
+        assert len(tp["slope"][t]) == n_layers - icfg["onset"]
+        slope[icfg["onset"]:, j] = torch.tensor(tp["slope"][t])
+    return inject, {"A": tp["A"], "slope": slope}
 
 
 WORDING_PAIRS = 24  # the earlier wording checks' first pilot pairs
@@ -548,7 +669,7 @@ def main():
                     "(choose_wording); run after the --report conditions")
     ap.add_argument("--arms", nargs="+", choices=list(ARMS), help="only these of the base arms (default: all; self is "
                     "always run, for the batching check)")
-    ap.add_argument("--arm-sets", nargs="+", choices=["base", "line3", "line4"],
+    ap.add_argument("--arm-sets", nargs="+", choices=["base", "line3", "line4", "inject"],
                     help="arm sets (arm_specs; default: the config's arm_sets, else base)")
     ap.add_argument("--lens", action="store_true", help="also read the logit lens over the suffix (line 4); or config lens")
     a = ap.parse_args()
@@ -603,7 +724,8 @@ def main():
                                                                                       if arm_sets != ["base"] else "")
         items = all_items[report]
         rep_ids = outcome_token_ids(report, tok)
-        specs = (arm_specs(arm_sets, len(items[0]["line"]), len(items[0]["suffix"])) if arms is None
+        inject, transplant = (inject_spec(cfg0["inject"], tok, items, n_layers) if "inject" in arm_sets else (None, None))
+        specs = (arm_specs(arm_sets, len(items[0]["line"]), len(items[0]["suffix"]), inject) if arms is None
                  else {k: ARMS[k] for k in arms})
         blocks_of = {k: arm_blocks(s.blocks, n_layers) for k, s in specs.items() if isinstance(s.blocks, tuple)}
         suffix_tokens = [tok.decode([items[0]["ids"][p]]) for p in items[0]["suffix"]]
@@ -627,7 +749,7 @@ def main():
                             keep_from=it["line"][0])
             alone.append([outcome(lp[0, 0], coin_ids)[0].item(), outcome(lp[0, 1], rep_ids)[0].item()])
         rows = run_chunk(model, probe, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], specs=specs,
-                         lens_pairs=lens_pairs)
+                         lens_pairs=lens_pairs, transplant=transplant)
         d_coin = [abs(r["coin"] - al[0]) for r, al in zip(rows, alone)]
         d_rep = [abs(r["report"]["none"] - al[1]) for r, al in zip(rows, alone)]
         d_self = [abs(r["report"]["self"] - r["report"]["none"]) for r in rows]
@@ -646,7 +768,7 @@ def main():
             part = items[2 * s:2 * (s + chunk)]
             lens_rows = []
             for row in run_chunk(model, part, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], specs=specs,
-                                 lens_pairs=lens_pairs):
+                                 lens_pairs=lens_pairs, transplant=transplant):
                 if not all(map(math.isfinite, [row["coin"], *row["report"].values(), *row["coin_arm"].values()])):
                     raise SystemExit(f"non-finite log-odds in pair {row['pair']}, order {row['order']}: {row}")
                 if want_lens:  # big arrays go to an npz per chunk, the rest to rows.jsonl

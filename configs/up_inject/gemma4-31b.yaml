@@ -1,0 +1,23 @@
+# Pushing the heads/tails lean (README, "Pushing the heads/tails lean at ' up' and around it"): the final of gemma4-31b.
+# The preference report (coin_report_bold), the 1,000 pilot pairs; pushes of the model's own lens heads - tails lean
+# at the seven tokens below, at every block from the final's onset (block 40), +/- 1 nat, three random
+# directions, and the final's own lean transplanted (configs/up_inject/transplant_gemma4-31b.json).
+family: gemma4-31b
+run_name: up-inject-gemma4-31b
+tags: [gemma4-31b, up_inject]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 32
+chunk_pairs: 64
+model:
+  name: google/gemma-4-31B-it
+report: coin_report_bold
+arm_sets: [inject]
+inject:
+  tokens: [",", " the", " ...", " it", " came", " up", "."]
+  onset: 40
+  dose: 1.0
+  seeds: [0, 1, 2]
+  transplant: configs/up_inject/transplant_gemma4-31b.json

@@ -1,6 +1,7 @@
 """report_patch.py on a tiny random Llama-architecture model (real tokenizer, CPU, fp32): the prompts extend the coinflip
 token for token, a self-patch changes nothing, batching changes nothing, and a swap does change the report."""
 
+import numpy as np
 import pytest
 import torch
 from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
@@ -178,3 +179,35 @@ def test_followup_arms(setup):
     assert max(abs(r["report"][f"pos{n_suffix - 1:02d}"] - r["report"]["none"]) for r in rows) > 1.0
     # the whole line without its last token is the line minus " up": it differs from the whole-line swap
     assert max(abs(r["report"][f"loo{n_line - 1:02d}"] - r["report"]["swap_line"]) for r in rows) > 1e-6
+
+
+def test_push_arms(setup):
+    """Pushes of the heads/tails lean: a zero dose leaves everything unchanged; a small push moves the lens log-odds by the
+    dose to first order; + and - pushes at " up" move the coin there in opposite directions; random-direction pushes are
+    not the lens pushes; a transplant with zero slopes is the unpatched pass; inject_positions finds the tokens."""
+    from report_patch import Arm, inject_positions
+    tok, items, model = setup
+    coin_ids = prompts.outcome_token_ids("coinflip", tok)
+    out_ids = prompts.outcome_token_ids("coin_report", tok)
+    ks = inject_positions(tok, items[0], [",", " the", " ...", " it", " came", " up", "."])
+    assert [tok.decode([items[0]["ids"][items[0]["suffix"][k]]]) for k in ks.values()] == list(ks)
+    up, ctx = ks[" up"], sorted(k for t, k in ks.items() if t != " up")
+    specs = arm_specs(["inject"], len(items[0]["line"]), len(items[0]["suffix"]),
+                      dict(up=up, ctx=ctx, onset=1, dose=0.05, seeds=[0]))
+    specs["zero"] = Arm("own", ("tokens", tuple(sorted((up, *ctx)))), ("from", 1), "push_lens", 0.0)
+    A = {it["a"]: 0.3 * i for i, it in enumerate(items)} | {it["b"]: -0.2 * i for i, it in enumerate(items)}
+    tp = {"A": A, "slope": torch.zeros(2, len(ctx) + 1)}
+    rows = run_chunk(model, items, tok.eos_token_id, coin_ids, out_ids, 2, 3, specs=specs, transplant=tp)
+    for r in rows:
+        assert r["report"]["zero"] == pytest.approx(r["report"]["none"], abs=1e-5)
+        assert r["report"]["transplant_all"] == pytest.approx(r["report"]["none"], abs=1e-5)  # zero slopes
+        assert r["push_check"]["push_all_pos"] == pytest.approx(1.0, abs=0.05)  # first order, small dose
+    assert all(r["coin_arm"]["push_up_pos"] > r["coin_arm"]["push_up_neg"] for r in rows)
+    assert max(abs(r["report"]["rand0_all_pos"] - r["report"]["push_all_pos"]) for r in rows) > 1e-6
+    # a transplant with slopes pushes toward the first task when the first task has the higher utility
+    tp["slope"] = torch.ones(2, len(ctx) + 1) * 0.5
+    rows = run_chunk(model, items, tok.eos_token_id, coin_ids, out_ids, 2, 3,
+                     specs={"self": specs["self"], "transplant_all": specs["transplant_all"]}, transplant=tp)
+    for r, it in zip(rows, items):
+        shift = r["coin_arm"]["transplant_all"] - r["coin"]
+        assert np.sign(shift) == np.sign(A[it["a"]] - A[it["b"]]) or abs(A[it["a"]] - A[it["b"]]) < 1e-9
