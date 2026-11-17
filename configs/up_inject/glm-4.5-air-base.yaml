@@ -14,7 +14,7 @@ chunk_pairs: 64
 model:
   name: zai-org/GLM-4.5-Air-Base
   chat_template_from: zai-org/GLM-4.5-Air
-  max_memory: {0: 69GiB, 1: 69GiB, 2: 72GiB}
+  max_memory: {0: 70GiB, 1: 70GiB, 2: 67GiB}  # as the final (loads at 69/69/72 ran out of memory on GPU 2)
 report: coin_report_bold
 arm_sets: [inject]
 inject:

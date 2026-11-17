@@ -6924,9 +6924,95 @@ too, as at " up"?
 5. **The transplant moves each base's answer toward its final Assistant's preferred task** (slope on A_i - A_j above 0, CI
    above 0).
 
-### Runs
+### Runs (2026-11-17)
 
-Not yet run.
+W&B group `coin_report`, tag `up_inject`; analysis `up_inject.py` (`outputs/coin_report/up_inject/summary.txt`,
+`gains.csv`). Each base ran on its final's pod right after it (the model cache wiped in between), so finals and bases share
+GPU types.
+
+| model | GPU | run | | model | GPU | run |
+|---|---|---|---|---|---|---|
+| Gemma 4 31B-it | 1x H100 | `li9tpenk` | | Gemma 4 31B base | 1x H100 | `ge0sekxu` |
+| Llama 3.3 70B | 1x H200 | `xz2fm800` | | Llama 3.1 70B base | 1x H200 | `y47ml0yd` |
+| GLM-4.5-Air | 3x H100 | `9xxgzbsj` | | GLM-4.5-Air base | 3x H100 | `60apnmwn` |
+
+About $42 of GPU, plus the Llama base guess rerun for the previous section on the Llama pod.
+- No H100/H200/B200 multi-GPU pod was in stock in US/Canada for about an hour, so GLM started last.
+- GLM's base loaded with the final's memory split (70/70/67 GiB), a placement change only.
+
+**Checks.** Self-patch exactly 0 in every run. The realized lens change at the pushed cells is 0.92-0.98 of the dose (gate
+[0.5, 2]) in all six, and the answer's mass is >= 0.66, so every arm passes the gate.
+
+### Results
+
+![gains](figures/up_inject_gains.png)
+
+(Each panel has its own scale: the gains differ about 20-fold between models.)
+
+| model | stage | coin at " up" per nat pushed there | G " up" | G the six around it | G all seven | random directions, G (3 seeds) | transplant: slope on A_i - A_j |
+|---|---|---|---|---|---|---|---|
+| Gemma 4 31B | final | 3.34 | -0.006 [-0.008, -0.003] | -0.023 [-0.025, -0.020] | +0.019 [+0.016, +0.022] | +0.002, +0.007, +0.004 | +0.006 (1.0% of its answer's slope, 0.64) |
+| | base | 6.61 | **+0.050 [+0.046, +0.053]** | -0.006 | -0.005 | **+0.041, -0.005, +0.249** | +0.004 (its own answer's slope: 0.018) |
+| Llama 3.3 70B | final | 0.71 | +0.002 [-0.001, +0.005] | +0.000 | +0.003 [+0.000, +0.006] | +0.002, +0.002, -0.000 | +0.000 (0.1% of 0.60) |
+| | base | 0.52 | +0.001 [+0.000, +0.003] | +0.001 | +0.004 [+0.003, +0.005] | -0.001, +0.000, -0.001 | +0.000 (own slope 0.004) |
+| GLM-4.5-Air | final | 0.68 | **+0.009 [+0.007, +0.011]** | **+0.006 [+0.004, +0.008]** | +0.012 [+0.010, +0.014] | -0.000, +0.001, +0.001 | +0.005 (1.1% of 0.43) |
+| | base | 0.52 | **+0.007 [+0.005, +0.009]** | +0.001 [-0.001, +0.003] | +0.009 [+0.007, +0.010] | -0.000, -0.001, -0.000 | +0.002 (own slope 0.010) |
+
+G is the reading gain: nats of the answer's heads - tails log-odds per nat of lens lean pushed. For scale, swapping " up"
+moved the finals' answers by κ = 0.057 (Gemma), 0.014 (Llama) and 0.050 (GLM) nats per nat of the coin brought in.
+
+- **Every push reaches the coin:** a 1-nat push at " up" (and the blocks after) moves the output coin there by 0.5-6.6 nats.
+  The later answer moves by at most a few hundredths of a nat.
+- **GLM's final reads the pushed lean, specifically and weakly.** G 0.009 at " up" and 0.006 at the six around it, against
+  random directions within ±0.001. Per nat of coin moved that's 0.013 nats, about a quarter of what swapping all of " up"'s
+  state does (κ 0.050), in line with line 3's potent part.
+- **Gemma's and Llama's finals don't, beyond what random pushes do.**
+  - Gemma's answer moves by -0.006 at " up" and -0.023 around it, both against the push, and +0.019 for all seven. Random
+    directions give +0.002 to +0.007.
+  - Llama's answer moves by at most 0.003, the same as random.
+  - Per nat of coin moved, both are a few thousandths, against swap κs of 0.057 and 0.014: the lean along the coin's own
+    direction is not what their answers read at " up".
+- **GLM's base reads the pushed lean at " up" about as much as its final** (0.007 vs 0.009), with random directions at 0.
+  The pathway from a heads/tails lean at " up" to the later heads/tails answer is there before post-training.
+- **Gemma's base responds, but not specifically.** Its answer moves by +0.050 at " up", but random directions of the same
+  size move it by up to +0.249 (and single tokens by ±0.08-0.09). The base's answer is sensitive to any push here, so this
+  doesn't show it reads the heads/tails direction.
+- **Llama's base is at about 0,** like its final.
+- **The transplant** (each base given its final's own lean, at all seven tokens and every block from the onset) moves the
+  bases toward the final's preferred task by 0.0002-0.004 nats per nat of A_i - A_j. That is 0.5% of their finals' answer
+  slopes or less. It is about a fifth of Gemma's and GLM's bases' own (tiny) slopes. In the finals, doubling their own lean
+  adds 0-1% to their answer's slope.
+
+**Predictions:**
+1. The finals read the pushed lean at " up" and around it (G_up, G_ctx > 0): **fails** (holds only for GLM).
+2. In the finals, random |G| < G_all / 4: **fails** (holds only for GLM).
+3. The bases' G_up > 0: **holds as stated**, but only GLM's base passes the random-direction comparison. Gemma base's
+   random directions move it as much or more, and Llama base's G is 0.001.
+4. Each base's G_all is below its final's: **fails** (Llama's base 0.004 vs final 0.003, both near 0).
+5. The transplant moves each base toward its final's preferred task: **holds**, by tiny amounts (0.0002-0.004 nats per
+   nat).
+
+### Findings
+
+1. **The heads/tails lean at " up" and around it is a minor input to the later answer.** Pushing it moves the coin at
+   " up" by up to several nats, and the answer by at most a few hundredths. Only in GLM does the answer follow it more than
+   random pushes, and then at about a quarter of what swapping " up"'s whole state does.
+2. **Where the answer does read it (GLM), the base reads it about as much as the final.** So in GLM the reading pathway
+   predates post-training; what post-training changes is the lean itself, which tracks the Assistant's preferences in the
+   final and not in the base. Gemma's base is too sensitive to arbitrary pushes to tell, and Llama reads it in neither.
+3. **Giving a base its final's lean barely moves its answer** (at most 0.5% of the final's answer slope).
+4. Together with the follow-ups' line 3: the " up" path into the later answer runs mostly through parts of " up"'s state
+   other than the coin's own heads/tails direction. GLM is the partial exception.
+
+### Caveats (from the results)
+
+- One push size (±1 lens nat), one set of tokens, the preference question only; the lens direction at each depth, not the
+  gradient through the remaining blocks (line 3's primary).
+- Replacing the residual at every block from the onset means the pushed tokens can't respond to anything else there;
+  that is the same at both signs, so the gains are clean, but it is a stronger edit than a single-block push.
+- The random arms are three directions per model; Gemma base's spread (-0.005 to +0.249) shows how much one direction can
+  matter in a base.
+- GPU types differ from the earlier rounds for some models (allowed), but each base shares its final's.
 
 ## Tasks
 
