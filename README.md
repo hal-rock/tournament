@@ -4906,6 +4906,17 @@ Llama's other prefills, for the wording question:
 | Llama 3.3 70B | 0.91 | 91% | 5.1 (preference 6.5) | **0.66** / 0.20 | 0.46 / 0.68 |
 | GLM-4.5-Air | 0.88 | 94% | 1.0 (preference 1.8) | 0.34 / 0.29 | 0.54 / 0.56 |
 
+![guess example](figures/coin_report_guess_example.png)
+
+One full guess prompt as Gemma read it (`guess_example.py`; added 2026-11-19, from the run's rows).
+- **The pair:** Gemma prefers the math task (Task B, tails) by 8.6 in sweep utilities. It was picked by rule: MATH or Alpaca
+  tasks, short, a clear preference for the tails task, and a guess pair effect near the median of the clear pairs (3.6 nats
+  against 3.4).
+- **The guess:** tails 0.81 here. With the tasks swapped, so that the math task is heads, it guesses heads 0.99.
+- **Why Gemma:** a single prompt shows the guess's heads lean as well as its pair effect. Averaged over both orders, that lean
+  is +1.2 nats in Gemma, +5.7 in Llama (as large as its pair effect, so Llama guesses mostly "heads") and +0.0 in GLM. The
+  table's pair effects cancel it.
+
 **Predictions:**
 1. The short preference question still tracks the Assistant, r >= 0.8: **yes** (0.91, 0.92, 0.85), though only with the prefills
    added after the wording check.
