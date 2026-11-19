@@ -9,7 +9,8 @@ The correlation is with the Assistant's answer at the end of this prompt, not wi
 figure). Runs: report_patch.py runs tagged up_lens (--arm-sets none --lens-lp), rows under outputs/coin_report/<family>/.
 Where the same family has a follow-up run on the same GPU type, the lens lean is checked against it.
 
-Usage: uv run python up_lens.py  -> outputs/coin_report/up_lens/{summary.txt, maps.npz}, figures/up_lens_<family>.png
+Usage: uv run python up_lens.py  -> outputs/coin_report/up_lens/{summary.txt, maps.npz} (every position),
+figures/up_lens_<family>.png (the coin line's tokens up to " up", for sharing)
 """
 
 from __future__ import annotations
@@ -95,44 +96,43 @@ def label(t):
 
 
 def plot(fam, M):
+    """Final | base side by side; the coin line's tokens up to and including " up" (the figure Hal shares)."""
     stages = [s for s in (fam, fam + "-base") if s in M]
-    fig, axes = plt.subplots(2, len(stages), figsize=(7.4 * len(stages), 11), squeeze=False, layout="constrained")
+    fig, axes = plt.subplots(2, len(stages), figsize=(4.3 * len(stages) + 1.2, 10.5), squeeze=False, layout="constrained")
     norms = (Normalize(LOG10_MIN, 0), Normalize(-1, 1))
     for j, s in enumerate(stages):
         m = M[s]
-        L1, P = m["corr"].shape
+        P = m["up"] + 1  # positions "Okay" .. " up"
+        L1 = m["corr"].shape[0]
         for i, (key, cmap) in enumerate((("prob", ps.SEQUENTIAL), ("corr", ps.DIVERGING))):
             ax = axes[i, j]
-            X = np.maximum(m[key], LOG10_MIN) if key == "prob" else m[key]
-            im = ax.imshow(X, aspect="auto", origin="lower", cmap=cmap, norm=norms[i], interpolation="nearest")
+            X = (np.maximum(m[key], LOG10_MIN) if key == "prob" else m[key])[:, :P]
+            ax.imshow(X, aspect="auto", origin="lower", cmap=cmap, norm=norms[i], interpolation="nearest")
             ax.grid(False)
             ax.axhline(L1 - 1.5, color=ps.SURFACE, lw=2.5)  # the output row sits above the lens rows
-            ax.add_patch(plt.Rectangle((m["up"] - 0.5, -0.5), 1, L1, fill=False, ec=ps.INK, lw=1.2))
             if key == "prob":  # on one hue, 0.05 and 0.9 look alike: dot the cells where heads/tails is the likely token
-                yy, xx = np.nonzero(m["prob"] >= np.log10(0.5))
-                ax.scatter(xx, yy, s=2.5, color=ps.SURFACE, marker="o", linewidths=0)
-            ax.set_xticks(range(P), [label(t) for t in m["tokens"]], rotation=90, fontsize=7)
+                yy, xx = np.nonzero(m["prob"][:, :P] >= np.log10(0.5))
+                ax.scatter(xx, yy, s=5, color=ps.SURFACE, marker="o", linewidths=0)
+            ax.set_xticks(range(P), [label(t) for t in m["tokens"][:P]], rotation=90, fontsize=8.5)
             ax.get_xticklabels()[m["up"]].set_fontweight("bold")
             step = max(1, round((L1 - 1) / 4 / 5) * 5)
             ticks = list(range(0, L1 - 1, step))
             ax.set_yticks(ticks + [L1 - 1], [str(t) for t in ticks] + ["output"], fontsize=8)
             if j == 0:
                 ax.set_ylabel("depth: the residual entering block", fontsize=9)
-            what = ("mean P(\" heads\") + P(\" tails\") under the logit lens\n(dots: >= 0.5)" if key == "prob" else
-                    f"r(heads - tails lean, Assistant's answer), {m['n_pairs']:,} pairs\n"
-                    f"(the answer's pair SD: {m['answer_sd']:.2f} nats)")
-            ax.set_title(f"{LABEL[s]}: {what}", fontsize=9)
+            what = ("P(\" heads\") + P(\" tails\") under the lens\n(mean; dots: >= 0.5)" if key == "prob" else
+                    f"r(heads - tails lean, final answer)\n{m['n_pairs']:,} pairs; answer SD {m['answer_sd']:.2f} nats")
+            ax.set_title(f"{LABEL[s]}\n{what}", fontsize=9)
         if j == len(stages) - 1:
             for i, cb_label in enumerate(("P, log scale", "Pearson r")):
                 cb = fig.colorbar(plt.cm.ScalarMappable(norm=norms[i], cmap=(ps.SEQUENTIAL, ps.DIVERGING)[i]),
-                                  ax=axes[i, :].tolist(), fraction=0.025, pad=0.01)
+                                  ax=axes[i, :].tolist(), fraction=0.05, pad=0.02)
                 cb.set_label(cb_label, fontsize=9)
                 if i == 0:
                     cb.set_ticks(range(LOG10_MIN, 1), labels=[f"$10^{{{k}}}$" if k else "1" for k in
                                                              range(LOG10_MIN, 1)])
-    fig.suptitle(f"{FINALS[fam]}, preference prompt: how much probability heads/tails get at each position and depth (top),\n"
-                 f"and whether the heads - tails lean there tracks the Assistant's final answer (bottom). Boxed: \" up\"",
-                 fontsize=11)
+    fig.suptitle(f"{FINALS[fam]}, the coin line up to \" up\" (the last column):\nhow much probability heads/tails get under the logit "
+                 f"lens (top),\nand whether the heads - tails lean tracks the Assistant's final answer (bottom)", fontsize=10.5)
     ps.save(fig, f"up_lens_{fam}")
 
 

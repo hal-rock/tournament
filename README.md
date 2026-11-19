@@ -7017,9 +7017,9 @@ moved the finals' answers by κ = 0.057 (Gemma), 0.014 (Llama) and 0.050 (GLM) n
 ## The heads/tails lean around " up": how much probability, and does it track the Assistant's answer?
 
 Exploratory, descriptive figures for sharing (Hal, 2026-11-18): a more direct view of the line-4 lens result. For the
-preference prompt (the follow-ups' `coin_report_bold`, the same 1,000 pilot pairs), at every position from the coin line's
-"Okay" to the Assistant's prefill "I would have preferred **", and every depth (the residual entering each block, plus
-the model's own output as the top row):
+preference prompt (the follow-ups' `coin_report_bold`, the same 1,000 pilot pairs), at every position of the coin line
+from "Okay" to " up" ("Okay, I'm flipping the coin now ... it came up"), and every depth (the residual entering each
+block, plus the model's own output as the top row):
 
 - **probability:** the logit lens's P(" heads") + P(" tails") (a softmax over the whole vocabulary), the mean over all
   2,000 prompts, on a log scale; dots mark cells where it is at least 0.5;
@@ -7028,7 +7028,9 @@ the model's own output as the top row):
   figure correlated the lean with the coin at " up"; this one uses the Assistant's answer instead.
 
 The follow-up runs had saved only the lens's log-odds (no probabilities), so `report_patch.py` gained `--lens-lp` (each
-token's full-vocabulary log-prob) and a readout-only arm set (`--arm-sets none`); `up_lens.py` makes the figures.
+token's full-vocabulary log-prob) and a readout-only arm set (`--arm-sets none`); `up_lens.py` makes the figures. The runs
+read every position through the Assistant's prefill; the figures show the coin line only (Hal, for sharing), and the
+whole-prompt maps are in `outputs/coin_report/up_lens/maps.npz`.
 
 **Runs (2026-11-18, ~$10):** Gemma 4 31B `2w9tm6m5`, base `gwtoilj4` (1x H100 SXM); Llama 3.3 70B `3gt1ngjv`, 3.1 70B
 base `atw6xaoz` (1x H200); GLM-4.5-Air `ldv87sl5`, base `wg8svd5d` (2x H200: no 3x H100 in stock, so GLM's lens values
@@ -7044,25 +7046,27 @@ filled (2026-11-16); W&B's copies were intact and restored.
 
 ### What the figures show
 
-| | " up" output P | " up" r (output) | r at ' came' (output, its P) | r at ' But' (output, its P) |
-|---|---|---|---|---|
-| Gemma 4 31B | 0.99 | +0.82 | +0.83 (3e-9) | +0.61 (1e-6) |
-| Llama 3.3 70B | 0.80 | +0.86 | +0.79 (8e-5) | +0.82 (2e-5) |
-| GLM-4.5-Air | 0.44 | +0.83 | +0.81 (9e-5) | +0.26 (3e-4) |
-| Gemma 4 31B base | 0.78 | +0.40 | +0.40 (7e-4) | +0.18 (5e-3) |
-| Llama 3.1 70B base | 0.81 | +0.06 | -0.05 (2e-3) | +0.14 (5e-3) |
-| GLM-4.5-Air base | 0.52 | +0.10 | -0.05 (3e-3) | +0.03 (1e-4) |
+At the output (the top row), r with the Assistant's answer, and the mean P(" heads") + P(" tails") in brackets:
 
-1. **Heads/tails get real probability at only a few positions:** " up" (the coin's own slot), the comma before "heads",
-   " or" (before "tails") and the final " **". Under the lens these come up from about the middle of the network (Llama
-   from block ~45 of 80, GLM ~25 of 46, Gemma ~50 of 60). Elsewhere the mean is 10^-2 or (mostly) far less. In Llama's
-   and GLM's mid-depth lens a few more tokens (" came", " ...", " it") also put most of the lens's mass on heads/tails,
-   though the output never does there.
-2. **In the finals the lean tracks the Assistant's answer well beyond those positions.** From mid-depth on, the
-   heads - tails lean correlates with the Assistant's answer at r 0.6-0.85 at " came" (all three), " it" (Llama, GLM),
-   " But" (Gemma, Llama) and many of the later tokens: about as well as at " up" itself (0.82-0.86), although at the
-   output either token gets 10^-4 to 10^-9 there. So the coinflip effect shows up as a lean between two tokens the model
-   isn't predicting.
+| | " up" | " came" | " it" | " ..." |
+|---|---|---|---|---|
+| Gemma 4 31B | +0.82 (0.99) | +0.83 (3e-9) | +0.46 (4e-4) | +0.63 (4e-3) |
+| Llama 3.3 70B | +0.86 (0.80) | +0.79 (8e-5) | +0.60 (9e-6) | +0.80 (4e-3) |
+| GLM-4.5-Air | +0.83 (0.44) | +0.81 (9e-5) | +0.81 (1e-4) | +0.52 (0.05) |
+| Gemma 4 31B base | +0.40 (0.78) | +0.40 (7e-4) | +0.31 (6e-5) | +0.16 (0.04) |
+| Llama 3.1 70B base | +0.06 (0.81) | -0.05 (2e-3) | +0.14 (6e-5) | +0.04 (0.13) |
+| GLM-4.5-Air base | +0.10 (0.52) | -0.05 (3e-3) | -0.16 (2e-3) | -0.13 (0.03) |
+
+1. **In the coin line, heads/tails get real probability only at " up"** (0.44-0.99 at the output). Under the lens it
+   comes up from about the middle of the network (Llama from block ~45 of 80, GLM ~25 of 46, Gemma ~50 of 60). In
+   Llama's and GLM's mid-depth lens one to three tokens just before it (" ...", " it", " came") also put most of the lens's
+   mass on heads/tails, though the output doesn't; everywhere else the mean is 10^-2 or (mostly) far less.
+2. **In the finals the lean tracks the Assistant's answer before " up" too.** From mid-depth on, the heads - tails lean at
+   " came" correlates with the Assistant's answer about as well as at " up" itself (0.79-0.83 against 0.82-0.86 at the
+   output, all three), and at " it" and " ..." at 0.46-0.81, although at the output either token gets at most 5%
+   there and mostly 10^-4 to 10^-9. So the coinflip effect shows up as a lean between two tokens the model isn't
+   predicting. The line's earlier tokens ("Okay" ... " now") track it weakly. (After " up", outside the figures, the
+   same holds at " But" and many later tokens.)
 3. **In the bases it barely does.** Their answers hardly vary across pairs (pair SD 0.15-0.43 nats against 2.5-9.9 in
    the finals), and the lean's correlation with them is at most ~0.4 (Gemma's base at " up") and mostly noise, though the
    bases put as much probability on heads/tails at " up" as the finals.
@@ -7072,8 +7076,7 @@ filled (2026-11-16); W&B's copies were intact and restored.
 - Correlations across pairs, not causal: the pushes and swaps (the two sections above) are the causal tests, and they found
   the answer reads little of this lean.
 - The logit lens isn't what the network reads at intermediate depths; Gemma's lens is uninformative below ~block 45 (mean
-  probabilities under 10^-6, drawn at the floor). One prompt wording, " heads"/" tails" with a space (the Assistant's
-  answer uses "heads"/"tails" after "**", which is why the bases' final-position r is 0.84-0.99 rather than 1).
+  probabilities under 10^-6, drawn at the floor). One prompt wording; the lens pair is " heads"/" tails" with a space.
 
 ## Tasks
 
