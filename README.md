@@ -5029,6 +5029,21 @@ is for the guess, here and in the replication's five larger models (finding 8's 
   Llama 3.3, DeepSeek V3, Llama 405B or Nemotron, it holds mostly when that outcome is also the word the model favors.
 - **Caveats:** read at "heads" / "tails" after the opened bold; Gemma's mass on "He" / "T" isn't counted. Not pre-registered.
 
+**Per-task utilities of the guess, DeepSeek V4 Flash** (its lean is small):
+
+![V4 Flash guess utilities](figures/deepseek-v4-flash/guess_utilities.png)
+
+- **Method** (`scripts/guess_utilities.py`, which takes any of the eight models): the guess was scored only on the 1,000 pilot
+  pairs, so its utilities are fit from those pairs alone, as `analyze.py` fits the sweep's, from pair effects (no lean).
+  - Each task is in about 6 pairs (median); one WildChat task is in none and is left out (299 tasks).
+  - For comparison, the user-turn coin at " up" is fit from the same pairs and forward passes.
+- **The guess tracks the Assistant's choice utilities at r 0.90 [0.87, 0.92]** (Spearman 0.86, non-BailBench r 0.85).
+  - Split-half reliability is 0.92, so that is near its ceiling.
+  - The coin on the same pairs gives r 0.81 (reliability 0.88), the same as the sweep's 15,000-pair coin (0.81).
+- **The guess moves about three times as much per unit of the Assistant's utility as the coin does** (slope 0.23 vs 0.08).
+- **Same order of task origins in both:** MATH on top, BailBench and stress tests at the bottom. Stress-test tasks the
+  Assistant mildly dislikes (utility -6 to -2) get guesses near 0 or above.
+
 ## Replication across larger models
 
 Most of the findings above rest on Gemma 4 31B and Llama 3.3 70B. Hal's question (2026-11-10): which of them hold on larger,
