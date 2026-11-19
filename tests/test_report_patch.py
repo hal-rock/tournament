@@ -181,6 +181,30 @@ def test_followup_arms(setup):
     assert max(abs(r["report"][f"loo{n_line - 1:02d}"] - r["report"]["swap_line"]) for r in rows) > 1e-6
 
 
+def test_lens_logprobs_readout(setup):
+    """The readout-only arm set ("none") with lens_lp: the full-vocabulary lens log-probs are log-probs (each pair's mass
+    <= 1), their difference is the two-column lens's log-odds, and the output's are the model's own (the coin at " up",
+    the stored output mass)."""
+    tok, items, model = setup
+    coin_ids = prompts.outcome_token_ids("coinflip", tok)
+    out_ids = prompts.outcome_token_ids("coin_report_bold", tok)
+    n_line, n_suffix = len(items[0]["line"]), len(items[0]["suffix"])
+    specs = arm_specs(["none"], n_line, n_suffix)
+    assert list(specs) == ["self"]
+    rows = run_chunk(model, items, tok.eos_token_id, coin_ids, out_ids, 2, batch_size=3, specs=specs,
+                     lens_pairs=[tuple(coin_ids), tuple(out_ids)], lens_lp=True)
+    for r in rows:
+        lp, lens = np.array(r["lens_lp"]), np.array(r["lens"])
+        assert lp.shape == (2, n_suffix, 4) and (lp <= 1e-6).all()
+        assert np.exp(lp[..., 0:2]).sum(-1).max() <= 1 + 1e-5
+        np.testing.assert_allclose(lp[..., 0] - lp[..., 1], lens[..., 0], atol=1e-4)
+        np.testing.assert_allclose(lp[..., 2] - lp[..., 3], lens[..., 1], atol=1e-4)
+        out_lp = np.array(r["out_lp"])
+        assert out_lp[n_line - 1, 0] - out_lp[n_line - 1, 1] == pytest.approx(r["coin"], abs=1e-5)
+        np.testing.assert_allclose(np.exp(out_lp[:, 0:2]).sum(-1), np.array(r["out_mass"])[:, 0], rtol=1e-5)
+        assert r["report"]["self"] == pytest.approx(r["report"]["none"], abs=1e-5)
+
+
 def test_push_arms(setup):
     """Pushes of the heads/tails lean: a zero dose leaves everything unchanged; a small push moves the lens log-odds by the
     dose to first order; + and - pushes at " up" move the coin there in opposite directions; random-direction pushes are

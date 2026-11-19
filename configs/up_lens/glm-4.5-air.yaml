@@ -1,0 +1,15 @@
+# Lens probabilities around ' up' (README, "The heads/tails lean around ' up': how much probability, and does it track the
+# Assistant's answer?"): the follow-ups' preference prompt (coin_report_bold) on the same 1,000 pilot pairs, no arms, the
+# logit lens with each token's own log-prob (--lens-lp). 2x H200 with the default split (as configs/coin_report/glm-4.5-air.yaml):
+# no 3x H100 SXM in stock on 2026-11-18, so the lens log-odds differ from the 3x H100 follow-up run's by bf16 rounding.
+family: glm-4.5-air
+run_name: up-lens-glm-4.5-air
+tags: [glm-4.5-air, up_lens]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: zai-org/GLM-4.5-Air

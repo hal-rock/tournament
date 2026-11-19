@@ -1,0 +1,16 @@
+# Lens probabilities around ' up' (README, "The heads/tails lean around ' up': how much probability, and does it track the
+# Assistant's answer?"): the follow-ups' preference prompt (coin_report_bold) on the same 1,000 pilot pairs, no arms, the
+# logit lens with each token's own log-prob (--lens-lp). Same GPU type and memory split as configs/up_followups/gemma4-31b-base.yaml,
+# so the lens log-odds can be checked against that run's.
+family: gemma4-31b-base
+run_name: up-lens-gemma4-31b-base
+tags: [gemma4-31b-base, up_lens]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 32
+chunk_pairs: 64
+model:
+  name: google/gemma-4-31B
+  chat_template_from: google/gemma-4-31B-it

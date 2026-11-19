@@ -1,0 +1,17 @@
+# Lens probabilities around ' up' (README, "The heads/tails lean around ' up': how much probability, and does it track the
+# Assistant's answer?"): the follow-ups' preference prompt (coin_report_bold) on the same 1,000 pilot pairs, no arms, the
+# logit lens with each token's own log-prob (--lens-lp). Same GPU type and memory split as configs/up_followups/llama-70b-base.yaml,
+# so the lens log-odds can be checked against that run's.
+family: llama-70b-base
+run_name: up-lens-llama-70b-base
+tags: [llama-70b-base, up_lens]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 16
+chunk_pairs: 64
+model:
+  name: unsloth/Llama-3.1-70B
+  chat_template_from: unsloth/Llama-3.3-70B-Instruct
+  max_memory: {0: 139GiB}

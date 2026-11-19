@@ -106,7 +106,7 @@ def arm_specs(sets, n_line, n_suffix, inject=None):
     control, and single-block checks of the split), "line4" (every position from the line's first token to the end alone,
     and the whole line without each of its tokens), "inject" (pushes of the heads/tails lean, see Arm; needs inject =
     {"up": suffix index of " up", "ctx": [the other pushed tokens' suffix indices], "onset": l0, "dose": nats,
-    "seeds": [random-direction seeds]}). "self" is always included."""
+    "seeds": [random-direction seeds]}), "none" (no arms beyond self: a readout-only run). "self" is always included."""
     specs = {"self": ARMS["self"]}
     for s in sets:
         if s == "inject":
@@ -120,6 +120,8 @@ def arm_specs(sets, n_line, n_suffix, inject=None):
                     specs[f"rand{seed}_all_{tag}"] = Arm("own", ("tokens", groups["all"]), ("from", l0), f"push_rand{seed}",
                                                          sign * dose)
             specs["transplant_all"] = Arm("own", ("tokens", groups["all"]), ("from", l0), "transplant")
+            continue
+        if s == "none":
             continue
         if s == "base":
             specs |= ARMS
@@ -433,6 +435,17 @@ def lens_dirs(model, H, token_ids):
     return unit(lens_grads(model, H, token_ids))
 
 
+def lens_logprobs(model, h, token_ids, rows=4):
+    """Logit-lens log-probs of token_ids at residuals h [B, P, D] -> [B, P, len(token_ids)] (fp32, CPU): the model's own
+    final norm and head over the whole vocabulary (its dtype, as at the output), then a log-softmax in fp32. `rows` batch
+    rows at a time bound the [rows, P, V] logits (Gemma's vocabulary is 262k)."""
+    out = []
+    for s in range(0, h.shape[0], rows):
+        x = acts.logit_lens(model, h[s:s + rows])
+        out.append(torch.log_softmax(x, dim=-1)[..., list(token_ids)].cpu())
+    return torch.cat(out)
+
+
 def rand_dirs(n_layers, dim, seed=0):
     """A fixed random unit vector per block (line 3's random control)."""
     return unit(torch.randn(n_layers, dim, generator=torch.Generator().manual_seed(seed)))
@@ -465,12 +478,14 @@ def rand_cells(seed, n_layers, n_pos, dim):
 
 
 def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arms=None, specs=None, lens_pairs=None,
-              transplant=None):
+              transplant=None, lens_lp=False):
     """All arms for a chunk of items (both orders of each pair included). Returns one row per item.
 
     specs: {name: Arm} (default: ARMS, or the names in `arms` of it). lens_pairs: token-id pairs [(a, b), ...] whose
     log-odds to read at every position of the suffix, entering every block (logit lens) and at the output (line 4); the
     row then has "lens" [n_layers, P, n_pairs], "out" and "out_mass" [P, n_pairs] (lists, P = len(suffix)).
+    lens_lp: also each pair token's own log-prob (a softmax over the whole vocabulary, lens_logprobs): "lens_lp"
+    [n_layers, P, 2 n_pairs] and "out_lp" [P, 2 n_pairs], tokens in lens_pairs order (a0, b0, a1, b1, ...).
     Every forward of a batch keeps logits from the batch's first line token on, so all arms round the LM head alike.
     transplant: for a "transplant" arm, {"A": {task id: the final Assistant's utility}, "slope": [n_layers, P] tensor, the
     final's lean slope at each block and pushed position (sorted suffix indices of the pushed tokens; 0 below the onset)}.
@@ -508,6 +523,9 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
             lens = lens[..., 0::2] - lens[..., 1::2]
             out = torch.stack([outcome(lp, pr)[0] for pr in lens_pairs], -1)  # [B, P, n]
             out_mass = torch.stack([outcome(lp, pr)[1] for pr in lens_pairs], -1)
+            if lens_lp:
+                full = torch.stack([lens_logprobs(model, store[l], flat) for l in L], 1)  # [B, L, P, 2n]
+                out_lp = lp[..., flat].cpu()  # [B, P, 2n]
         n_up = len(its[0]["line"]) - 1  # " up"'s index in the captured positions
         if {"pot_lens", "null_lens"} & transforms:
             H = torch.stack([store[l][:, n_up] for l in L], 1)  # [B, L, D]
@@ -525,6 +543,8 @@ def run_chunk(model, items, pad_id, coin_ids, rep_ids, n_layers, batch_size, arm
             cap_ok[k] = torch.stack([okstore[l][r] for l in L])
             if lens_pairs is not None:
                 res[k].update(lens=lens[r].tolist(), out=out[r].tolist(), out_mass=out_mass[r].tolist())
+                if lens_lp:
+                    res[k].update(lens_lp=full[r].tolist(), out_lp=out_lp[r].tolist())
             if {"pot_lens", "null_lens"} & transforms:
                 u_lens[k] = U[r]
     u_grad, rho = {}, None
@@ -669,9 +689,11 @@ def main():
                     "(choose_wording); run after the --report conditions")
     ap.add_argument("--arms", nargs="+", choices=list(ARMS), help="only these of the base arms (default: all; self is "
                     "always run, for the batching check)")
-    ap.add_argument("--arm-sets", nargs="+", choices=["base", "line3", "line4", "inject"],
+    ap.add_argument("--arm-sets", nargs="+", choices=["base", "line3", "line4", "inject", "none"],
                     help="arm sets (arm_specs; default: the config's arm_sets, else base)")
     ap.add_argument("--lens", action="store_true", help="also read the logit lens over the suffix (line 4); or config lens")
+    ap.add_argument("--lens-lp", action="store_true", help="the lens readout also stores each token's own log-prob over the "
+                    "whole vocabulary (lens_logprobs; implies --lens); or config lens_lp")
     a = ap.parse_args()
     # torch's default intra-op threads follow the host's cores (88-96 on 22-24 vCPU pods), which oversubscribes a busy host
     torch.set_num_threads(min(16, torch.get_num_threads()))
@@ -680,7 +702,8 @@ def main():
     arm_sets = a.arm_sets or cfg0.get("arm_sets", ["base"])
     arms = None if a.arms is None else sorted(set(a.arms) | {"self"}, key=list(ARMS).index)
     assert arms is None or arm_sets == ["base"], "--arms selects among the base arms only"
-    want_lens = a.lens or cfg0.get("lens", False)
+    want_lp = a.lens_lp or cfg0.get("lens_lp", False)
+    want_lens = a.lens or cfg0.get("lens", False) or want_lp
     tasks = read_jsonl(cfg0["tasks_file"])
     sweep = select_pairs(len(tasks), 15000, 0)
     pairs = (pilot_pairs(len(tasks), cfg0["n_pairs"], sweep, cfg0.get("seed", 0)) if cfg0["pairs"] == "pilot"
@@ -733,7 +756,7 @@ def main():
                          tags=cfg.get("tags"), reinit="finish_previous",
                          config={**cfg, "n_pairs_run": len(pairs), "arms": list(specs), "arm_sets": arm_sets,
                                  "single_blocks": blocks_of, "suffix_tokens": suffix_tokens, "n_layers": n_layers,
-                                 "lens": want_lens, "wording_check": wording.get(report),
+                                 "lens": want_lens, "lens_lp": want_lp, "wording_check": wording.get(report),
                                  **({"model_resolved": resolved} if "model_from" in cfg else {})})
         out = Path("outputs/coin_report") / cfg["family"] / run.id
         out.mkdir(parents=True, exist_ok=True)
@@ -749,7 +772,7 @@ def main():
                             keep_from=it["line"][0])
             alone.append([outcome(lp[0, 0], coin_ids)[0].item(), outcome(lp[0, 1], rep_ids)[0].item()])
         rows = run_chunk(model, probe, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], specs=specs,
-                         lens_pairs=lens_pairs, transplant=transplant)
+                         lens_pairs=lens_pairs, transplant=transplant, lens_lp=want_lp)
         d_coin = [abs(r["coin"] - al[0]) for r, al in zip(rows, alone)]
         d_rep = [abs(r["report"]["none"] - al[1]) for r, al in zip(rows, alone)]
         d_self = [abs(r["report"]["self"] - r["report"]["none"]) for r in rows]
@@ -758,6 +781,10 @@ def main():
             checks["grad_path_coin_max"] = max(abs(r["coin_grad_path"] - r["coin"]) for r in rows)
         if want_lens:  # the lens entering block L-1 is not the output; the output read at " up" must be the coin
             checks["out_up_vs_coin_max"] = max(abs(r["out"][len(items[0]["line"]) - 1][0] - r["coin"]) for r in rows)
+        if want_lp:  # the full-vocabulary lens (model dtype) against the fp32 two-column lens, as log-odds
+            import numpy as np
+            checks["lens_lp_vs_lens_max"] = max(float(np.abs((lambda x: x[..., 0] - x[..., 1])(np.array(r["lens_lp"]))
+                                                             - np.array(r["lens"])[..., 0]).max()) for r in rows)
         print("batching check: " + ", ".join(f"{k} {v:.3g}" for k, v in checks.items()), flush=True)
         run.summary.update(checks)
 
@@ -768,11 +795,12 @@ def main():
             part = items[2 * s:2 * (s + chunk)]
             lens_rows = []
             for row in run_chunk(model, part, pad_id, coin_ids, rep_ids, n_layers, cfg["batch_size"], specs=specs,
-                                 lens_pairs=lens_pairs, transplant=transplant):
+                                 lens_pairs=lens_pairs, transplant=transplant, lens_lp=want_lp):
                 if not all(map(math.isfinite, [row["coin"], *row["report"].values(), *row["coin_arm"].values()])):
                     raise SystemExit(f"non-finite log-odds in pair {row['pair']}, order {row['order']}: {row}")
                 if want_lens:  # big arrays go to an npz per chunk, the rest to rows.jsonl
-                    lens_rows.append((row["pair"], row["order"], row.pop("lens"), row.pop("out"), row.pop("out_mass")))
+                    lens_rows.append((row["pair"], row["order"], row.pop("lens"), row.pop("out"), row.pop("out_mass"),
+                                      row.pop("lens_lp", None), row.pop("out_lp", None)))
                 io.append_jsonl(path, row)
             if lens_rows:
                 import numpy as np
@@ -780,7 +808,9 @@ def main():
                                     order=np.array([x[1] for x in lens_rows]),
                                     lens=np.array([x[2] for x in lens_rows], dtype=np.float32),
                                     out=np.array([x[3] for x in lens_rows], dtype=np.float32),
-                                    out_mass=np.array([x[4] for x in lens_rows], dtype=np.float32))
+                                    out_mass=np.array([x[4] for x in lens_rows], dtype=np.float32),
+                                    **({"lens_lp": np.array([x[5] for x in lens_rows], dtype=np.float32),
+                                        "out_lp": np.array([x[6] for x in lens_rows], dtype=np.float32)} if want_lp else {}))
             n = min(s + chunk, len(pairs))
             rate = n / (time.time() - t0)
             print(f"  {n}/{len(pairs)} pairs, {rate:.2f} pairs/s, ETA {(len(pairs) - n) / rate / 60:.1f} min", flush=True)
