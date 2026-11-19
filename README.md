@@ -4913,9 +4913,9 @@ One full guess prompt as Gemma read it (`guess_example.py`; added 2026-11-19, fr
   tasks, short, a clear preference for the tails task, and a guess pair effect near the median of the clear pairs (3.6 nats
   against 3.4).
 - **The guess:** tails 0.81 here. With the tasks swapped, so that the math task is heads, it guesses heads 0.99.
-- **Why Gemma:** a single prompt shows the guess's heads lean as well as its pair effect. Averaged over both orders, that lean
-  is +1.2 nats in Gemma, +5.7 in Llama (as large as its pair effect, so Llama guesses mostly "heads") and +0.0 in GLM. The
-  table's pair effects cancel it.
+- **Why Gemma:** a single prompt shows the guess's lean toward one outcome word as well as its pair effect. Averaged over both
+  orders, that lean is +1.2 nats toward heads in Gemma, +5.7 in Llama (as large as its pair effect, so Llama guesses mostly
+  "heads") and +0.0 in GLM. The table's pair effects cancel it. All eight models: "The guess's outcome lean" below.
 
 **Predictions:**
 1. The short preference question still tracks the Assistant, r >= 0.8: **yes** (0.91, 0.92, 0.85), though only with the prefills
@@ -4981,6 +4981,53 @@ One full guess prompt as Gemma read it (`guess_example.py`; added 2026-11-19, fr
   partial correlations, but comparisons between questions within a model use the same A and c.
 - The guess may be read by the model partly as "which would you pick"; nothing here separates that from a belief about the coin.
 - 1,000 pilot pairs; exploratory beyond the five predictions.
+
+### The guess's outcome lean, in all eight models (exploratory, 2026-11-19)
+
+Every pair is scored in both orders, and the pair effect cancels any lean toward one outcome word. Hal asked how large that lean
+is for the guess, here and in the replication's five larger models (finding 8's runs, same question and wording).
+- **Measures:**
+  - the lean: the mean of the two orders' log-odds (heads - tails), averaged over the 1,000 pilot pairs, with a 95% bootstrap CI
+    over pairs;
+  - for scale, the mean size of the pair effect;
+  - for single prompts of clear pairs (|A_i - A_j| > 2 in each model's sweep utilities), how often the top answer names the
+    preferred task's outcome, split by whether that outcome is heads or tails.
+- **Source:** the runs' rows on disk, with no new runs. `scripts/guess_lean.py` writes `outputs/coin_report/guess_lean.csv`,
+  which also holds the preference questions, the Task A/B control and the coin at " up" from the same forward passes.
+
+![guess lean](figures/coin_report_guess_lean.png)
+
+| model | guess lean, nats [95% CI] | mean pair effect | names the preferred task's outcome: when it's heads / tails | coin at " up": lean |
+|---|---|---|---|---|
+| Gemma 4 31B | +1.15 [+1.03, +1.25] | 4.79 | 99% / 66% | -1.16 |
+| Llama 3.3 70B | **+5.70** [+5.55, +5.84] | 5.14 | 98% / **54%** | +1.87 |
+| GLM-4.5-Air | +0.04 [-0.00, +0.08] | 0.96 | 88% / 79% | -0.89 |
+| Llama 3.1 405B | **-2.27** [-2.38, -2.17] | 3.14 | 62% / 99% | +0.28 |
+| Nemotron-4 340B | **-3.49** [-3.67, -3.31] | 7.19 | 62% / 99% | -2.52 |
+| DeepSeek V3 | -1.63 [-1.68, -1.57] | 2.16 | 57% / 97% | -1.07 |
+| Kimi K2 | -0.39 [-0.44, -0.35] | 1.93 | 85% / 96% | -1.55 |
+| DeepSeek V4 Flash | -0.36 [-0.43, -0.30] | 1.44 | 75% / 86% | +0.31 |
+
+1. **Every guess but GLM's leans toward one outcome word, and the direction depends on the model.** Gemma and Llama 3.3 lean
+   toward heads; all five larger models lean toward tails. So it isn't a heads bias in general.
+2. **In some models the lean is as large as the preference's effect.**
+   - The lean is 1.1 times the mean pair effect in Llama 3.3, 0.7 in DeepSeek V3 and Llama 405B, and 0.5 in Nemotron.
+   - It is 0.25 or less in Gemma, Kimi, V4 Flash and GLM.
+3. **Single prompts:**
+   - When the preferred task's outcome is the word the model leans toward, the guess names it in 96-99% of prompts (V4 Flash
+     86%).
+   - When it's the other word, that drops to 54% (Llama 3.3), 57-62% (DeepSeek V3, Llama 405B, Nemotron), 66% (Gemma) and 75-85%
+     (V4 Flash, Kimi).
+   - It stays above 50% in every model, so the preference moves single guesses in both positions.
+4. **The lean isn't the coin's own lean carried over.** The coin at " up" leans the same way in four models (Llama 3.3,
+   Nemotron, DeepSeek V3, Kimi) and the other way in three (Gemma, Llama 405B, V4 Flash). GLM's guess doesn't lean. The same
+   model's questions also lean differently: Llama 405B's short preference leans -0.72 and its guess -2.27; Kimi's lean +1.06 and
+   -0.39. So the lean looks like a prior over the answer word that depends on the question and prefill, not part of the
+   coinflip effect.
+- **What it changes:** nothing in the findings above, which use pair effects. It does change how raw probabilities read: "the
+  guess favors the outcome that gives the Assistant its preferred task" describes the pair effect. For a single prompt in
+  Llama 3.3, DeepSeek V3, Llama 405B or Nemotron, it holds mostly when that outcome is also the word the model favors.
+- **Caveats:** read at "heads" / "tails" after the opened bold; Gemma's mass on "He" / "T" isn't counted. Not pre-registered.
 
 ## Replication across larger models
 
@@ -5382,6 +5429,8 @@ above 0 and the share above 0.
   - Kimi's swap share is 0.3% with a CI just above 0 (r(d, coin) -0.08).
   - DeepSeek V3's κ is slightly negative (-0.021, CI below 0) though its share is 0.0%.
 - **Not reported:** the early/late layer split (dropped before the run; see "Finding 8: scope").
+- **Added 2026-11-19:** the guess's lean toward one outcome word in these five models (toward tails in all five, up to 0.7 times
+  the pair effect) is in "Shorter questions", "The guess's outcome lean".
 
 ## The coin as a tool call
 
