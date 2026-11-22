@@ -1,0 +1,27 @@
+# Tulu 3 70B by post-training stage (README, "Does DPO raise the coin's leakage, or the Assistant's preferences?").
+# One config per stage, each on its own 2x H100 SXM pod (141 GB of bf16 weights split over NVLink GPUs).
+# Tulu's template (no BOS; its tokenizer adds one, as its SFT did) written out with the BOS, the same for every
+# stage: checked identical to BOS + apply_chat_template of allenai/Llama-3.1-Tulu-3-70B-SFT.
+wandb_project: tournament
+group: tulu3
+tags: [tulu3-70b, dpo-leak]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep (and of OLMo 2 32B's stages).
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring (see tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+run_name: tulu3-70b-sft
+
+models:
+  - name: allenai/Llama-3.1-Tulu-3-70B-SFT
+    stage: sft
+    turn_format: {user: "<|begin_of_text|><|user|>\n", reply: "\n<|assistant|>\n"}
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}

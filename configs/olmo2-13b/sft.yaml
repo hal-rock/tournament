@@ -1,0 +1,26 @@
+# OLMo 2 13B by post-training stage (README, "Does DPO raise the coin's leakage, or the Assistant's preferences?").
+# One config per stage, each on its own 1x A100 SXM, as ../coinflip's OLMo 2 13B run. Every stage reads DPO's
+# template (all 13B templates include BOS), as in configs/olmo2/. Base weights are fp32 on disk, cast to bf16.
+wandb_project: tournament
+group: olmo2-13b
+tags: [olmo2-13b, dpo-leak]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+require_gpu: true
+system_prompt: none
+# The fixed 15,000 pairs of the model sweep (and of OLMo 2 32B's stages).
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+# Tolerance on the median |log-odds diff| between batched and unbatched scoring (see tournament.check_batching).
+batching_check: {n_prompts: 16, tolerance: 1.0}
+
+run_name: olmo2-13b-sft
+
+models:
+  - name: allenai/OLMo-2-1124-13B-SFT
+    stage: sft
+    chat_template_from: allenai/OLMo-2-1124-13B-DPO
+    conditions: [assistant, coinflip]
+    phrasing_probe: {n_pairs: 20, n_samples: 3, max_new_tokens: 12}

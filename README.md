@@ -69,6 +69,7 @@ uv run python tournament.py configs/openers/<model>.yaml # coinflip with each la
 uv run python openers.py                                 # openers vs bleedthrough (W&B group "openers")
 uv run python cross_model.py                             # Assistant utilities: model x model r, by task type
 uv run python olmo2.py                                   # OLMo 2 32B stages next to OLMo 3.1 32B (W&B group "olmo2")
+uv run python dpo_leak.py                                # DPO: the Assistant's scale vs the coin's leakage rate (groups "tulu3", "olmo2-13b")
 uv run python figures_stages.py                          # both ladders' coinflip by stage vs the final Assistant, slide style
 uv run python user_choice.py                             # the user's choice vs the Assistant's, base vs final (W&B group "user_choice")
 uv run python user_does.py                               # coin / user's choice when the user does the task (W&B group "user_does")
@@ -7152,6 +7153,93 @@ At the output (the top row), r with the Assistant's answer, and the mean P(" hea
   the answer reads little of this lean.
 - The logit lens isn't what the network reads at intermediate depths; Gemma's lens is uninformative below ~block 45 (mean
   probabilities under 10^-6, drawn at the floor). One prompt wording; the lens pair is " heads"/" tails" with a space.
+
+## Does DPO raise the coin's leakage, or the Assistant's preferences? (OLMo 2, Tulu 3)
+
+In the ladders whose SFT trained only on the Assistant's tokens, SFT already starts the coinflip effect and DPO more than doubles
+it: in `../coinflip`, OLMo 2 32B goes 0.97 → 2.25 and Tulu 3 70B 1.08 → 2.45, though DPO moves the weights far less than SFT.
+Over the 300 tasks the *correlation* barely moves at DPO (OLMo 2 32B: r 0.89 → 0.93), but the coin's *size* does. Hal's
+question (2026-11-22): is DPO especially good at making the Assistant's preferences leak into the coin, or is it especially good
+at strengthening those preferences, which then leak at about the rate they did after SFT?
+
+### Design
+
+- **Ladders.** OLMo 2 32B is on disk (group `olmo2`, previous sections). New, each stage on its own pod, same template across a
+  ladder, no system prompt, the sweep's 300 tasks and 15,000 pairs in both orders:
+  - **Tulu 3 70B** (group `tulu3`, `configs/tulu3/`): `unsloth/Llama-3.1-70B` (base), `allenai/Llama-3.1-Tulu-3-70B-SFT`,
+    `-DPO` and `allenai/Llama-3.1-Tulu-3-70B` (final, after RLVR). Tulu's template has no BOS and its tokenizer adds one, so
+    every stage reads `<|begin_of_text|><|user|>\n...` (`turn_format`; checked identical to the template with BOS prepended),
+    as in `../coinflip`'s Tulu runs. 2x H100 SXM per stage (no B200s were in stock), all four stages on the same GPU type; `tournament.py` now checks peer copies and a pinned sanity prompt whenever a model is split over GPUs.
+  - **OLMo 2 13B** (group `olmo2-13b`, `configs/olmo2-13b/`): `allenai/OLMo-2-1124-13B`, `-SFT`, `-DPO`, `-Instruct`
+    (after three RLVR rounds), every stage on DPO's template, one A100 SXM per stage, as `../coinflip`'s 13B run. Its
+    `../coinflip` effect is much smaller (0.27 → 0.54 at DPO).
+  - Context, already seen: OLMo 3.1 32B (role-blind SFT masks, so its SFT is not "normal") and Apertus 1.5 70B (RL before DPO).
+- **Measures** (`dpo_leak.py`). A and C are a stage's Assistant and coinflip utilities (nats), over the 300 tasks.
+  - **Assistant scale** σ_A = SD(A), how strongly the Assistant's preferences separate the tasks.
+  - **Leaked size** b = cov(A, C) / σ_A: the part of the coin that lines up with the Assistant, in coin nats per Assistant
+    SD (the `b` of the OLMo 2 section).
+  - **Leakage rate** λ = cov(A, C) / var(A) = b / σ_A: coin nats per nat of Assistant utility. This is "the proportion of
+    leakage": it stays put if DPO only strengthens preferences that then leak at the SFT rate.
+  - **Decomposition of a step** s → t: log(b_t / b_s) = log(σ_A,t / σ_A,s) + log(λ_t / λ_s). The **leakage share**
+    S = log(λ_t / λ_s) / log(b_t / b_s) is the part of the leaked coin's growth that comes from a higher rate; 1 − S comes
+    from stronger Assistant preferences. Primary step: SFT → DPO.
+  - **Checks on the same split:** λ over non-harmful tasks (`lam_benign`) and within origin (`lam_within`); the gap ratio
+    gap_C / gap_A (non-harmful minus harmful, the contrast `../coinflip`'s pairs measure).
+  - **Secondary:** each condition's gain (the slope of stage t's utilities on stage s's, with r between them, which says
+    whether DPO mostly turns up the SFT pattern); the **marginal leakage** of a step, the slope of ΔC on ΔA over tasks
+    (does what the step adds to the Assistant reach the coin at the SFT rate?); and the gain of the coin's part *not* on the
+    Assistant (residual SD), which separates a general sharpening of the coin from leakage that is specific to the
+    Assistant's preferences.
+  - CIs are 95% task bootstraps within origin (2,000), the same resamples for every ladder and stage, so steps are paired.
+- **Weight distance isn't needed for the question.** Both gains come from the same step, so dividing each by how far the step
+  moves the weights cancels in S and in λ_t / λ_s. If DPO is disproportionately effective per unit of weight change, the
+  question is only whether it's more so for the coin than for the Assistant.
+
+### Pre-registered before running (2026-11-22)
+
+**Seen before writing this:** OLMo 2 32B's stage stats (computed from `outputs/olmo2/`). SFT → DPO: σ_A 1.92 → 3.36 (x1.75),
+b 0.25 → 0.59 (x2.39), λ 0.129 → 0.176 (x1.37), so S ≈ 0.36; λ over non-harmful tasks x1.38, within origin x1.28. DPO's
+coin and Assistant are each mostly the SFT pattern turned up (r 0.98 between stages, gains x2.25 and x1.72). The marginal
+leakage of the DPO step is 0.23 nats per nat, against 0.14 for the SFT step. Also seen, as context: OLMo 3.1 32B's
+λ 0.017 → 0.043 at DPO (x2.5, σ_A x2.4), Apertus's 0.020 → 0.026 at DPO (x1.3, σ_A x1.8). Tulu 3 70B and OLMo 2 13B in
+the tournament have no data yet; they are the test.
+
+**Call per ladder (SFT → DPO),** read only when DPO grows the leaked coin (b's gain has a CI above 1.2):
+- **Explained away:** S < 0.25 and λ's gain has a CI that includes 1. DPO's larger coin is its stronger preferences.
+- **Mostly preferences, rate up a little:** S < 0.25 but λ's gain has a CI that excludes 1 (a case the bins above first left
+  out; added before any data).
+- **Both:** 0.25 ≤ S ≤ 0.75. Said as "mostly preferences" when S's CI is below 0.5, "mostly leakage" when above, otherwise
+  not split.
+- **Leakage step:** S > 0.75. DPO raises the rate itself, beyond what stronger preferences explain.
+- If b's gain has a CI at or below 1.2: **DPO doesn't scale the broad coin here**, which contradicts the premise for that ladder.
+
+**Gate:** split-half reliability ≥ 0.9 in all eight cells of each new ladder (the run's own batching check must also pass).
+Mean coin mass under 0.5 is flagged, not gated: utilities are log-odds within " heads"/" tails".
+
+**Predictions:**
+1. **Premise:** b grows at least 1.5x at DPO in Tulu 3 70B, with a CI above 1.2 (about 85%), and in OLMo 2 13B (about 65%).
+2. **Stronger preferences:** σ_A grows 1.3-2.5x at DPO in both ladders (about 70%).
+3. **The call, Tulu 3 70B:** both (about 50%), explained away (30%), leakage step (20%). **OLMo 2 13B:** both (40%),
+   explained away (30%), leakage step (30%).
+4. **The rate rises at all:** λ's gain is above 1 (point estimate) in both (about 75%), as in all three ladders already seen.
+5. **The last stage:** Tulu's final (RLVR) changes b by less than 10% from DPO (about 75%; `../coinflip` +0.03). OLMo 2 13B's
+   three RLVR rounds raise b by 10-30% (about 50%; `../coinflip` +0.12 of 0.54).
+6. **Marginal leakage:** the DPO step's marginal leakage is above λ at SFT in both (about 70%).
+7. **Robust to task type:** `lam_benign` and `lam_within` move in the same direction as λ at DPO, each gain within 0.2 of λ's,
+   in both (about 70%).
+
+**What each outcome would mean:**
+- **Explained away:** DPO isn't special at leakage. Its outsized effect on the coin is an outsized effect on how strongly the
+  Assistant prefers, and SFT sets the rate.
+- **Both:** DPO does both; S says how much of the coin's growth each accounts for.
+- **Leakage step:** DPO, beyond strengthening preferences, makes them reach the Human turn more. That would fit OLMo 3, where
+  DPO installs the effect, and would make DPO data the place to look for what drives leakage.
+
+**Caveats, known in advance:**
+- σ_A is a log-odds readout. DPO lowers entropy in general, so a "stronger preference" here can be the same ranking read more
+  confidently; this design can't separate the two, and the residual gain is the only check on general sharpening of the coin.
+- The ladders differ in data, recipe, frame and size at once.
+- One prompt per condition, at "Okay,"; CIs cover task sampling only.
 
 ## Tasks
 

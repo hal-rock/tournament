@@ -281,7 +281,15 @@ def main():
         model = load_model(m["name"], device, dtype, revision, m.get("max_memory"), m.get("loader"))
         if "use_cache" in m:  # no KV cache: scoring doesn't need one, and it costs memory on a tight fit
             model.config.use_cache = m["use_cache"]
-        if m.get("loader"):  # a loader of our own: check it reads, with an answer a base model can't miss
+        # A loader of our own, or a model split over GPUs (where a host with corrupt peer copies outputs garbage, see
+        # ~/mats/CLAUDE.md): check it reads, with an answer a base model can't miss.
+        split = device == "cuda" and torch.cuda.device_count() > 1
+        if split:
+            from matskit.models import peer_copies_ok
+            if not peer_copies_ok():
+                raise SystemExit("GPU-to-GPU copies corrupt data on this host (matskit.models.peer_copies_ok)")
+            print("  peer copies ok", flush=True)
+        if m.get("loader") or split:
             sanity = tokenizer("The capital of France is Paris, and the capital of Germany is", return_tensors="pt")
             with torch.no_grad():
                 top = model(sanity.input_ids.to(model.device)).logits[0, -1].argmax().item()
