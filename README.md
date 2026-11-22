@@ -7160,7 +7160,10 @@ In the ladders whose SFT trained only on the Assistant's tokens, SFT already sta
 it: in `../coinflip`, OLMo 2 32B goes 0.97 → 2.25 and Tulu 3 70B 1.08 → 2.45, though DPO moves the weights far less than SFT.
 Over the 300 tasks the *correlation* barely moves at DPO (OLMo 2 32B: r 0.89 → 0.93), but the coin's *size* does. Hal's
 question (2026-11-22): is DPO especially good at making the Assistant's preferences leak into the coin, or is it especially good
-at strengthening those preferences, which then leak at about the rate they did after SFT?
+at strengthening those preferences, which then leak at about the rate they did after SFT? **Some of each, in proportions that
+depend on the ladder.** DPO raises the leakage rate in every ladder. In OLMo 2 (32B and 13B) about two thirds of the coin's growth
+is stronger preferences; in Tulu 3 70B about two thirds is the higher rate, and that comes from the harm contrast. Among MATH /
+Alpaca / WildChat tasks it's mostly stronger preferences in all three. See Results.
 
 ### Design
 
@@ -7240,6 +7243,177 @@ Mean coin mass under 0.5 is flagged, not gated: utilities are log-odds within " 
   confidently; this design can't separate the two, and the residual gain is the only check on general sharpening of the coin.
 - The ladders differ in data, recipe, frame and size at once.
 - One prompt per condition, at "Okay,"; CIs cover task sampling only.
+
+### Results (2026-11-22)
+
+Runs: Tulu 3 70B base `9guy1irm`, SFT `2wlmz8bf`, DPO `0xq03fv4`, final `ac0a3vlj` (group `tulu3`); OLMo 2 13B base `ok113j64`, SFT
+`f5mkn8z9`, DPO `zu4np7ty`, final `us61y4x4` (group `olmo2-13b`). Eight pods, $31.98 of GPU. One 13B pod never booted and was
+replaced on the same GPU type. Every Tulu stage passed the peer-copy check and answered " Berlin" to the sanity prompt.
+`uv run python dpo_leak.py` writes `outputs/dpo_leak/{stages,steps}.csv` and `report.txt`.
+
+**The gate passes.** Split-half reliability is 0.978-0.999 in all sixteen new cells. Coin mass is 0.82-0.94 in Tulu and
+0.85-0.87 in OLMo 2 13B, so none is flagged.
+
+**Bottom line: it isn't explained away in any ladder, but how much DPO raises the rate depends on the ladder.**
+- **DPO grows the leaked coin by the same ~2.2-2.4x in all three correctly masked ladders**, as `../coinflip`'s DPO/SFT ratios
+  have it (2.0-2.3).
+- **The leakage rate rises in every ladder.**
+  - In OLMo 2, at both sizes, about a third of that growth is the higher rate and two thirds is stronger Assistant preferences
+    (S 0.31-0.36).
+  - In Tulu 3 70B it's the other way round (S 0.63): its Assistant's scale grows only 1.37x.
+- **Tulu's difference is the harm contrast.** Its SFT Assistant already rejects harmful tasks nearly as strongly as its DPO one,
+  while DPO more than doubles the coin's harm contrast.
+- **On the MATH / Alpaca / WildChat tasks (Hal's request), the coin's growth is mostly stronger preferences in all three
+  ladders** (S 0.14-0.28 pooled).
+
+![Each stage's Assistant scale and leaked coin](figures/dpo_leak_paths.png)
+
+The dashed lines are constant leakage rates λ. Each ladder's SFT → DPO step crosses them, steeply in Tulu (orange) and in OLMo 3,
+more shallowly in OLMo 2 and Apertus. The 13B's SFT moves almost flat: its Assistant's scale grows tenfold while its leaked coin
+doesn't grow.
+
+| ladder | stage | σ_A | b | λ [95% CI] |
+|---|---|---|---|---|
+| OLMo 2 32B | SFT | 1.92 | 0.248 | 0.129 [0.122, 0.136] |
+| | DPO | 3.36 | 0.593 | 0.176 [0.168, 0.185] |
+| | final | 3.34 | 0.603 | 0.181 [0.171, 0.190] |
+| Tulu 3 70B | SFT | 2.64 | 0.161 | 0.061 [0.056, 0.065] |
+| | DPO | 3.62 | 0.376 | 0.104 [0.096, 0.111] |
+| | final | 3.62 | 0.379 | 0.105 [0.097, 0.112] |
+| OLMo 2 13B | SFT | 2.04 | 0.068 | 0.033 [0.029, 0.038] |
+| | DPO | 3.48 | 0.147 | 0.042 [0.038, 0.047] |
+| | final | 4.03 | 0.191 | 0.047 [0.043, 0.052] |
+
+(σ_A: SD of the Assistant's utilities, nats. b: the coin along the Assistant, coin nats per Assistant SD. λ = b / σ_A, coin nats per
+Assistant nat. Bases: σ_A 0.20-0.38, b 0.008-0.076.)
+
+**The DPO step**, gains (after / before) with 95% CIs:
+
+| ladder | Assistant scale σ_A | leaked coin b | leakage rate λ | leakage share S | the call |
+|---|---|---|---|---|---|
+| Tulu 3 70B | x1.37 [1.34, 1.39] | x2.34 [2.27, 2.41] | **x1.71** [1.66, 1.76] | **0.63** [0.61, 0.65] | both, mostly leakage |
+| OLMo 2 13B | x1.70 [1.68, 1.72] | x2.17 [2.07, 2.27] | x1.27 [1.21, 1.34] | 0.31 [0.26, 0.36] | both, mostly preferences |
+| OLMo 2 32B (seen) | x1.75 [1.72, 1.77] | x2.39 [2.34, 2.45] | x1.37 [1.34, 1.40] | 0.36 [0.34, 0.38] | both, mostly preferences |
+| Apertus 70B, RL → DPO (seen) | x1.77 [1.72, 1.82] | x2.29 [2.08, 2.55] | x1.29 [1.16, 1.45] | 0.31 [0.20, 0.40] | both, mostly preferences |
+| OLMo 3.1 32B (seen) | x2.40 [2.35, 2.44] | x5.98 [4.68, 8.90] | x2.49 [1.94, 3.75] | 0.51 [0.43, 0.60] | both (not split) |
+
+The checks agree in direction:
+
+| ladder | λ gain, non-harmful | λ gain, within origin | gap ratio gain |
+|---|---|---|---|
+| Tulu 3 70B | x1.58 | x1.60 | x1.79 |
+| OLMo 2 13B | x1.11 | x1.50 | x1.31 |
+| OLMo 2 32B | x1.38 | x1.28 | x1.35 |
+
+Each DPO stage is mostly its SFT stage turned up (slope of DPO's utilities on SFT's, with r):
+
+| ladder | Assistant | coin |
+|---|---|---|
+| OLMo 2 32B | x1.72 (r 0.98) | x2.25 (r 0.98) |
+| OLMo 2 13B | x1.69 (r 0.996) | x1.80 (r 0.96) |
+| Tulu 3 70B | x1.33 (r 0.97) | x2.24 (r 0.98) |
+
+![Gains in Assistant scale, leakage rate and leaked coin, by step](figures/dpo_leak_gains.png)
+
+![Assistant vs coinflip utilities at SFT and DPO](figures/dpo_leak_scatter.png)
+
+**Predictions, scored:**
+1. **Premise: confirmed in both.** b grows x2.34 (CI low 2.27) in Tulu and x2.17 (2.07) in OLMo 2 13B.
+2. **Stronger preferences: confirmed.** σ_A grows x1.37 and x1.70, both inside 1.3-2.5. Tulu's is near the bottom of the range.
+3. **The call: "both" in both, as the most likely outcome.** The split goes opposite ways, though: mostly leakage in Tulu (I'd
+   given "leakage step", S > 0.75, 20%), mostly preferences in the 13B.
+4. **The rate rises: confirmed.** x1.71 and x1.27.
+5. **The last stage: right for Tulu, wrong for the 13B by a hair.** Tulu's RLVR leaves b at x1.007. The 13B's three RLVR rounds
+   raise it x1.302, just past my 10-30%; that step's S is 0.44.
+6. **Marginal leakage: confirmed.** DPO's added Assistant preferences reach the coin at 0.152 nats per nat in Tulu (λ at SFT 0.061)
+   and 0.055 in the 13B (0.033). Any rise in λ from turning up the SFT pattern implies this, so it isn't independent evidence.
+7. **Robust to task type: right for Tulu, wrong for the 13B.** In the 13B, λ within origin rises x1.50 against x1.27 overall, more
+   than my 0.2 tolerance. The direction agrees everywhere.
+
+#### The more arbitrary preferences: MATH, Alpaca and WildChat (exploratory, Hal's request)
+
+BailBench and STRESS-TEST tasks often sit apart from the rest in utility. So the same measures are repeated over the 225
+MATH / Alpaca / WildChat tasks: pooled, within origin, and one origin at a time. The complement, BailBench + STRESS-TEST, is added
+for contrast. These were specified before any new ladder was analysed.
+
+Leakage share S at DPO [95% CI], with λ's gain in brackets:
+
+| ladder | all 300 | MATH + Alpaca + WildChat | same, within origin | MATH | Alpaca | WildChat | BailBench + STRESS-TEST |
+|---|---|---|---|---|---|---|---|
+| OLMo 2 32B | 0.36 (x1.37) | 0.20 [0.15, 0.25] (x1.19) | 0.15 [0.04, 0.25] (x1.14) | 0.06 [-0.12, 0.22] | 0.09 [-0.07, 0.25] | 0.20 [0.04, 0.33] | 0.26 [0.21, 0.32] (x1.27) |
+| OLMo 2 13B | 0.31 (x1.27) | 0.14 [0.04, 0.22] (x1.11) | 0.28 [0.13, 0.44] (x1.29) | 0.39 [0.08, 0.75] | 0.34 [-0.14, 1.57] | 0.27 [0.07, 0.45] | 0.52 [0.44, 0.63] (x1.74) |
+| Tulu 3 70B | 0.63 (x1.71) | 0.28 [0.13, 0.39] (x1.25) | 0.45 [0.27, 0.58] (x1.53) | 0.54 [0.33, 0.78] | 0.04 [-0.72, 0.28] | 0.53 [0.27, 0.68] | 0.55 [0.50, 0.59] (x1.63) |
+
+- **Same direction everywhere.** In every ladder the rate rises among the arbitrary tasks too, and less than over all 300.
+- **Pooled, the coin's growth there is 72-86% stronger preferences.** S is 0.14-0.28, with the Assistant's scale up x1.80-1.99.
+- **The rate rises most on the harm side.** It rises x1.27-1.74 on BailBench + STRESS-TEST. In the 32B the pool's rise (x1.37) is
+  larger than either half's, so part of it is the contrast between the two groups.
+- **Single origins are noisy:** 75 tasks each, and MATH's and Alpaca's preferences are the weakest (σ_A 0.3-0.5 at SFT). Where λ
+  before DPO is near 0, its gain is unbounded; the figure draws those CIs dotted. In the 32B, MATH and Alpaca have a rate gain
+  whose CI includes 1.
+- **In the Assistant's choices the subset isn't saturated:** σ_A over these tasks is 0.8-1.0 nats at SFT and 1.5-1.8 at DPO.
+
+![Leakage rate gain and S at DPO, by task set](figures/dpo_leak_subsets.png)
+
+**Tulu's harm contrast.** At DPO, the Assistant's own benign − harmful gap grows only x1.31 in Tulu (5.86 → 7.69 nats), against
+x1.65-1.69 in OLMo 2. The coin's gap grows x2.35, as in OLMo 2 (x2.17-2.29). Tulu's SFT Assistant already rejects harmful tasks
+almost as strongly as its DPO one, and DPO makes the coin catch up. On the arbitrary tasks, Tulu's step looks like OLMo 2's:
+Assistant x1.80, λ x1.25.
+
+#### What changes in the coin: overall size vs following the Assistant (exploratory, after the data)
+
+λ's gain splits exactly into two factors:
+- **rel_coin:** the coin's part off its line on the Assistant (residual SD) growing relative to the Assistant's scale, i.e. the
+  coin as a whole getting more extreme;
+- **align:** b growing relative to that residual, i.e. the coin following the Assistant more closely.
+
+| ladder (DPO step) | λ gain | rel_coin | align | coin residual's own gain |
+|---|---|---|---|---|
+| OLMo 2 32B | x1.37 | x1.03 [0.98, 1.09] | **x1.32** [1.25, 1.40] | x1.81 |
+| OLMo 2 13B | x1.27 | x1.01 [0.97, 1.06] | **x1.26** [1.19, 1.34] | x1.72 |
+| Apertus 70B (RL → DPO) | x1.29 | x1.05 [0.99, 1.12] | **x1.23** [1.11, 1.38] | x1.86 |
+| Tulu 3 70B | x1.71 | **x1.43** [1.34, 1.52] | x1.20 [1.13, 1.28] | x1.96 |
+| OLMo 3.1 32B | x2.49 | x0.75 [0.70, 0.80] | **x3.32** [2.60, 4.88] | x1.80 |
+
+- **The coin's off-line part grows ~1.7-2.0x at DPO in all five ladders.**
+- **What varies is how much the Assistant grows alongside it.**
+  - In OLMo 2 and Apertus the Assistant grows by the same factor (rel_coin ≈ 1). There, all of the rate's rise is the coin
+    following the Assistant more closely, x1.23-1.32.
+  - In Tulu the Assistant grows less, so about two thirds of the rate's rise (log 1.43 / log 1.71) is the coin getting more
+    extreme overall.
+  - OLMo 3's DPO is the outlier: it mostly installs the alignment (x3.3), as expected from its null SFT.
+- **The residual isn't purely non-preference variation.** It includes a curved dependence on A: in Tulu's DPO scatter, the most
+  harmful tasks fall below the line. On the 225 arbitrary tasks, Tulu's rel_coin is about 1 (residual x1.79, Assistant x1.80).
+
+### Findings
+
+1. **DPO's larger coin isn't explained away by stronger preferences in any ladder, but in OLMo 2 it mostly is.**
+   - Over the 300 tasks DPO raises the leakage rate x1.27-1.37 in OLMo 2 at both sizes and x1.71 in Tulu 3 70B.
+   - The Assistant's preferences grow x1.70-1.75 in OLMo 2 and x1.37 in Tulu.
+   - So DPO's x2.2-2.4 on the leaked coin is about two thirds stronger preferences in OLMo 2 and about two thirds a higher rate in
+     Tulu.
+2. **For the more arbitrary preferences it is mostly stronger preferences everywhere.** Among MATH / Alpaca / WildChat, the rate
+   rises x1.11-1.25 (pooled; S 0.14-0.28). Most of what's left of DPO's specific effect on the rate sits on the harm side and in the
+   harm contrast, which is what `../coinflip`'s pairs measure. Measured on those pairs, DPO looks more special for the coin than it
+   does on ordinary tasks.
+3. **Tulu's high share comes from harm.** Its SFT already gives the Assistant nearly its final harm aversion (the Assistant's
+   gap grows x1.31 at DPO), while the coin's harm contrast still more than doubles.
+4. **The rate itself is set mostly at SFT, and it differs a lot between ladders.**
+   - At similar Assistant scales after SFT (σ_A 1.9-2.6), λ is 0.129 in OLMo 2 32B, 0.061 in Tulu 3 70B and 0.033 in OLMo 2 13B.
+   - So `../coinflip`'s small 13B effect is a low rate, not weaker preferences: the 13B's SFT Assistant is as strong as the 32B's.
+   - DPO then multiplies each ladder's rate by 1.3-1.7.
+5. **The final RL stages barely matter.** Tulu's RLVR leaves everything within 1%. OLMo 2 13B's three RLVR rounds add x1.30 to the
+   leaked coin (S 0.44).
+
+### Caveats (from the results)
+
+- σ_A is a log-odds readout. For harmful tasks the Assistant's choices sit 5-10 nats into the tail, where "stronger" can mean
+  further into the tail. That makes all-task and harm-contrast gains on the Assistant side hard to read as preference strength;
+  the MATH / Alpaca / WildChat subset avoids most of it.
+- The arbitrary-subset and rate-split analyses are exploratory. Per-origin estimates rest on 75 tasks each.
+- OLMo 2 32B's numbers were seen before the pre-registration. The confirmatory evidence is Tulu 3 70B and OLMo 2 13B, one ladder
+  each.
+- GPU types differ between ladders (A100 for OLMo 2, 2x H100 for Tulu) but not within one. Gains are within-ladder ratios.
 
 ## Tasks
 

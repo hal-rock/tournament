@@ -70,12 +70,39 @@ STAGE_LABELS = {"base": "base", "sft": "SFT", "dpo": "DPO", "instruct": "final",
 COLORS = {k: plotstyle.SERIES[j] for j, k in enumerate(LADDERS)}
 MARKERS = {"olmo2_32b": "o", "tulu3_70b": "D", "olmo2_13b": "^", "olmo3_32b": "s", "apertus_70b": "v"}
 
-STAGE_STATS = ("sd_a", "sd_c", "b", "lam", "b_benign", "lam_benign", "b_within", "lam_within", "gap_a", "gap_c",
-               "gap_ratio", "resid_sd", "r")
+# Task sets for the scale / leaked size / rate triple: (task mask from origins and benign, demean within origin?). The
+# "arb" sets (Hal's request, 2026-11-22, exploratory, added before any new ladder was analysed) are the 225 MATH, Alpaca
+# and WildChat tasks, where preferences are "more arbitrary" than BailBench's and STRESS-TEST's, pooled, within origin, and
+# one origin at a time.
+ARB = ("MATH", "ALPACA", "WILDCHAT")
+SUBSETS = {
+    "": (lambda o, bn: np.ones(len(o), bool), False),
+    "benign": (lambda o, bn: bn, False),
+    "within": (lambda o, bn: np.ones(len(o), bool), True),
+    "arb": (lambda o, bn: np.isin(o, ARB), False),
+    "arbw": (lambda o, bn: np.isin(o, ARB), True),
+    "math": (lambda o, bn: o == "MATH", False),
+    "alpaca": (lambda o, bn: o == "ALPACA", False),
+    "wildchat": (lambda o, bn: o == "WILDCHAT", False),
+    "rest": (lambda o, bn: ~np.isin(o, ARB), False),  # the complement, BailBench + STRESS-TEST (added with "arb")
+}
+SUBSET_LABELS = {"": "all 300 tasks", "benign": "non-harmful", "within": "within origin",
+                 "arb": "MATH + Alpaca + WildChat", "arbw": "MATH + Alpaca + WildChat, within origin",
+                 "math": "MATH", "alpaca": "Alpaca", "wildchat": "WildChat",
+                 "rest": "BailBench + STRESS-TEST"}
+
+
+def sfx(sub):
+    return f"_{sub}" if sub else ""
+
+
+STAGE_STATS = tuple(f"{q}{sfx(sub)}" for sub in SUBSETS for q in ("sd_a", "b", "lam")) + (
+    "sd_c", "gap_a", "gap_c", "gap_ratio", "resid_sd", "r", "resid_sd_arb", "r_arb")
 SK = {s: j for j, s in enumerate(STAGE_STATS)}
-GAINS = ("sd_a", "sd_c", "b", "lam", "b_benign", "lam_benign", "b_within", "lam_within", "gap_ratio", "resid_sd")
-STEP_STATS = tuple(f"g_{g}" for g in GAINS) + ("share", "share_benign", "share_within", "k_a", "k_c", "r_a", "r_c",
-                                               "marginal", "r_marginal")
+GAINS = tuple(f"{q}{sfx(sub)}" for sub in SUBSETS for q in ("sd_a", "b", "lam")) + (
+    "sd_c", "gap_ratio", "resid_sd", "resid_sd_arb")
+STEP_STATS = tuple(f"g_{g}" for g in GAINS) + tuple(f"share{sfx(sub)}" for sub in SUBSETS) + (
+    "k_a", "k_c", "r_a", "r_c", "marginal", "r_marginal", "marginal_arb", "rel_coin", "align", "share_align")
 TK = {s: j for j, s in enumerate(STEP_STATS)}
 
 MIN_RELIABILITY = 0.9
@@ -88,33 +115,48 @@ def slope(x, y):
     return float((x * y).mean() / (x * x).mean())
 
 
-def stage_vec(a, c, benign, origins):
-    """STAGE_STATS of one stage over arrays of the same (possibly resampled) tasks."""
+def triple(a, c):
+    """(sd_a, b, lam, residual SD, r) of C on A over these tasks."""
     a0, c0 = a - a.mean(), c - c.mean()
     cov, var = (a0 * c0).mean(), (a0 * a0).mean()
     sd_a = math.sqrt(var)
-    ab, cb = a[benign], c[benign]
-    ab0, cb0 = ab - ab.mean(), cb - cb.mean()
-    aw, cw = within_groups(a, origins), within_groups(c, origins)
-    gap_a, gap_c = ab.mean() - a[~benign].mean(), cb.mean() - c[~benign].mean()
-    return np.array([
-        sd_a, c.std(), cov / sd_a, cov / var,
-        (ab0 * cb0).mean() / ab0.std(), (ab0 * cb0).mean() / (ab0 * ab0).mean(),
-        (aw * cw).mean() / aw.std(), (aw * cw).mean() / (aw * aw).mean(),
-        gap_a, gap_c, gap_c / gap_a, (c0 - cov / var * a0).std(), cov / (sd_a * c.std()),
-    ])
+    return sd_a, cov / sd_a, cov / var, (c0 - cov / var * a0).std(), cov / (sd_a * c0.std())
 
 
-def step_vec(st_s, st_t, a_s, c_s, a_t, c_t):
+def subset_arrays(a, c, sub, benign, origins):
+    mask_fn, within = SUBSETS[sub]
+    m = mask_fn(origins, benign)
+    a, c = a[m], c[m]
+    if within:
+        a, c = within_groups(a, origins[m]), within_groups(c, origins[m])
+    return a, c
+
+
+def stage_vec(a, c, benign, origins):
+    """STAGE_STATS of one stage over arrays of the same (possibly resampled) tasks."""
+    vals = []
+    for sub in SUBSETS:
+        vals += triple(*subset_arrays(a, c, sub, benign, origins))[:3]
+    _, _, _, resid_sd, r = triple(a, c)
+    _, _, _, resid_arb, r_arb = triple(*subset_arrays(a, c, "arb", benign, origins))
+    gap_a, gap_c = a[benign].mean() - a[~benign].mean(), c[benign].mean() - c[~benign].mean()
+    return np.array(vals + [c.std(), gap_a, gap_c, gap_c / gap_a, resid_sd, r, resid_arb, r_arb])
+
+
+def step_vec(st_s, st_t, a_s, c_s, a_t, c_t, benign, origins):
     """STEP_STATS of the step s -> t from both stages' STAGE_STATS and utilities (same tasks)."""
     with np.errstate(divide="ignore", invalid="ignore"):
         g = {name: st_t[SK[name]] / st_s[SK[name]] for name in GAINS}
         share = lambda lam, b: math.log(lam) / math.log(b) if lam > 0 and b > 0 and b != 1 else math.nan
         da, dc = a_t - a_s, c_t - c_s
-        return np.array([g[n] for n in GAINS] + [
-            share(g["lam"], g["b"]), share(g["lam_benign"], g["b_benign"]), share(g["lam_within"], g["b_within"]),
+        arb = np.isin(origins, ARB)
+        return np.array([g[n] for n in GAINS] + [share(g[f"lam{sfx(sub)}"], g[f"b{sfx(sub)}"]) for sub in SUBSETS] + [
             slope(a_s, a_t), slope(c_s, c_t), np.corrcoef(a_s, a_t)[0, 1], np.corrcoef(c_s, c_t)[0, 1],
-            slope(da, dc), np.corrcoef(da, dc)[0, 1],
+            slope(da, dc), np.corrcoef(da, dc)[0, 1], slope(da[arb], dc[arb]),
+            # Exploratory (after the data): lam's gain = rel_coin * align exactly. rel_coin is the coin's part off the
+            # Assistant line growing relative to the Assistant (the whole coin getting more extreme); align is b over
+            # that residual SD growing (the coin following the Assistant more closely); share_align its part of lam's gain.
+            g["resid_sd"] / g["sd_a"], g["b"] / g["resid_sd"], share(g["b"] / g["resid_sd"], g["lam"]),
         ])
 
 
@@ -144,7 +186,7 @@ def ladder_cells(U, stages, benign, origins, resamples):
     step_cells = {}
     for s, t in zip(stages, stages[1:]):
         args = lambda idx: (U[f"{s}/assistant"][idx], U[f"{s}/coinflip"][idx], U[f"{t}/assistant"][idx],
-                            U[f"{t}/coinflip"][idx])
+                            U[f"{t}/coinflip"][idx], benign[idx], origins[idx])
         everything = np.arange(len(benign))
         est = step_vec(stage_cells[s][0], stage_cells[t][0], *args(everything))
         boot = np.array([step_vec(stage_cells[s][1][j], stage_cells[t][1][j], *args(i)) for j, i in enumerate(resamples)])
@@ -264,12 +306,11 @@ def predictions(steps, stages_cells):
 def fig_paths(stage_cells, keys):
     """sd_a against b, log-log, each ladder's path through its stages; dashed lines of constant lam."""
     fig, ax = plt.subplots(figsize=(7.2, 5.6))
-    xs = np.geomspace(0.2, 12, 50)
+    xs = np.geomspace(0.15, 12, 50)
     for lam in (0.01, 0.02, 0.05, 0.1, 0.2, 0.5):
         ax.plot(xs, lam * xs, color="#c9c7c1", lw=0.8, ls=(0, (4, 3)), zorder=1)
-        x_end = min(12, 1.4 / lam)
-        ax.text(x_end, lam * x_end, f" λ = {lam:g}", color="#8a8880", fontsize=8, va="bottom", ha="left"
-                if x_end < 12 else "right", rotation=0)
+        x_end, y_end = (11.5, lam * 11.5) if lam * 11.5 < 1.5 else (1.3 / lam, 1.3)
+        ax.text(x_end, y_end, f"λ = {lam:g} ", color="#8a8880", fontsize=8, va="bottom", ha="right")
     for k in keys:
         st = LADDERS[k]["stages"]
         est = np.array([stage_cells[k][s][0] for s in st])
@@ -286,7 +327,7 @@ def fig_paths(stage_cells, keys):
                             textcoords="offset points", fontsize=7.5, color="#55534d", ha="right" if above else "left")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlim(0.25, 12)
+    ax.set_xlim(0.15, 12)
     ax.set_ylim(0.003, 2)
     ax.set_xlabel("Assistant scale: SD of the Assistant's utilities (nats)")
     ax.set_ylabel("Leaked size b: the coin along the Assistant\n(coin nats per Assistant SD)")
@@ -304,7 +345,7 @@ def fig_gains(steps, keys):
     step_names = ("base → SFT", "SFT → DPO (Apertus: SFT → RL)", "DPO → final (Apertus: RL → DPO)")
     measures = (("g_sd_a", "Assistant scale σ_A", plotstyle.SERIES[0]), ("g_lam", "leakage rate λ",
                 plotstyle.SERIES[1]), ("g_b", "leaked coin b = σ_A·λ", "#3d3b36"))
-    xmin, xmax = 0.5, 16
+    xmin, xmax = 0.5, 32
     fig, axes = plt.subplots(1, 3, figsize=(12.5, 1.2 + 0.75 * len(keys)), sharey=True, sharex=True)
     for j, (title, ax) in enumerate(zip(step_names, axes)):
         for row, k in enumerate(keys):
@@ -326,9 +367,9 @@ def fig_gains(steps, keys):
         ax.axvline(1, color="#8a8880", lw=0.8, zorder=1)
         ax.set_xscale("log")
         ax.set_xlim(xmin, xmax)
-        ax.xaxis.set_major_locator(FixedLocator([0.5, 1, 2, 4, 8, 16]))
+        ax.xaxis.set_major_locator(FixedLocator([0.5, 1, 2, 4, 8, 16, 32]))
         ax.xaxis.set_minor_locator(NullLocator())
-        ax.set_xticklabels(["0.5", "1", "2", "4", "8", "16"])
+        ax.set_xticklabels(["0.5", "1", "2", "4", "8", "16", "32"])
         ax.set_title(title, fontsize=10, loc="left")
         ax.set_xlabel("gain, stage after / before (log scale)")
     axes[0].set_yticks(range(len(keys)), [LADDERS[k]["label"] for k in keys])
@@ -339,6 +380,55 @@ def fig_gains(steps, keys):
     fig.text(0.1, -0.06, "On a log scale the leaked coin's gain is the sum of the other two. S = log(λ gain) / log(b gain), "
              "the share of the leaked coin's growth that is a higher rate; shown where b's gain has a CI above 1.2.",
              fontsize=8, color="#55534d")
+    fig.tight_layout()
+    return fig
+
+
+def fig_subsets(steps, keys):
+    """Each ladder's DPO step (rows), by task set (markers): the leakage rate's gain and the leakage share S, with CIs."""
+    from matplotlib.ticker import FixedLocator, NullLocator
+    subs = ("", "arb", "arbw", "math", "alpaca", "wildchat", "rest")
+    colors = dict(zip(subs, ["#3d3b36", plotstyle.SERIES[0], "#86b6ef", plotstyle.SERIES[2], plotstyle.SERIES[3],
+                             plotstyle.SERIES[6], plotstyle.SERIES[7]]))
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 1.2 + 0.85 * len(keys)), sharey=True)
+    for row, k in enumerate(keys):
+        est, boot = steps[k][LADDERS[k]["dpo"]]
+        lo, hi = ci(boot)
+        for m, sub in enumerate(subs):
+            yv = row + (m - (len(subs) - 1) / 2) * 0.12
+            for ax, name in zip(axes, (f"g_lam{sfx(sub)}", f"share{sfx(sub)}")):
+                j = TK[name]
+                if not np.isfinite(est[j]):
+                    continue
+                l, h = lo[j], hi[j]
+                lim = (0.5, 8) if name.startswith("g_") else (-0.6, 1.6)
+                clipped = not (lim[0] <= l and h <= lim[1])  # unbounded where lam before the step is near 0
+                l, h = max(l, lim[0]), min(h, lim[1])
+                ax.plot([l, h], [yv, yv], color=colors[sub], lw=1.0 if clipped else 1.3, ls=":" if clipped else "-",
+                        zorder=2, solid_capstyle="butt")
+                ax.plot(est[j], yv, "o", color=colors[sub], ms=5, mec=plotstyle.SURFACE, mew=0.7, zorder=3,
+                        label=SUBSET_LABELS[sub] if row == 0 and name.startswith("g_") else None)
+    ax0, ax1 = axes
+    ax0.axvline(1, color="#8a8880", lw=0.8, zorder=1)
+    ax0.set_xscale("log")
+    ax0.set_xlim(0.5, 8)
+    ax0.xaxis.set_major_locator(FixedLocator([0.5, 1, 2, 4, 8]))
+    ax0.xaxis.set_minor_locator(NullLocator())
+    ax0.set_xticklabels(["0.5", "1", "2", "4", "8"])
+    ax0.set_xlabel("leakage rate λ, gain at DPO (log scale)")
+    ax0.set_title("Does DPO raise the leakage rate?", fontsize=10, loc="left")
+    for x in (0, 0.25, 0.5, 0.75, 1):
+        ax1.axvline(x, color="#8a8880" if x in (0, 1) else "#e2e0da", lw=0.8, zorder=1)
+    ax1.set_xlim(-0.6, 1.6)
+    ax1.set_xlabel("leakage share S of the coin's growth at DPO")
+    ax1.set_title("How much of the coin's growth is the rate (S), not the Assistant's scale", fontsize=10, loc="left")
+    ax0.set_yticks(range(len(keys)), [f"{LADDERS[k]['label']}\n({' → '.join(STAGE_LABELS[s] for s in LADDERS[k]['dpo'])})"
+                                      for k in keys])
+    ax0.set_ylim(len(keys) - 0.5, -0.5)
+    fig.legend(*ax0.get_legend_handles_labels(), frameon=False, ncol=4, loc="lower left", bbox_to_anchor=(0.12, 1.0),
+               fontsize=8.5)
+    fig.text(0.12, -0.04, "Dotted: a CI cut at the axis (one origin's rate is near 0 before the step, so its gain is "
+             "unbounded).", fontsize=8, color="#55534d")
     fig.tight_layout()
     return fig
 
@@ -440,6 +530,16 @@ def main():
             say(f"  {'':15} {'':14}  k_a {est[TK['k_a']]:.2f} (r {est[TK['r_a']]:.3f}), k_c {est[TK['k_c']]:.2f} "
                 f"(r {est[TK['r_c']]:.3f}); marginal leakage {g('marginal', 3)} (r {est[TK['r_marginal']]:.2f})")
 
+    say("\nExploratory (after the data): lam's gain = rel_coin x align. rel_coin = resid_sd gain / sd_a gain (the coin's")
+    say("part off the Assistant line growing relative to the Assistant); align = b gain / resid_sd gain (the coin following")
+    say("the Assistant more closely); share_align = log(align) / log(lam gain).")
+    for k in keys:
+        for (s, t), (est, boot) in steps[k].items():
+            lo, hi = ci(boot)
+            g = lambda n, d=2: fmt(est[TK[n]], lo[TK[n]], hi[TK[n]], d)
+            say(f"  {LADDERS[k]['label']:15} {STAGE_LABELS[s]:>5} -> {STAGE_LABELS[t]:5}  lam x{est[TK['g_lam']]:.2f} = "
+                f"rel_coin x{g('rel_coin')} * align x{g('align')}; share_align {g('share_align')}")
+
     say("\nThe call on each ladder's DPO step (pre-registered for Tulu 3 70B and OLMo 2 13B; context otherwise):")
     for k in keys:
         pre, post = LADDERS[k]["dpo"]
@@ -453,12 +553,38 @@ def main():
             say(f"  {head}")
             for line in lines:
                 say(f"    {line}")
+    say("\nExploratory (Hal's request, added before any new ladder was analysed): the 225 MATH / Alpaca / WildChat tasks,")
+    say("where preferences are more arbitrary than BailBench's and STRESS-TEST's. Per stage sd_a | b | lam; per step S:")
+    arb_subs = ("arb", "arbw", "math", "alpaca", "wildchat", "rest")
+    for k in keys:
+        for s in LADDERS[k]["stages"]:
+            est, boot = stage_cells[k][s]
+            lo, hi = ci(boot)
+            cells = []
+            for sub in arb_subs:
+                j = SK[f"lam_{sub}"]
+                cells.append(f"{sub} {est[SK[f'sd_a_{sub}']]:.2f} | {est[SK[f'b_{sub}']]:.3f} | "
+                             f"{fmt(est[j], lo[j], hi[j], 3)}")
+            say(f"  {LADDERS[k]['label']:15} {STAGE_LABELS[s]:5}  " + "   ".join(cells)
+                + f"   r_arb {est[SK['r_arb']]:.2f}")
+        for (s, t), (est, boot) in steps[k].items():
+            lo, hi = ci(boot)
+            cells = []
+            for sub in ("",) + arb_subs:
+                g_l, sh = TK[f"g_lam{sfx(sub)}"], TK[f"share{sfx(sub)}"]
+                cells.append(f"{sub or 'all'}: sd_a x{est[TK[f'g_sd_a{sfx(sub)}']]:.2f} lam x"
+                             f"{fmt(est[g_l], lo[g_l], hi[g_l])} S {fmt(est[sh], lo[sh], hi[sh])}")
+            say(f"  {LADDERS[k]['label']:15} {STAGE_LABELS[s]:>5} -> {STAGE_LABELS[t]:5}")
+            for c_ in cells:
+                say(f"      {c_}")
+            say(f"      resid_sd_arb x{est[TK['g_resid_sd_arb']]:.2f}; marginal leakage (arb) {est[TK['marginal_arb']]:.3f}")
     (OUT / "report.txt").write_text("\n".join(report) + "\n")
 
     order = [k for k in ("olmo2_32b", "tulu3_70b", "olmo2_13b", "olmo3_32b", "apertus_70b") if k in keys]
     for name, fig in (("paths", fig_paths(stage_cells, order)), ("gains", fig_gains(steps, order)),
                       ("scatter", fig_scatter(U_by, [k for k in order if k in ("olmo2_32b", "tulu3_70b",
-                                                                                  "olmo2_13b")]))):
+                                                                                  "olmo2_13b")])),
+                      ("subsets", fig_subsets(steps, order))):
         path = plotstyle.save(fig, f"dpo_leak_{name}")
         plt.close(fig)
         print(f"wrote {path}")
