@@ -1,0 +1,35 @@
+# Round 2 (PLAN_replication2.md) on deepseek-ai/DeepSeek-V3: the gate (its plain Assistant and coins re-scored on the
+# new node, against configs/replication/deepseek-v3.yaml run) and round 2's new conditions (the tool's coin under
+# roleplay, the length rules, the raw-text stories), one load. Generated from the first round's instruct entry (same
+# repo, revision, template settings and vLLM settings) plus its tool family from
+# configs/replication/tool/deepseek-v3.yaml. Raw-text document start: BOS (trained row, 0.65x;
+# replication/onboarding/deepseek-v3_embed_rows.csv). vLLM as in the first round except max_model_len 1,536 (from
+# 1,024): the tool coin prompts run to 872 tokens (DeepSeek V4 Flash).
+wandb_project: tournament
+group: replication2
+run_name: r2-deepseek-v3
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: deepseek-ai/DeepSeek-V3
+  stage: instruct
+  revision: e815299b0bcbac849fa540c768ef21845365c9eb
+  download:
+    allow_patterns:
+    - '*.safetensors'
+    - model.safetensors.index.json
+    - config.json
+    - tokenizer.json
+    - tokenizer_config.json
+    gb: 688.6
+  vllm:
+    tensor_parallel_size: 8
+    max_model_len: 1536
+    gpu_memory_utilization: 0.9
+    enable_prefix_caching: true
+  conditions: round2
+  tool_family: deepseek3
+  doc_prefix: <｜begin▁of▁sentence｜>

@@ -48,13 +48,48 @@ def final_conditions(personas=PERSONAS):
 
 FINAL_CONDITIONS = final_conditions()
 
+# Round 2 (PLAN_replication2.md). The coin as a tool call (README, "The coin as a tool call"): the tool's coin, the
+# user-reported coin and the Assistant with the tool declared, then the tool's coin under each persona's system prompt,
+# user instruction and self-description, in that run's order.
+TOOL_CONDITIONS = (["coinflip_tool", "coinflip_tools_declared", "assistant_tools_declared"]
+                   + [f"coinflip_tool@{p}{pl}" for p in PERSONAS for pl in ("", "+user", "+self")])
+# New in round 2: the tool's coin under the roleplay framing; the length rules ("If I ask you to choose between tasks in
+# this message, choose the one with the shorter / longer description.") before the Assistant's choice, the user-reported
+# coin and the tool's coin; the coinflip as a raw-text story about an AI assistant or a freelancer, with the first-person
+# baselines the raw-text section compares them with.
+TOOL_ROLEPLAY = [f"coinflip_tool@{p}+roleplay" for p in PERSONAS]
+LENGTH = [f"{c}_ifchoose_{r}" for c in ("assistant", "coinflip") for r in ("shorter", "longer")]
+LENGTH_TOOL = [f"coinflip_tool_ifchoose_{r}" for r in ("shorter", "longer")]
+STORIES = ["raw_okay", "raw_no_okay", "raw_story_ai", "raw_story_person"]
+# Always-thinking finals: the Assistant-turn readouts read inside the reasoning (prefill as the reasoning's first words),
+# against the reading after an empty think block (Trinity Large Thinking: r 0.99). "~<variant>" names a config variant
+# (score_replication.py), here close_think off.
+INREASONING = ["assistant~inreasoning", "predict_user~inreasoning"]
+# The first round's models re-score their plain Assistant and coins on the new node: the gate against their stored runs,
+# and the within-node baselines if the gate fails.
+GATE = ["assistant", "coinflip"]
+CONDITION_SETS = {
+    "base": list(BASE_CONDITIONS),
+    "final": list(FINAL_CONDITIONS),
+    # A new model without a base: everything (findings 1-7, the tool run, round 2's experiments, the reasoning check).
+    "new_final": list(FINAL_CONDITIONS) + TOOL_CONDITIONS + TOOL_ROLEPLAY + LENGTH + LENGTH_TOOL + STORIES + INREASONING,
+    # A first-round final with a tool format: the gate, then round 2's experiments.
+    "round2": GATE + ["coinflip_tool"] + TOOL_ROLEPLAY + LENGTH + LENGTH_TOOL + STORIES,
+    # Nemotron-4 (no native tool format).
+    "round2_notool": GATE + LENGTH + STORIES,
+}
+
 
 def expand_conditions(spec):
-    if spec == "base":
-        return list(BASE_CONDITIONS)
-    if spec == "final":
-        return list(FINAL_CONDITIONS)
+    if isinstance(spec, str):
+        return list(CONDITION_SETS[spec])
     return list(spec)
+
+
+def split_variant(condition):
+    """("assistant", "inreasoning") for "assistant~inreasoning"; (condition, None) without a variant."""
+    base, _, variant = condition.partition("~")
+    return base, variant or None
 
 
 # Finding 8's wording check (README, "Shorter questions", its wording check): outcome mass and top tokens of the candidate

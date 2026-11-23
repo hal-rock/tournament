@@ -7415,6 +7415,186 @@ Assistant x1.80, λ x1.25.
   each.
 - GPU types differ between ladders (A100 for OLMo 2, 2x H100 for Tulu) but not within one. Gains are within-ladder ratios.
 
+## Replication round 2: two newer models without bases, and three new experiments
+
+Hal's question (2026-11-23): frontier open-weight models no longer ship their base models, which the first round
+("Replication across larger models") required. Do the findings hold on two of them, GLM-5.3 and Kimi K3.1 Pro? Round 2
+also runs three new experiments on all eight finals:
+- **the tool's coin under a roleplay persona;**
+- **the length choice rules,** with the user-reported coin and with the tool's coin;
+- **the coinflip as a third-person raw-text story** (an AI assistant, or a freelancer).
+
+The plan, sizes and costs are in `PLAN_replication2.md`.
+
+### Design (written 2026-11-23, before any data)
+
+- **New models, finals only** (configs `configs/replication/glm-5.3.yaml`, `kimi-k3.1-pro.yaml`; notes in their headers):
+  - `zai-org/GLM-5.3`: 743B parameters, 39B active, FP8. It shares GLM-5.2's base, and neither base is released.
+  - `moonshotai/Kimi-K3.1-Pro`: 2.8T parameters, 104B active, MXFP4 experts, 1.56 TB. It is post-trained from Kimi K3,
+    whose base isn't released either.
+  - **Both always think.** Assistant-turn readouts go after an empty think block, written as each template renders a past
+    turn with empty reasoning: GLM `<think></think>`; Kimi `<|close|>think<|sep|><|open|>response<|sep|>`. A reasoning
+    check reads A and P inside the reasoning instead (prefill as the reasoning's first words, all 15,000 pairs; Trinity:
+    r 0.99).
+  - **Effort block.** Both templates write a reasoning-effort block into every prompt (GLM "Reasoning Effort: Max",
+    Kimi a "thinking-effort" system message). It's a control the deployed model always sees, so it stays. A persona's
+    system message follows it.
+  - **Effort level, by a rule fixed now:** after loading, `score_replication.choose_effort` scores P(close of the think
+    block right after its opener) at the Assistant condition's generation prompt. That's 24 pairs in both orders, at
+    low, high and max. It keeps the level where the model itself is likeliest to close the block at once, so the empty
+    block is least off-policy. Every prompt of that model uses the chosen level, and it's recorded in `progress.jsonl`.
+  - **Formats:**
+    - GLM: its Jinja template;
+    - Kimi: Moonshot's encoder through its tokenizer. The test checks that tokenizing a rendered prompt in one piece
+      gives the encoder's own segment-by-segment ids.
+    - The tool formats are new `toolframe.py` families, `glm5` and `kimi3`.
+    - Raw-text document starts: `[gMASK]<sop>` (GLM) and `[BOS]` (Kimi).
+    - `tests/test_replication_new_models.py` checks every condition against each model's own template.
+  - **Conditions** (`replication.CONDITION_SETS["new_final"]`, 75): the first round's 44 final conditions, the tool run's 15,
+    the four new experiments' conditions (below), and the reasoning check.
+- **The first round's six finals** (`configs/replication/round2/<key>.yaml`, run names `r2-<key>`).
+  - Each config is the first round's instruct entry, plus its tool family and document start
+    (`tests/test_replication_round2.py`). The one change is max_model_len 1,536 (the tool prompts reach 872 tokens).
+  - **Conditions** (`CONDITION_SETS["round2"]`, 17; Nemotron-4 `round2_notool`, 10): the gate's `assistant`, `coinflip` and
+    `coinflip_tool`, and the new conditions. Nemotron-4 has no tool format.
+  - Raw-text document starts: each model's trained BOS. Nemotron-4 gets `</s>` and SentencePiece's dummy-prefix space: NeMo
+    separates pretraining documents with EOD, and its `<s>` row was never trained. A test checks this against SentencePiece's
+    ids.
+  - No bases (Hal, 2026-11-23).
+- **New conditions** (`prompts.py`, `replication.py`):
+  - **T_rp:** `coinflip_tool@p+roleplay`, the tool's coin with the roleplay framing as the system message, after the tool
+    block. Four personas.
+  - **Length rules:** "If I ask you to choose between tasks in this message, choose the one with the shorter / longer
+    description.", a blank line, then the condition's own text, unchanged:
+    - `assistant_ifchoose_<rule>` (A_k);
+    - `coinflip_ifchoose_<rule>` (C_k);
+    - `coinflip_tool_ifchoose_<rule>` (T_k, new: the rule, then the tool coin's user turn, the prefilled call and the result).
+  - **Raw-text stories:** `raw_story_ai`, `raw_story_person` and their first-person baselines `raw_okay`, `raw_no_okay`, as in
+    "The coinflip as raw text".
+- **Sample:** the sweep's 300 tasks and 15,000 pairs, both orders, in every condition.
+- **Node and engine:** one vast.ai 8x B300. Kimi K3.1 Pro's weights alone (1,454 GiB) exceed 8x B200's memory.
+  - vLLM 0.33 for the first round's models and GLM-5.3, as in round 1.
+  - Kimi K3.1 Pro needs vLLM ≥ 0.35, a nightly, in its own venv.
+  - Jobs: `replication/round2_jobs.yaml`.
+  - Each model gets the on-policy tool check (50 pairs), a 24-pair pilot of every condition, and the full scoring, in one
+    load.
+- **Finding 8 on GLM-5.3 only:** Hal skipped Kimi K3.1 Pro, which transformers can't run. It uses round 1's scope:
+  - the 1,000 report pilot pairs;
+  - the unpatched pass, `self`, `swap` and `ctrl`;
+  - questions chosen by the wording check of GLM's pilot, by round 1's rule;
+  - HF, `configs/coin_report/glm-5.3.yaml`. The weightless load check passes (`replication/patch_load_check.md`).
+
+### Pre-registered before any data (2026-11-23)
+
+**Conventions,** as in round 1:
+- CIs are 95% task bootstraps within origin, one set of resamples per model, so differences are paired.
+- Persona fits: X = c + b_def · z(A_0) + b_per · z(A_p), with w = b_per / (b_def + b_per).
+- "Separable" means |r(A_p, A_0)| < 0.9.
+- A cell with split-half reliability below 0.9 or median outcome mass below 0.2 is "not interpretable".
+- Everything is reported over all 300 tasks (where the calls are made), within origin, and over the benign sources (MATH,
+  Alpaca, WildChat), with magnitudes beside it.
+
+**Gate.**
+- **The first round's models:** each re-scored `assistant`, `coinflip` and `coinflip_tool` against its round-1 run.
+  - The bar: utilities r ≥ 0.999 and SD within 2%.
+  - A model that passes is compared with its stored round-1 conditions (A_0, A_p, A_rp, C_rp, T_sys).
+  - A model that fails uses its re-scored conditions wherever they exist, and needs no others: T-rp uses A_0 and the
+    round-1 A_rp, and the failure is reported beside it.
+- **Every model:** the sanity prompt at load, and the 24-pair pilot (mass, top tokens).
+
+**A. The new models (GLM-5.3, Kimi K3.1 Pro): the first round's findings without a base.**
+1. **Finding 1, final only:** "tracks" if r(A_f, C_f) ≥ 0.5 with its CI above 0.
+   - The first round's base values are context: r(A_b, C_b) from -0.07 to 0.76.
+   - Without a base, a "tracks" call can't separate post-training from pretraining.
+2. **Finding 2, final only:** "Assistant-like" if r(A_f, U_f) ≥ 0.5 with its CI above 0.
+3. **Finding 3, final only:** "Assistant-like" if r(A_f, P_f) ≥ 0.5 with its CI above 0. Δ = r(U_f, P_f) − r(U_f, A_f) and
+   its call are reported beside it.
+4. **Findings 4-7:** the first round's calls, unchanged.
+5. **Finding 8 (GLM-5.3):** the first round's call (share > 0 with κ's CI above 0), per question.
+6. **The tool run's calls 1-3:**
+   - Δr_decl;
+   - r(A_decl, A_0);
+   - Δρ_self, with its secondary Δ_T.
+7. **Reasoning check:** r and the SD ratio of A and P read inside the reasoning against after the empty block. Reported;
+   "agrees" if r ≥ 0.95.
+
+**B. The tool's coin under roleplay** (the five first-round finals with a tool format, and the new two):
+- **Primary:** T_rp = c + b_def · z(A_0) + b_per · z(A_rp), the roleplay section's fit and call (first that applies: not
+  separable, against the persona, neither, default Assistant, persona, mix). A_rp is the roleplay Assistant
+  (`assistant@p+roleplay`). Finding 6 "replicates with the tool" if the call is "persona" or "mix".
+- **Comparisons** (paired):
+  - Δw_rp = w_rp(T) − w_rp(C), against the user-reported coin under roleplay (C_rp);
+  - w_rp(T) − w_sys(T), against the tool's system-prompt fit.
+  - Each is called "less" (CI below 0), "more" (above) or "as much". There's no comparison where either call is "not
+    separable" or "neither".
+- **Secondary:** ρ_rp(T) = b_per(T_rp) / b_per(T_sys) on the fixed target A_sys, beside ρ_rp(C). Also the harm gaps of
+  T_rp, T_sys and T, and r(T_rp, A_rp).
+
+**C. Length rules** (all eight finals; the tool's coin in the seven with a tool format). For each rule k (shorter, longer),
+the reworded run's measures:
+1. **Following:** agreement of A_k with the rule (the share of task pairs the rule orders whose utilities order them the
+   same way), minus A_0's. Called "follows" if its CI is above 0.
+2. **Each coin toward the rule:**
+   - d_pr = the instructed coin's partial r with the rule given A_0, minus the default coin's partial r. That's C_k against
+     C_0, and T_k against T (`coinflip_tool`).
+   - "Toward the rule" if its CI is above 0, "away from the rule" if below, "no change" otherwise.
+3. **Each coin's mirrored length contrast:** (X_shorter − X_longer) / 2 on z(−log length), with source fixed effects.
+   "Follows" or "against the length instruction" by its CI, else "no length effect".
+4. **Tool minus user-reported** (paired), on d_pr and on the contrast: "the tool's coin follows less" (CI below 0), "more",
+   or "as much". This is new.
+   - The rule comes from the user, so a user-reported coin that follows it may follow the user's wish.
+   - A tool's result is less plausibly shaded by that wish.
+   - If the tool's coin follows as much, the user's-wish reading of the reworded run weakens.
+
+**D. Raw-text stories** (all eight finals; no bases):
+- **Measures, per story X (`raw_story_ai`, `raw_story_person`) and per first-person baseline:**
+  - r(A_f, X_f), over all tasks and within origin;
+  - the **relative slope** = slope of X_f on z(A_f) / slope of C_f (the chat coinflip) on z(A_f). This is the round-1 call's
+    retention without the base subtraction.
+  - paired contrasts: each story minus `raw_no_okay`; AI minus freelancer (in r and relative slope).
+- **Call per story:** the round-1 categories on the relative slope.
+  - **tracks:** ≥ 0.25 with its CI above 0;
+  - **reversed:** ≤ −0.25 with its CI below 0;
+  - **absent:** |relative slope| < 0.25;
+  - **unclear:** otherwise.
+- r(A_f, X_f) is read beside the call: in round 1, Llama 70B's stories kept the ranking (r 0.60-0.67) at an eighth of the
+  scale.
+
+**Predictions** (mine, before any data):
+1. **Thinking models' user-reported coin:** both new finals have a small user-reported coin (SD < 0.5 nats), as Trinity
+   Large Thinking (0.20) and OLMo 3.1 Think (0.17) did.
+   - Finding 1 (final only) holds in at most one of the two.
+   - The tool's coin tracks the Assistant in both (r(T, A_0) ≥ 0.7, Trinity 0.81).
+2. **Findings 2 and 3 hold in both** (r(A_f, U_f) and r(A_f, P_f) ≥ 0.5; Trinity 0.88, 0.75).
+3. **The reasoning check agrees** (r ≥ 0.95) for A and P in both.
+4. **The effort rule picks "low"** in both.
+5. **Finding 8 on GLM-5.3:** replicates for the guess, not for the short preference. That holds if its user-reported coin's
+   SD is at least 0.5 nats; below that, finding 8 is run only after a check-in with Hal.
+6. **T-rp:** the tool's coin follows the roleplay persona ("persona" or "mix") in at least half of the separable cells. Δw_rp
+   (tool minus user-reported) has no consistent sign across models.
+7. **Length rules:**
+   - The Assistant follows both rules in all eight.
+   - The user-reported coin moves toward the rule for both rules in at least 5 of 8.
+   - The tool's coin does in at least 4 of 7.
+   - Tool minus user-reported d_pr is "as much" or "less" in every cell, and "less" in at least half.
+8. **Stories:**
+   - `raw_okay` tracks in at least 6 of 8.
+   - The freelancer story is absent in at least 6 of 8; the AI-assistant story in at least 5 of 8.
+   - Every story is below `raw_no_okay` in relative slope (paired CI below 0) in at least 7 of 8 per story.
+9. **Gate:** passes for at least 5 of the 6 first-round models. B300 is a different GPU from round 1's B200, so DeepSeek V4
+   Flash is the likeliest to fail, as its coin did against HF.
+
+**Caveats, known in advance:**
+- **No base for the new models,** so findings 1-3 there are about the final model's state, not about post-training's change.
+- **Both new models always think.** Their Assistant readouts after an empty block are off their trained path, and the
+  reasoning check is only one guard.
+- **The effort block differs from round 1's models,** which have none.
+- **The first round's comparisons cross GPU types** (B200 then, B300 now) and, for max_model_len, a setting that sizes the KV
+  cache. The gate is the check.
+- **The tool comparisons inherit the tool run's caveats:** the tool block changes the user-reported coin, and per-family
+  tool formats differ.
+- One phrasing per condition, greedy readouts, CIs over task sampling only.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

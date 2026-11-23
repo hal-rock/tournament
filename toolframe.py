@@ -25,6 +25,12 @@ Families (`tool_family` in a replication config), each in its own format:
   trinity:   Trinity Large Thinking's template: its default identity line and the tool instructions in the system block
              (it writes them whenever tools are declared); the call after an empty think block (reasoning_content "",
              as close_think reads every other Assistant turn); the result in a user turn wrapped in <tool_response>.
+  glm5:      GLM-5.3's template (PLAN_replication2.md): the tool instructions in a second system block, after the
+             "Reasoning Effort" line and before a persona's system block; the call as <tool_call>flip_coin</tool_call>
+             after an empty think block; the result after <|observation|>, wrapped in <tool_response>.
+  kimi3:     Kimi K3.1 Pro's encoder (its tokenizer's apply_chat_template, encoding_k3.py): a "tool-declare" system
+             message before the thinking-effort one; the call in the Assistant's <tools> channel after an empty think
+             block and an empty response; the result as a role="tool" message.
 
 A persona as the system prompt is the system message (with the tools); in the user turn it is part of `body`.
 """
@@ -36,6 +42,8 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
+from prompts import THINK_OPENERS, close_think_text
+
 SENTINEL = "<<<CUT_HERE>>>"
 TOOLS = [{"type": "function", "function": {
     "name": "flip_coin",
@@ -43,7 +51,7 @@ TOOLS = [{"type": "function", "function": {
                    "Returns the result, \"heads\" or \"tails\".",
     "parameters": {"type": "object", "properties": {}, "required": []},
 }}]
-FAMILIES = ("kimi", "llama", "deepseek3", "deepseek4", "trinity")
+FAMILIES = ("kimi", "llama", "deepseek3", "deepseek4", "trinity", "glm5", "kimi3")
 KIMI_CALL_ID = "functions.flip_coin:0"
 KIMI_DEFAULT_SYSTEM = re.compile(r"<\|im_system\|>system<\|im_middle\|>You are Kimi, an AI assistant created by Moonshot AI\."
                                  r"<\|im_end\|>\n?")
@@ -58,7 +66,8 @@ DEEPSEEK3_TOOLS = ("# Tools\n\nYou may call one or more functions to assist with
                    "At the end of function call returns, you should print <｜tool▁calls▁end｜><｜end▁of▁sentence｜>")
 # What a generated call to the tool contains, per family (the on-policy check).
 CALL_MARKER = {"kimi": "<|tool_call_begin|>functions.flip_coin", "llama": '"name": "flip_coin"',
-               "deepseek3": "<｜tool▁sep｜>flip_coin", "deepseek4": 'invoke name="flip_coin"', "trinity": "<function=flip_coin>"}
+               "deepseek3": "<｜tool▁sep｜>flip_coin", "deepseek4": 'invoke name="flip_coin"', "trinity": "<function=flip_coin>",
+               "glm5": "<tool_call>flip_coin", "kimi3": '<|open|>call tool="flip_coin"'}
 _CALL_RE = {"llama": re.compile(r'"name"\s*:\s*"flip_coin"'), "deepseek4": re.compile(r'<｜DSML｜invoke name="flip_coin"'),
             "trinity": re.compile(r'<function=flip_coin>|"name"\s*:\s*"flip_coin"')}
 _encoders = {}
@@ -72,7 +81,10 @@ def calls_tool(family, reply, first=False):
     hit = pattern.search(reply)
     if hit is None or not first:
         return hit is not None
-    before = re.sub(r"<[^<>]*>|```json|\{", "", reply[:hit.start()])
+    before = reply[:hit.start()]
+    if family == "kimi3":  # the empty response channel and the opening of the tools channel: <|close|>response<|sep|>...
+        before = re.sub(r"<\|(?:open|close)\|>(?:think|response|tools)<\|sep\|>", "", before)
+    before = re.sub(r"<[^<>]*>|```json|\{", "", before)
     return before.strip() in ("", "function")  # DeepSeek V3: <｜tool▁call▁begin｜>function<｜tool▁sep｜>flip_coin
 
 
@@ -111,14 +123,19 @@ def _messages(family, body, system, result):
         msgs.append({"role": "assistant", "content": "", "tool_calls": [
             {"type": "function", "function": {"name": "flip_coin", "arguments": "{}"}}]})
         msgs.append({"role": "tool", "name": "flip_coin", "content": json.dumps({"result": result})})
-    elif family == "trinity":
+    elif family in ("trinity", "glm5"):
         msgs.append({"role": "assistant", "content": "", "reasoning_content": "", "tool_calls": [
             {"type": "function", "function": {"name": "flip_coin", "arguments": {}}}]})
         msgs.append({"role": "tool", "name": "flip_coin", "content": json.dumps({"result": result})})
+    elif family == "kimi3":  # the encoder parses the arguments from a JSON string
+        msgs.append({"role": "assistant", "content": "", "reasoning_content": "", "tool_calls": [
+            {"id": KIMI_CALL_ID, "type": "function", "function": {"name": "flip_coin", "arguments": "{}"}}]})
+        msgs.append({"role": "tool", "tool_call_id": KIMI_CALL_ID, "name": "flip_coin",
+                     "content": json.dumps({"result": result})})
     return msgs
 
 
-def _render(family, tok, msgs, system=None, gen_prompt=False, ds_repo=None):
+def _render(family, tok, msgs, system=None, gen_prompt=False, ds_repo=None, template_kwargs=None):
     if family == "deepseek4":
         enc = deepseek4_encoder(ds_repo)
         return enc.encode_messages([{"role": "system", "content": system or "", "tools": TOOLS}] + msgs,
@@ -127,39 +144,46 @@ def _render(family, tok, msgs, system=None, gen_prompt=False, ds_repo=None):
         text = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=gen_prompt,
                                        chat_template=DEEPSEEK3_TEMPLATE.read_text())
     else:
-        text = tok.apply_chat_template(msgs, tools=TOOLS, tokenize=False, add_generation_prompt=gen_prompt)
+        text = tok.apply_chat_template(msgs, tools=TOOLS, tokenize=False, add_generation_prompt=gen_prompt,
+                                       **(template_kwargs or {}))
     if family == "kimi" and not system:
         text, n = KIMI_DEFAULT_SYSTEM.subn("", text, count=1)
         assert n == 1, "Kimi's default system block not found"
     return text
 
 
-def build_tool_prompt(kind, condition, body, tok, family, system=None, prefill=None, close_think=False, ds_repo=None):
+def build_tool_prompt(kind, condition, body, tok, family, system=None, prefill=None, close_think=False, ds_repo=None,
+                      template_kwargs=None):
     """Prompt text for a tool condition, ending right where the outcome token goes.
     kind "call": cut where the tool result's value starts. kind "declared": `condition`'s own prompt (an open user turn,
     or the Assistant's turn and its prefill) with the tool declared."""
     assert family in FAMILIES, f"unknown tool_family {family!r}"
+    kw = dict(ds_repo=ds_repo, template_kwargs=template_kwargs)
     if kind == "call":
-        text = _render(family, tok, _messages(family, body, system, SENTINEL), system, ds_repo=ds_repo)
+        text = _render(family, tok, _messages(family, body, system, SENTINEL), system, **kw)
         cut = text.index(SENTINEL)
         for outcome in ("heads", "tails"):  # nothing before the cut may render differently with a real result
-            full = _render(family, tok, _messages(family, body, system, outcome), system, ds_repo=ds_repo)
+            full = _render(family, tok, _messages(family, body, system, outcome), system, **kw)
             assert full.startswith(text[:cut]) and full[cut:].startswith(outcome), (family, full[cut - 40:cut + 20])
         return text[:cut]
     assert kind == "declared", kind
     if prefill is None:  # an open user turn (the user-reported coin)
-        text = _render(family, tok, _messages(family, body + SENTINEL, system, None), system, ds_repo=ds_repo)
+        text = _render(family, tok, _messages(family, body + SENTINEL, system, None), system, **kw)
         return text[:text.index(SENTINEL)]
-    text = _render(family, tok, _messages(family, body, system, None), system, gen_prompt=True, ds_repo=ds_repo)
+    text = _render(family, tok, _messages(family, body, system, None), system, gen_prompt=True, **kw)
     if family == "deepseek4":
         assert text.endswith("<｜Assistant｜></think>"), text[-40:]  # chat mode: the empty think block
     if close_think:
-        assert text.endswith("<think>"), text[-40:]
-        text += "</think>\n"
+        assert text.endswith("<think>" if close_think is True else THINK_OPENERS), text[-40:]
+        text += close_think_text(close_think)
     return text + prefill
 
 
-def generation_prompt(family, tok, body, system=None, close_think=False, ds_repo=None):
+def generation_prompt(family, tok, body, system=None, close_think=False, ds_repo=None, template_kwargs=None):
     """Where the Assistant answers the `call` user turn on its own (the on-policy check), thinking off."""
-    text = _render(family, tok, _messages(family, body, system, None), system, gen_prompt=True, ds_repo=ds_repo)
-    return text + "</think>\n" if close_think else text
+    text = _render(family, tok, _messages(family, body, system, None), system, gen_prompt=True, ds_repo=ds_repo,
+                   template_kwargs=template_kwargs)
+    if close_think:
+        assert text.endswith("<think>" if close_think is True else THINK_OPENERS), text[-40:]
+        text += close_think_text(close_think)
+    return text

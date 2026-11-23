@@ -20,7 +20,16 @@ Outputs, under outputs/replication/<run_name>/:
   soon as its condition finishes;
 - pilot/<stage>__<condition>.csv.gz: --pilot runs (no W&B), with the top tokens of every prompt;
 - onpolicy/<stage>__<condition>.jsonl: --onpolicy, for tool-call conditions (toolframe.py): the Assistant's own greedy reply
-  where the prompt prefills the call, and whether it calls the tool (one line per prompt, then a summary in progress.jsonl).
+  where the prompt prefills the call, and whether it calls the tool (one line per prompt, then a summary in progress.jsonl);
+- <stage>.template_kwargs.json: for an always-thinking model with an `effort` entry (PLAN_replication2.md), the
+  reasoning-effort level its prompts use, chosen once after loading by choose_effort() and reused after a restart.
+
+Config entries for round 2 (PLAN_replication2.md), besides those listed in replication.py:
+- close_think: true, or the exact text that closes the model's think block (prompts.close_think_text);
+- keep_system: keep the blocks the template writes on its own (the reasoning-effort line) when there's no system prompt;
+- template_kwargs: extra template arguments; effort: {kwarg, values, close, pairs}, the rule that picks the level;
+- doc_prefix: the document start of the raw-text conditions;
+- variants: {name: {entry: value}}, overrides for conditions named "<condition>~<name>" (the reasoning check).
 
 Conditions whose results file exists are skipped, so a crashed stage resumes where it stopped.
 """
@@ -47,13 +56,15 @@ import yaml
 # - FP8 kernels JIT-compile DeepGEMM with $CUDA_HOME/bin/nvcc, which must be >= 12.9 and match torch's CUDA 13.0 headers:
 #   the venv's pinned nvidia-cuda-nvcc 13.0, not the image's toolkit.
 os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+# The engine core's startup includes loading the weights: ~1 h for Kimi K2's 1 TB in round 1, longer for Kimi K3.1 Pro.
+os.environ.setdefault("VLLM_ENGINE_READY_TIMEOUT_S", "7200")
 os.environ["PATH"] = f"{Path(sys.executable).parent}:{os.environ.get('PATH', '')}"
 _cu13 = Path(sysconfig.get_paths()["purelib"]) / "nvidia" / "cu13"
 if (_cu13 / "bin" / "nvcc").exists():
     os.environ["CUDA_HOME"] = str(_cu13)
 
-from prompts import CONDITIONS, build_prompt, outcome_token_ids, split_condition
-from replication import WORDING_CHECK, expand_conditions, report_pilot_pairs
+from prompts import CONDITIONS, THINK_OPENERS, build_prompt, outcome_token_ids, split_condition
+from replication import WORDING_CHECK, expand_conditions, report_pilot_pairs, split_variant
 
 OUT_ROOT = Path("outputs/replication")
 SANITY = ("The capital of France is Paris, and the capital of Germany is", "Berlin")
@@ -170,11 +181,17 @@ def revision_of(cfg, repo):
 
 
 def render_condition(condition, m, tasks, ordered, template_tokenizer, tokenizer, system_prompt, prefill=True):
-    """Token ids of every ordered pair's prompt, and the first prompt's text (for the log)."""
+    """Token ids of every ordered pair's prompt, and the first prompt's text (for the log). A condition
+    "<condition>~<variant>" is <condition> rendered with the config's variants[<variant>] entries."""
+    condition, variant = split_variant(condition)
+    if variant is not None:
+        m = {**m, **m["variants"][variant]}
     texts = [build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt, prefill,
                           turn_format=m.get("turn_format"), close_think=m.get("close_think", False),
                           strip_think=m.get("strip_think", False), tool_family=m.get("tool_family"),
-                          tool_repo=m.get("tool_repo", m["name"])) for a, b in ordered]
+                          tool_repo=m.get("tool_repo", m["name"]), doc_prefix=m.get("doc_prefix"),
+                          keep_system=m.get("keep_system", False), template_kwargs=m.get("template_kwargs"))
+             for a, b in ordered]
     ids = tokenizer(texts, add_special_tokens=False).input_ids
     return ids, texts[0]
 
@@ -200,6 +217,39 @@ def sanity_check(engine, tokenizer, m, uses_bos):
         raise SystemExit(f"{m['name']} fails the sanity prompt: {shown}")
     if not all(math.isfinite(v) for _, v in top):
         raise SystemExit(f"{m['name']}: non-finite log-probs in the sanity check")
+
+
+def choose_effort(engine, m, tasks, pairs, template_tokenizer, tokenizer, system_prompt, out, stage):
+    """The reasoning-effort level of an always-thinking model's prompts (PLAN_replication2.md, fixed before any data): the
+    level at which the model itself is likeliest to close its think block at once, P(close token right after the think
+    opener) at the Assistant condition's generation prompt, averaged over the first pairs in both orders. That makes the
+    empty think block the Assistant-turn readouts use least off-policy. Sets m["template_kwargs"]; a restart reads the
+    saved choice."""
+    spec = m.get("effort")
+    if not spec:
+        return
+    path = out / f"{stage}.template_kwargs.json"
+    if path.exists():
+        m["template_kwargs"] = json.loads(path.read_text())
+        print(f"effort: {m['template_kwargs']} (chosen earlier, {path})", flush=True)
+        return
+    (close_id,) = tokenizer(spec["close"], add_special_tokens=False).input_ids
+    ordered = pairs[:spec.get("pairs", 24)] + [(j, i) for i, j in pairs[:spec.get("pairs", 24)]]
+    means = {}
+    for level in spec["values"]:
+        probe = {**m, "template_kwargs": {spec["kwarg"]: level}, "close_think": False}
+        ids, example = render_condition("assistant", probe, tasks, ordered, template_tokenizer, tokenizer, system_prompt,
+                                        prefill=False)
+        assert example.endswith(THINK_OPENERS), example[-60:]
+        means[level] = statistics.mean(math.exp(lp) for lp, _, _, _ in engine.score(ids, (close_id, close_id)))
+    choice = max(means, key=means.get)
+    m["template_kwargs"] = {spec["kwarg"]: choice}
+    path.write_text(json.dumps(m["template_kwargs"]))
+    summary = dict(stage=stage, effort=choice, p_close={k: round(v, 5) for k, v in means.items()}, prompts=len(ordered),
+                   time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    print(f"effort: {json.dumps(summary)}", flush=True)
+    with open(out / "progress.jsonl", "a") as f:
+        f.write(json.dumps(summary) + "\n")
 
 
 def onpolicy_check(engine, conditions, m, tasks, pairs, template_tokenizer, tokenizer, system_prompt, a, out):
@@ -280,7 +330,7 @@ def main(argv=None):
             passes.insert(1 if passes and passes[0][2] else 0,
                           (report_pilot_pairs(len(tasks), 1000, cfg.get("seed", 0))[:n_wording], out / "pilot", True, todo,
                            f"{a.stage}__wording__"))
-    onpolicy = [c for c in conditions if CONDITIONS[split_condition(c)[0]].get("tool") == "call"
+    onpolicy = [c for c in conditions if CONDITIONS[split_condition(split_variant(c)[0])[0]].get("tool") == "call"
                 and not (out / "onpolicy" / f"{a.stage}__{c}.jsonl").exists()] if a.onpolicy else []
     if not passes and not onpolicy:
         return
@@ -292,7 +342,8 @@ def main(argv=None):
     template_tokenizer = AutoTokenizer.from_pretrained(m.get("chat_template_from", m["name"]), trust_remote_code=trc,
                                                        revision=revision_of(cfg, m.get("chat_template_from", m["name"])))
     system_prompt = cfg.get("system_prompt", "none")
-    outcome_ids = {c: tuple(outcome_token_ids(c, tokenizer)) for _, _, _, todo, _ in passes for c in todo}
+    outcome_ids = {c: tuple(outcome_token_ids(split_variant(c)[0], tokenizer)) for _, _, _, todo, _ in passes
+                   for c in todo}
     probe_ids, _ = render_condition("assistant", m, tasks, all_pairs[:1], template_tokenizer, tokenizer, system_prompt)
     uses_bos = tokenizer.bos_token_id is not None and probe_ids[0][0] == tokenizer.bos_token_id
 
@@ -314,6 +365,8 @@ def main(argv=None):
     engine = (VllmEngine if a.engine == "vllm" else HfEngine)(m, top_k)
     print(f"loaded {m['name']} in {(time.time() - t_load) / 60:.1f} min", flush=True)
     sanity_check(engine, tokenizer, m, uses_bos)
+    out.mkdir(parents=True, exist_ok=True)
+    choose_effort(engine, m, tasks, all_pairs, template_tokenizer, tokenizer, system_prompt, out, a.stage)
     if onpolicy:
         onpolicy_check(engine, onpolicy, m, tasks, all_pairs[:a.onpolicy], template_tokenizer, tokenizer, system_prompt,
                        a, out)

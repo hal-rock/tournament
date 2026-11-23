@@ -8,7 +8,8 @@ The jobs file:
     gpus: 8                     # GPUs on the node
     disk_budget_gb: 3800        # weights on disk at once (downloaded + downloading), HF cache only
     max_downloads: 2            # repos downloading at once
-    score_python: /root/vllm-env/bin/python   # the interpreter for score_replication.py (scripts/node_setup.sh)
+    score_python: /root/vllm-env/bin/python   # the interpreter for score_replication.py (scripts/node_setup.sh); a job
+                                              # may set its own
     jobs:
       - name: llama-405b-base
         config: configs/replication/llama-405b.yaml
@@ -71,7 +72,9 @@ def load_jobs(path):
             v = m.get("vllm", {})
             n = v.get("tensor_parallel_size", 1) * v.get("pipeline_parallel_size", 1)
             assert j.setdefault("gpus", n) == n, f"{j['name']}: gpus {j['gpus']} but the config's vLLM uses {n}"
-            j["cmd"] = " ".join([spec.get("score_python", "uv run python"), "score_replication.py", j["config"],
+            # A job's own score_python overrides the file's (round 2: vLLM nightly for Kimi K3.1 Pro, 0.33 for the rest).
+            j["cmd"] = " ".join([j.get("score_python", spec.get("score_python", "uv run python")), "score_replication.py",
+                                 j["config"],
                                  "--stage", j["stage"], *map(str, j.get("args", []))])
         else:
             j.setdefault("repos", [])

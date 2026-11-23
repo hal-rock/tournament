@@ -191,6 +191,12 @@ for _base in ("assistant", "coinflip"):
     for _rule, _text in IFCHOOSE_RULES.items():
         CONDITIONS[f"{_base}_ifchoose_{_rule}"] = {**CONDITIONS[_base], "body": (
             IFCHOOSE_LEAD.format(rule=_text) + CONDITIONS[_base]["body"])}
+# The same rules before the coin as a tool call (PLAN_replication2.md, Hal 2026-11-23: "choice instruction based on task
+# length, both with and without tool call report"): the rule, a blank line, then coinflip_tool's user turn ("... Okay,
+# please flip the coin now."), the prefilled call and the tool's result.
+for _rule, _text in IFCHOOSE_RULES.items():
+    CONDITIONS[f"coinflip_tool_ifchoose_{_rule}"] = {**CONDITIONS["coinflip_tool"], "body": (
+        IFCHOOSE_LEAD.format(rule=_text) + CONDITIONS["coinflip_tool"]["body"])}
 # Lazy personas (README, "Lazy personas"): a one-word persona of the kind people try for fun, at the start of the user's
 # message in one of two phrasings (Hal, 2026-11-12): "You are a pirate." (an identity) or "In your next message, answer as a
 # pirate." (the shallow instruction's "next message", without "if asked what you prefer"). A blank line, then the condition's
@@ -429,6 +435,21 @@ SYSTEM_BLOCKS = [
 ]
 
 
+# Default system blocks that some templates write into every prompt and that we keep (`keep_system` in a config): the
+# reasoning-effort line of always-thinking models (GLM-5.3: "Reasoning Effort: Max"; Kimi K3.1 Pro: a "thinking-effort"
+# system message). They are a control the deployed model always sees, not an identity prompt like Kimi K2's "You are Kimi".
+# The text that closes an always-thinking template's generation prompt into an empty think block, so the prefill is the
+# answer, keyed by how the generation prompt ends (`close_think` in a config: true for "</think>\n", or the exact text).
+THINK_OPENERS = ("<think>", "<|open|>think<|sep|>")
+
+
+def close_think_text(close_think):
+    """The text close_think appends: True is OLMo 3 Think's / Trinity's "</think>\\n"; a string is used as given (GLM-5.3:
+    "</think>"; Kimi K3.1 Pro: "<|close|>think<|sep|><|open|>response<|sep|>"), each as its template renders a past turn
+    with empty reasoning (tests/test_replication_<key>.py)."""
+    return "</think>\n" if close_think is True else close_think
+
+
 def _strip_system(rendered, content):
     """Templates that inject a default system block have no flag to disable it,
     so cut the block off. Deliberately strict: fail loudly on a template we have
@@ -441,9 +462,11 @@ def _strip_system(rendered, content):
 
 
 def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format, close_think=False,
-            strip_think=False):
+            strip_think=False, keep_system=False, template_kwargs=None):
     """The conversation as text, user content still ending in SENTINEL, plus the
-    Assistant header if has_reply."""
+    Assistant header if has_reply. keep_system: with system_prompt "none", keep the blocks the template writes on its own
+    (the reasoning-effort line, above) instead of stripping them. template_kwargs: extra arguments for the template
+    (reasoning_effort, thinking_effort)."""
     if turn_format is not None:
         # Models released without a Jinja template (DeepSeek V4) or whose template is wrong (Nemotron-4's HF
         # conversion): literal text that opens a user turn with no system prompt ("user"), or with one ("system", a
@@ -463,8 +486,8 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
     # appends "/nothink" to the user turn), Gemma 4 with an empty thought channel. Other
     # templates ignore it.
     rendered = template_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=has_reply,
-                                                      enable_thinking=False)
-    if system_prompt == "none":
+                                                      enable_thinking=False, **(template_kwargs or {}))
+    if system_prompt == "none" and not keep_system:
         rendered = _strip_system(rendered, messages[-1]["content"])
     if has_reply and rendered.endswith("<think></think>"):
         # GLM-4.5 puts a newline between the empty think block and the answer (it is in the
@@ -474,9 +497,10 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
         # Think-only templates (OLMo 3 Think) open every reply with "<think>" and have no
         # non-thinking mode. Close the block empty, so the prefill is the answer itself. One
         # newline, as in the chat and safety parts of Dolci-Think-SFT (math and code use two).
-        if not rendered.endswith("<think>"):
-            raise ValueError("close_think: the generation prompt does not end in <think>")
-        rendered += "</think>\n"
+        # Other always-thinking templates close it their own way (close_think_text).
+        if not rendered.endswith("<think>" if close_think is True else THINK_OPENERS):
+            raise ValueError("close_think: the generation prompt does not open a think block")
+        rendered += close_think_text(close_think)
     if has_reply and strip_think:
         # Or drop the opening "<think>", so the prefill follows the Assistant header directly. This
         # is how the Think template renders a reply that carries no trace: the format ../coinflip's
@@ -489,7 +513,7 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
 
 def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
                  turn_format=None, close_think=False, strip_think=False, doc_prefix=None, tool_family=None,
-                 tool_repo=None):
+                 tool_repo=None, keep_system=False, template_kwargs=None):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
@@ -503,6 +527,7 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     doc_prefix: the model's document-start token(s), which open a raw-text condition (no template).
     tool_family, tool_repo: for a tool condition (CONDITIONS[...]["tool"]), the family's tool format and, for DeepSeek V4,
     the repo of its reference encoder (toolframe.py).
+    keep_system, template_kwargs: see _render (always-thinking models' reasoning-effort block and its level).
     A condition "<condition>@<persona>[+placement]" adds the persona (see PLACEMENTS); as the system prompt, it replaces
     system_prompt (which must then be "none").
     """
@@ -530,14 +555,15 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
         if spec["tool"] == "call" and not prefill:  # the Assistant's turn left open: does it call the tool on its own?
             return toolframe.generation_prompt(tool_family, template_tokenizer, body,
                                                system=None if system_prompt == "none" else system_prompt,
-                                               close_think=close_think, ds_repo=tool_repo)
+                                               close_think=close_think, ds_repo=tool_repo,
+                                               template_kwargs=template_kwargs)
         return toolframe.build_tool_prompt(spec["tool"], condition, body, template_tokenizer, tool_family,
                                            system=None if system_prompt == "none" else system_prompt,
                                            prefill=spec["prefill"] if prefill else None, close_think=close_think,
-                                           ds_repo=tool_repo)
+                                           ds_repo=tool_repo, template_kwargs=template_kwargs)
     has_reply = spec["prefill"] is not None
     rendered = _render([{"role": "user", "content": body + SENTINEL}], template_tokenizer, has_reply,
-                       system_prompt, turn_format, close_think, strip_think)
+                       system_prompt, turn_format, close_think, strip_think, keep_system, template_kwargs)
 
     if not has_reply:
         # Cut inside the user turn, so the model continues the Human's message.

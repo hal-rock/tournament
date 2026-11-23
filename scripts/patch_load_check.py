@@ -48,7 +48,7 @@ from replication_embed_rows import _decode, _get  # noqa: E402
 from report_patch import resolve_model  # noqa: E402
 from tournament import kimi_k2_config  # noqa: E402
 
-KEYS = ["kimi-k2", "llama-405b", "deepseek-v3", "deepseek-v4-flash", "trinity-large", "nemotron4-340b"]
+KEYS = ["kimi-k2", "llama-405b", "deepseek-v3", "deepseek-v4-flash", "trinity-large", "nemotron4-340b", "glm-5.3"]
 DTYPES = {"BF16": torch.bfloat16, "F16": torch.float16, "F32": torch.float32, "F64": torch.float64,
           "F8_E4M3": torch.float8_e4m3fn, "F8_E5M2": torch.float8_e5m2, "F8_E8M0": torch.float8_e8m0fnu,
           "I8": torch.int8, "U8": torch.uint8, "I16": torch.int16, "I32": torch.int32, "I64": torch.int64,
@@ -208,7 +208,7 @@ def rope_check(model, config, repo, sha, tensors) -> list[str]:
 
 def check(key: str, cache: Path) -> tuple[str, dict]:
     cfg = yaml.safe_load((ROOT / "configs" / "coin_report" / f"{key}.yaml").read_text())
-    m = resolve_model(cfg)
+    m = resolve_model(cfg, require_effort=False)  # the effort level only shapes prompts
     sha = pinned_sha(m["name"], m.get("revision"))
     index, tensors = read_headers(m["name"], sha, cache)
     assert set(index) == set(tensors), (set(index) ^ set(tensors))

@@ -61,9 +61,10 @@ from openers import slope_per_sd, write_csv  # noqa: E402
 from replication import PERSONAS  # noqa: E402
 from report import INK, INK_2, RULE, origin_scatter, style  # noqa: E402
 
-KEYS = ("llama-405b", "deepseek-v3", "kimi-k2", "deepseek-v4-flash", "trinity-large")
+KEYS = ("llama-405b", "deepseek-v3", "kimi-k2", "deepseek-v4-flash", "trinity-large", "glm-5.3", "kimi-k3.1-pro")
 LABEL = {"llama-405b": "Llama 3.1 405B", "deepseek-v3": "DeepSeek V3", "kimi-k2": "Kimi K2",
-         "deepseek-v4-flash": "DeepSeek V4 Flash", "trinity-large": "Trinity Large Thinking"}
+         "deepseek-v4-flash": "DeepSeek V4 Flash", "trinity-large": "Trinity Large Thinking", "glm-5.3": "GLM-5.3",
+         "kimi-k3.1-pro": "Kimi K3.1 Pro"}
 R_UNCHANGED = 0.95
 SUFFIXES = ra.FIT_SUFFIXES
 PLAIN = {"T": "coinflip_tool", "Cd": "coinflip_tools_declared", "Ad": "assistant_tools_declared", "A0": "assistant",
@@ -77,15 +78,30 @@ def persona_cells(p):
             f"P_self@{p}": f"predict_user@{p}+self"}
 
 
+def tool_run(key, root=None):
+    """The run holding a model's tool conditions: tool-<key> (the first round), or the model's own (round 2's new models)."""
+    return f"tool-{key}" if (Path(root or ra.OUT) / f"tool-{key}").exists() else key
+
+
+def analysis_dir(key, root=None):
+    run = tool_run(key, root)
+    return Path(root or ra.OUT) / run / ("analysis" if run != key else "analysis_tool")
+
+
 class Data:
     """One model's cells under short names, from its tool run and its replication run."""
 
     def __init__(self, key, root=None):
-        rep, tool = ra.Model(key, root), ra.Model(f"tool-{key}", root)
+        # Round 2's new models (README, "Replication round 2") ran the tool conditions in their own run.
+        tool_key = tool_run(key, root)
+        rep = ra.Model(key, root)
+        tool = rep if tool_key == key else ra.Model(tool_key, root)
         assert rep.ids == tool.ids, "the two runs' task sets differ"
         self.key, self.label = key, LABEL.get(key, rep.label)
         self.ids, self.origins, self.nonharm = rep.ids, rep.origins, rep.nonharm
         self.dir = tool.dir
+        # Its own analysis directory: the new models' run directory also holds replication_analysis.py's analysis/.
+        self.out = tool.dir / ("analysis" if tool_key != key else "analysis_tool")
         self.U, self.cells, self.pilots = {}, {}, set()
         names = dict(PLAIN)
         for p in PERSONAS:
@@ -406,7 +422,7 @@ ORIGIN_LABELS = {"MATH": "MATH", "ALPACA": "Alpaca", "WILDCHAT": "WildChat", "ST
 
 def saved_stats(key, root=None):
     """{name: (estimate, lo, hi)} from analyze()'s stats.csv, so figures don't rerun the bootstrap."""
-    path = Path(root or ra.OUT) / f"tool-{key}" / "analysis" / "stats.csv"
+    path = analysis_dir(key, root) / "stats.csv"
     rows = [line.split(",") for line in path.read_text().splitlines()[1:]]
     return {r[0]: tuple(float(v) for v in r[1:]) for r in rows}
 
@@ -414,7 +430,7 @@ def saved_stats(key, root=None):
 def plot_tool_scatter(keys, path, root=None):
     """One panel per model: the tool's coin (T) against the Assistant's own choice (A_0), one per task, with an
     ordinary least-squares line and r (95% task-bootstrap CI, all 300 tasks and pooled within sources) from stats.csv."""
-    keys = [k for k in keys if (Path(root or ra.OUT) / f"tool-{k}" / "analysis" / "stats.csv").exists()]
+    keys = [k for k in keys if (analysis_dir(k, root) / "stats.csv").exists()]
     if not keys:
         return
     ncols = 3
@@ -463,7 +479,7 @@ def analyze(key, n_boot=N_BOOTSTRAP, figures=True, root=None, fig_root=None):
     S = bootstrap(d.U, d.origins, d.nonharm, resamples, d.personas())
     rows = calls(S, d)
     pol = onpolicy(d)
-    out = d.dir / "analysis"
+    out = d.out
     write_csv(out / "stats.csv", [dict(stat=n, estimate=v[0], ci_low=v[1], ci_high=v[2]) for n, v in S.items()])
     write_csv(out / "calls.csv", rows)
     if pol:
@@ -498,7 +514,7 @@ def main(argv=None):
         return
     results, calls_by_key, summary = {}, {}, []
     for key in a.keys:
-        if not (ra.OUT / f"tool-{key}" / "results").exists():
+        if not (ra.OUT / tool_run(key) / "results" / "instruct__coinflip_tool.csv.gz").exists():
             print(f"{key}: no tool results yet")
             continue
         S, rows, pol = analyze(key, a.n_boot)

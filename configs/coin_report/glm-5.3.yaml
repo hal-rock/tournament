@@ -1,0 +1,24 @@
+# Finding 8 of replication round 2 (PLAN_replication2.md): report_patch.py's design (the 1,000 pilot pairs outside the
+# sweep; the unpatched pass, self, swap and ctrl, as the first round's scope) on GLM-5.3, in HF on the round-2 node (8x
+# B300) after its vLLM scoring. Run once per report question (--report), the wordings chosen from the vLLM wording check
+# of the model's pilot, by the first round's rule.
+# - Model and prompt format from the replication config (model_from): repo, pinned revision, the kept reasoning-effort
+#   block at the level the vLLM run chose (outputs/replication/glm-5.3/instruct.template_kwargs.json), the empty think
+#   block "</think>", the pinned sanity text.
+# - Native GlmMoeDsaForCausalLM (transformers 5.17) with its FP8 block quantization (the gpu group's `kernels`); the
+#   multi-token-prediction layer (model.layers.78) is in the checkpoint and not loaded (scripts/patch_load_check.py).
+#   DSA keeps min(2,048, prompt length) tokens, so attention is dense on these prompts, as in vLLM.
+# - Memory: 745.6 GB (694 GiB) as loaded; the 180 GiB cap puts them on four B300s (~268 GiB each), leaving ~88 GiB on each
+#   for activations. Batch 64 (~250-token prompts); captures stay on the CPU.
+family: glm-5.3
+run_name: coin-report-glm-5.3
+tags: [glm-5.3, replication2, finding8]
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+pairs: pilot
+n_pairs: 1000
+seed: 0
+batch_size: 64
+chunk_pairs: 64
+model_from: {config: configs/replication/glm-5.3.yaml, stage: instruct}
+model:
+  max_memory: {0: 180GiB, 1: 180GiB, 2: 180GiB, 3: 180GiB, 4: 180GiB, 5: 180GiB, 6: 180GiB, 7: 180GiB}

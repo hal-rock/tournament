@@ -96,6 +96,7 @@ BENIGN_SOURCES = ("MATH", "ALPACA", "WILDCHAT")  # PLAN_replication.md, decision
 MIN_RELIABILITY, MIN_MASS = 0.9, 0.2
 SEPARABLE = 0.9  # "separable" is |r(persona Assistant, A_0)| below this
 R_AP = 0.5  # finding 3: r(A_f, P_f) at least this
+R_FINAL_ONLY = 0.5  # round 2, findings 1-3 without a base: r(A_f, Y_f) at least this, with its CI above 0
 READOUT = {"A": "assistant", "C": "coinflip", "U": "user_choice", "P": "predict_user"}
 READOUT_LABEL = {"A": "Assistant's own choice", "C": "Coin", "U": "User's choice", "P": "Assistant's prediction\nof the user"}
 PLACE = {"none": "", "sys": "@{p}", "user": "@{p}+user", "self": "@{p}+self", "roleplay": "@{p}+roleplay"}
@@ -200,6 +201,8 @@ class Model:
         cfg = read_config(key, root)
         self.label = model_label(key, cfg)
         self.legacy = bool(cfg.get("legacy"))
+        # Round 2's new models have no released base (README, "Replication round 2"): findings 1-3 get final-only calls.
+        self.has_base = not cfg.get("models") or any(m.get("stage") == "base" for m in cfg["models"])
         tasks = sorted(read_jsonl(cfg.get("tasks_file", DEFAULT_TASKS)), key=lambda t: t["id"])
         self.tasks = tasks
         self.ids = [t["id"] for t in tasks]
@@ -410,7 +413,25 @@ def _A0():
     return condition_key("A", "instruct")
 
 
+def final_only_call(n, S, model, y):
+    """Round 2's call for findings 1-3 on a model without a released base (README, "Replication round 2", A): "replicates"
+    if r(A_f, Y_f) >= 0.5 with its CI above 0. Without a base it can't separate post-training from pretraining."""
+    need = [condition_key("A", "instruct"), condition_key(y, "instruct")]
+    status, reason = gate(model, need)
+    if status == "not run":
+        return _row(n, None, status, reason)
+    r = S[f"r:{y}_f~A_f"]
+    ok = r[0] >= R_FINAL_ONLY and r[1] > 0
+    section = f"final only; Δ: {delta_call(*S['f3:delta'])}" if n == 3 and "f3:delta" in S else "final only"
+    delta = f"; Δ = r(U_f, P_f) - r(U_f, A_f) {_ci(S, 'f3:delta')}" if n == 3 and "f3:delta" in S else ""
+    return _row(n, None, status, reason, "replicates" if ok else "doesn't", section,
+                key_number=f"r {r[0]:.2f} (no base)", detail=f"r(A_f, {y}_f) {_ci(S, f'r:{y}_f~A_f')}{delta}",
+                plot=[(f"r:{y}_f~A_f", f"r(A_f, {y}_f), no base", R_FINAL_ONLY)])
+
+
 def call_1(S, model):
+    if not model.has_base:
+        return final_only_call(1, S, model, "C")
     need = [condition_key(x, s) for x in "AC" for s in ("base", "instruct")]
     status, reason = gate(model, need)
     if status == "not run":
@@ -425,6 +446,8 @@ def call_1(S, model):
 
 
 def call_2(S, model):
+    if not model.has_base:
+        return final_only_call(2, S, model, "U")
     need = [condition_key(x, s) for x in "AU" for s in ("base", "instruct")]
     status, reason = gate(model, need)
     if status == "not run":
@@ -438,6 +461,8 @@ def call_2(S, model):
 
 
 def call_3(S, model):
+    if not model.has_base:
+        return final_only_call(3, S, model, "P")
     need = [condition_key("A", "instruct"), condition_key("P", "base"), condition_key("P", "instruct")]
     status, reason = gate(model, need)
     if status == "not run":

@@ -39,6 +39,7 @@ from test_replication_kimi_k2 import FINAL as KIMI, KIMI_PATTERN, _files, specia
 
 ROOT = Path(__file__).resolve().parent.parent
 KEYS = ["kimi-k2", "llama-405b", "deepseek-v3", "deepseek-v4-flash", "trinity-large", "nemotron4-340b"]
+R2_KEYS = ["glm-5.3"]  # replication round 2 (PLAN_replication2.md): finding 8 on GLM-5.3 only
 LLAMA = "unsloth/Llama-3.3-70B-Instruct"  # test_report_patch.py's tokenizer
 TASKS = read_jsonl(ROOT / "data/tasks_n300_max500_seed0.jsonl")
 # The first pilot pairs (report_patch.pilot_pairs, as the runs draw them), the ones the wording check scores.
@@ -167,7 +168,7 @@ def test_model_from_resolves(key):
 
 
 @pytest.mark.parametrize("path", sorted(p.name for p in (ROOT / "configs/coin_report").glob("*.yaml")
-                                        if p.stem not in KEYS))
+                                        if p.stem not in KEYS + R2_KEYS))
 def test_earlier_configs_resolve_unchanged(path):
     cfg = yaml.safe_load((ROOT / "configs/coin_report" / path).read_text())
     m = resolve_model(cfg)
@@ -468,3 +469,36 @@ def test_kimi_k2_reads_as_deepseek_v3():
     ref_inv, ref_mult, ref_scale = remote_yarn(config)
     assert torch.allclose(inv_freq, torch.tensor(ref_inv), rtol=1e-6) and mult == pytest.approx(ref_mult)
     assert tournament.LOADERS["kimi_k2"] is tournament.load_kimi_k2
+
+
+# ---------------------------------------------------------------- round 2: GLM-5.3
+
+def test_glm53_resolves_with_the_effort_its_scoring_chose(tmp_path, monkeypatch):
+    """GLM-5.3's patching reads its replication entry's format (the kept effort block, "</think>", the pinned sanity text)
+    and the effort level its vLLM run chose (outputs/replication/glm-5.3/instruct.template_kwargs.json), and builds on the
+    pilot pairs exactly the prompts score_replication renders with that level."""
+    cfg = coin_report_config("glm-5.3")
+    rep, entry = replication_entry("glm-5.3")
+    assert cfg["model_from"] == {"config": "configs/replication/glm-5.3.yaml", "stage": "instruct"}
+    assert (cfg["n_pairs"], cfg["seed"], cfg["pairs"]) == (1000, 0, "pilot")
+    monkeypatch.chdir(tmp_path)  # no scoring on disk: resolve_model refuses, unless told the effort doesn't matter
+    (tmp_path / "configs").symlink_to(ROOT / "configs")
+    with pytest.raises(AssertionError):
+        resolve_model(cfg)
+    assert "template_kwargs" not in resolve_model(cfg, require_effort=False)
+    chosen = tmp_path / "outputs/replication/glm-5.3/instruct.template_kwargs.json"
+    chosen.parent.mkdir(parents=True)
+    chosen.write_text('{"reasoning_effort": "low"}')
+    m = resolve_model(cfg)
+    assert prompt_format(m) == {"close_think": "</think>", "keep_system": True,
+                                "template_kwargs": {"reasoning_effort": "low"}}
+    assert m["sanity"] == entry["sanity"] and m["revision"] == entry["revision"]
+    tok, template = load_tokenizers(m)
+    ordered = [q for i, j in PAIRS for q in ((i, j), (j, i))]
+    scored = {**entry, "template_kwargs": {"reasoning_effort": "low"}}
+    for report in WORDING_CHECK:
+        items = build_items(tok, TASKS, PAIRS, report, template, **prompt_format(m))
+        full = score_replication.render_condition(report, scored, TASKS, ordered, template, tok, "none")[0]
+        assert [it["ids"] for it in items] == full
+        assert all(tok.decode(it["ids"][it["up"]]).strip() == "up" for it in items)
+        assert "Reasoning Effort: Low" in tok.decode(items[0]["ids"])

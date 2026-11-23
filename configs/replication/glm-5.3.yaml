@@ -1,0 +1,43 @@
+# GLM-5.3 (Z.ai; 743B-parameter MoE, 39B active, FP8 e4m3 with 128x128 block scales, 756 GB) in replication round 2
+# (PLAN_replication2.md). No base is released (GLM-5.3 shares GLM-5.2's base; neither is on the Hub), so this is the
+# final model alone, with every round-2 condition: findings 1-7, the coin as a tool call, the tool's coin under roleplay,
+# the length rules, the raw-text stories and the reasoning check (replication.CONDITION_SETS["new_final"]).
+# Onboarding notes: replication/onboarding/glm-5.3.md; tests/test_replication_glm53.py checks this file.
+# - Template: the repo's chat_template.jinja. Every prompt opens [gMASK]<sop><|system|>Reasoning Effort: <level>, with no
+#   newlines anywhere between turns. That block is a control the deployed model always sees, so it stays (keep_system);
+#   a persona's system message is a second <|system|> block after it.
+# - Always thinks: the generation prompt ends <|assistant|><think>, with no non-thinking mode. Assistant-turn readouts go
+#   after an empty think block, "</think>" with no newline, as the template renders a past turn with empty reasoning.
+#   The reasoning check (~inreasoning) reads inside the reasoning instead.
+# - Effort: low, high or max (the template's default), picked after loading by score_replication.choose_effort: the
+#   level at which the model is likeliest to close its think block at once.
+# - Tools (toolframe family glm5): the tool instructions are a <|system|> block after the effort line; the call is
+#   <tool_call>flip_coin</tool_call>, the result <|observation|><tool_response>{"result": "heads"}.
+# - Raw text: "[gMASK]<sop>", as GLM-4.5-Air in the raw-text section (input rows 0.72x and 0.92x an ordinary row).
+# - DeepSeek sparse attention keeps the top 2,048 tokens per query; every prompt here is shorter, so it is dense.
+wandb_project: tournament
+group: replication2
+run_name: glm-5.3
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+  - name: zai-org/GLM-5.3
+    stage: instruct
+    revision: ba32f8c19c8738e2c57c71798c601d477a7bf844
+    close_think: "</think>"
+    keep_system: true
+    effort: {kwarg: reasoning_effort, values: [low, high, max], close: "</think>", pairs: 24}
+    tool_family: glm5
+    doc_prefix: "[gMASK]<sop>"
+    variants: {inreasoning: {close_think: false}}
+    sanity: {text: "[gMASK]<sop>The capital of France is Paris, and the capital of Germany is"}
+    download:
+      allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, generation_config.json, tokenizer.json,
+                       tokenizer_config.json, chat_template.jinja]
+      gb: 755.7
+    # The longest prompt over the 75 conditions is in the config test (tests/test_replication_glm53.py).
+    vllm: {tensor_parallel_size: 8, max_model_len: 1536, gpu_memory_utilization: 0.9, enable_prefix_caching: true}
+    conditions: new_final

@@ -1,0 +1,31 @@
+# Replication round 2's node jobs (PLAN_replication2.md), run by replication_runner.py in this order, one model load each
+# (pilot of 24 pairs for every condition, then the full scoring). Order:
+# - DeepSeek V4 Flash first: small (4 GPUs, as in round 1), and its gate (assistant, coinflip, coinflip_tool against
+#   round 1's runs) checks the new node early;
+# - GLM-5.3, the first new model (check-in after it);
+# - Kimi K3.1 Pro, the largest and riskiest, in the vLLM nightly venv;
+# - the other first-round finals.
+# Finding 8's patching on GLM-5.3 (HF) is a separate list, replication/round2_patch_jobs.yaml, after the check-in.
+# --onpolicy 50: the Assistant's own reply to each tool-call user turn (does it call flip_coin?), as in the tool run.
+# --wording 0 for the first-round models (their wordings are settled); the new models get the wording check by default.
+# Disk: the largest model is Kimi K3.1 Pro (1,561 GB); rent >= 5 TB and lower disk_budget_gb if the node has less.
+gpus: 8
+disk_budget_gb: 3800
+max_downloads: 2
+score_python: /root/vllm-env/bin/python
+jobs:
+  - {name: r2-deepseek-v4-flash, config: configs/replication/round2/deepseek-v4-flash.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: glm-5.3, config: configs/replication/glm-5.3.yaml, stage: instruct, args: [--onpolicy, 50, --with-pilot, 24]}
+  - {name: kimi-k3.1-pro, config: configs/replication/kimi-k3.1-pro.yaml, stage: instruct,
+     score_python: /root/vllm-nightly/bin/python, args: [--onpolicy, 50, --with-pilot, 24]}
+  - {name: r2-llama-405b, config: configs/replication/round2/llama-405b.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: r2-deepseek-v3, config: configs/replication/round2/deepseek-v3.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: r2-kimi-k2, config: configs/replication/round2/kimi-k2.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: r2-trinity-large, config: configs/replication/round2/trinity-large.yaml, stage: instruct,
+     args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
+  - {name: r2-nemotron4-340b, config: configs/replication/round2/nemotron4-340b.yaml, stage: instruct,
+     args: [--with-pilot, 24, --wording, 0]}

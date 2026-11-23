@@ -81,3 +81,16 @@
 - **Shape mismatches**: 0.
 - Dtype casts at load (checkpoint -> model): none.
 - **Verdict: loads**: every model parameter is filled from the checkpoint with its shape, and every checkpoint tensor is used or deliberately skipped.
+
+## Round 2 (PLAN_replication2.md), 2026-11-23
+
+### glm-5.3: `zai-org/GLM-5.3`
+
+- Revision `ba32f8c19c8738e2c57c71798c601d477a7bf844` (pinned in the replication config); 141 shards, 118,629 tensors, 755.6 GB.
+- Class `GlmMoeDsaForCausalLM` (AutoModelForCausalLM), 78 blocks; attention `sdpa` (the default); quantization: {"quant_method": "fp8", "fmt": "e4m3", "weight_block_size": [128, 128]}.
+- As loaded: 2,085 parameters and 77 buffers, 745.6 GB of weights (93.2 GB per GPU split over 8; largest block 9.9 GB). transformers set 2,160 tensors from the checkpoint (52 s on the meta device).
+- **Missing** (model parameters no checkpoint tensor fills): 0.
+- **Unexpected** (checkpoint tensors the model doesn't take): 0. Skipped by transformers' ignore rules (not loaded): 37 after renaming, all in layer 78: `model.layers.*.eh_proj.weight`, `model.layers.*.enorm.weight`, `model.layers.*.hnorm.weight`, `model.layers.*.input_layernorm.weight`, `model.layers.*.mlp.experts.down_proj`, `model.layers.*.mlp.experts.down_proj_scale_inv` ....
+- **Shape mismatches**: 0.
+- Dtype casts at load (checkpoint -> model): none.
+- **Verdict: loads**: every model parameter is filled from the checkpoint with its shape, and every checkpoint tensor is used or deliberately skipped.

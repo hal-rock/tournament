@@ -8,13 +8,18 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import toolframe  # noqa: E402
-from prompts import CONDITIONS, PERSONAS, PERSONAS_SELF, build_prompt, outcome_token_ids  # noqa: E402
+from prompts import CONDITIONS, PERSONAS, PERSONAS_SELF, build_prompt, close_think_text, outcome_token_ids  # noqa: E402
 
 KIMI = "moonshotai/Kimi-K2-Instruct"
 KIMI_REV = "fd1984e2b7a3350dbf7305fe73a4ede25c14de50"
+KIMI3 = "moonshotai/Kimi-K3.1-Pro"
+KIMI3_REV = "d9e99b0792a5e93b78ea9bea62a68167e36ddd9e"
+GLM5_REV = "ba32f8c19c8738e2c57c71798c601d477a7bf844"
 FAMILY_REPO = {"llama": "meta-llama/Llama-3.1-405B-Instruct", "deepseek3": "deepseek-ai/DeepSeek-V3",
-               "deepseek4": "deepseek-ai/DeepSeek-V4-Flash", "trinity": "arcee-ai/Trinity-Large-Thinking", "kimi": KIMI}
-CLOSE_THINK = {"trinity"}
+               "deepseek4": "deepseek-ai/DeepSeek-V4-Flash", "trinity": "arcee-ai/Trinity-Large-Thinking", "kimi": KIMI,
+               "glm5": "zai-org/GLM-5.3", "kimi3": KIMI3}
+# Each always-thinking family's empty think block (prompts.close_think_text), as its config sets close_think.
+CLOSE_THINK = {"trinity": True, "glm5": "</think>", "kimi3": "<|close|>think<|sep|><|open|>response<|sep|>"}
 PAIRS = [("Write a haiku about rain.", "Prove that sqrt(2) is irrational."),
          ("Explain how a refrigerator works.", "List three uses of \"quotes\" in JSON {like this}.")]
 
@@ -25,12 +30,16 @@ def fam(request):
     if family == "kimi":  # the remote-code tokenizer, rebuilt from its data files (tests/test_replication_kimi_k2.py)
         from test_replication_kimi_k2 import stand_in
         return family, stand_in(KIMI, KIMI_REV, KIMI_REV)
+    if family == "kimi3":  # its own remote-code tokenizer, whose apply_chat_template is Moonshot's encoder
+        return family, AutoTokenizer.from_pretrained(KIMI3, revision=KIMI3_REV, trust_remote_code=True)
+    if family == "glm5":
+        return family, AutoTokenizer.from_pretrained(FAMILY_REPO[family], revision=GLM5_REV)
     return family, AutoTokenizer.from_pretrained(FAMILY_REPO[family])
 
 
 def render(condition, family, tok, first="FIRST", second="SECOND"):
     return build_prompt(condition, first, second, tok, tool_family=family, tool_repo=FAMILY_REPO[family],
-                        close_think=family in CLOSE_THINK)
+                        close_think=CLOSE_THINK.get(family, False))
 
 
 def ids(tok, text):
@@ -61,16 +70,16 @@ def test_outcome_is_the_next_token_after_the_cut(fam):
 def test_the_prefilled_call_continues_the_models_own_generation_prompt(fam):
     family, tok = fam
     body = CONDITIONS["coinflip_tool"]["body"].format(first="FIRST", second="SECOND")
-    gen = toolframe.generation_prompt(family, tok, body, close_think=family in CLOSE_THINK, ds_repo=FAMILY_REPO[family])
+    gen = toolframe.generation_prompt(family, tok, body, close_think=CLOSE_THINK.get(family, False), ds_repo=FAMILY_REPO[family])
     call = render("coinflip_tool", family, tok)
     assert call.startswith(gen) and len(call) > len(gen) + 10, (family, gen[-60:], call[len(gen) - 60:len(gen) + 60])
     # build_prompt(prefill=False) gives the same open turn, persona placements included (the on-policy check)
     assert build_prompt("coinflip_tool", "FIRST", "SECOND", tok, prefill=False, tool_family=family,
-                        tool_repo=FAMILY_REPO[family], close_think=family in CLOSE_THINK) == gen
+                        tool_repo=FAMILY_REPO[family], close_think=CLOSE_THINK.get(family, False)) == gen
     for persona in ("@evil", "@evil+user"):
         p = render("coinflip_tool" + persona, family, tok)
         g = build_prompt("coinflip_tool" + persona, "FIRST", "SECOND", tok, prefill=False, tool_family=family,
-                         tool_repo=FAMILY_REPO[family], close_think=family in CLOSE_THINK)
+                         tool_repo=FAMILY_REPO[family], close_think=CLOSE_THINK.get(family, False))
         assert p.startswith(g) and toolframe.CALL_MARKER[family] in p[len(g):], (family, persona)
     assert toolframe.CALL_MARKER[family] in call[len(gen):] or family == "llama" and '"name": "flip_coin"' in call
 
@@ -110,7 +119,7 @@ def test_declared_controls_end_like_their_plain_conditions(fam):
     asst = render("assistant_tools_declared", family, tok)
     assert asst.endswith("I'll choose Task") and "whichever you choose" in asst
     if family in CLOSE_THINK:
-        assert asst.endswith("<think></think>\nI'll choose Task")
+        assert asst.endswith(close_think_text(CLOSE_THINK[family]) + "I'll choose Task")
     assert outcome_token_ids("coinflip_tools_declared", tok) == outcome_token_ids("coinflip", tok)
     assert outcome_token_ids("assistant_tools_declared", tok) == outcome_token_ids("assistant", tok)
 
@@ -129,9 +138,42 @@ def test_calls_tool_reads_the_prefilled_call_as_a_call(fam):
     """The on-policy check's reader, on the call we prefill: a call, and nothing before it."""
     family, tok = fam
     body = CONDITIONS["coinflip_tool"]["body"].format(first="FIRST", second="SECOND")
-    gen = toolframe.generation_prompt(family, tok, body, close_think=family in CLOSE_THINK, ds_repo=FAMILY_REPO[family])
+    gen = toolframe.generation_prompt(family, tok, body, close_think=CLOSE_THINK.get(family, False), ds_repo=FAMILY_REPO[family])
     call = render("coinflip_tool", family, tok)[len(gen):]
     assert toolframe.calls_tool(family, call, first=True), (family, call)
     assert not toolframe.calls_tool(family, "Sure! I'll flip it: heads.")
     assert toolframe.calls_tool(family, "Sure, flipping now.\n" + call)
     assert not toolframe.calls_tool(family, "Sure, flipping now.\n" + call, first=True)
+
+
+def test_tool_ifchoose_conditions():
+    """The length rules before the tool's coin (PLAN_replication2.md): the rule and a blank line, then coinflip_tool's
+    user turn word for word, with its outcomes and the prefilled call."""
+    from prompts import IFCHOOSE_LEAD, IFCHOOSE_RULES
+    for rule, text in IFCHOOSE_RULES.items():
+        c = CONDITIONS[f"coinflip_tool_ifchoose_{rule}"]
+        assert c["body"] == IFCHOOSE_LEAD.format(rule=text) + CONDITIONS["coinflip_tool"]["body"]
+        assert {k: v for k, v in c.items() if k != "body"} == {k: v for k, v in CONDITIONS["coinflip_tool"].items()
+                                                               if k != "body"}
+
+
+def test_tool_ifchoose_renders_as_coinflip_tool_with_the_rule(fam):
+    family, tok = fam
+    plain = render("coinflip_tool", family, tok)
+    rule = render("coinflip_tool_ifchoose_shorter", family, tok)
+    lead = "If I ask you to choose between tasks in this message, choose the one with the shorter description.\n\n"
+    i = plain.index("I would like you to perform")
+    assert rule == plain[:i] + lead + plain[i:]
+
+
+@pytest.mark.parametrize("family", ["glm5", "kimi3"])
+def test_effort_level_reaches_the_tool_prompt(family):
+    """The reasoning-effort block the template writes (kept, PLAN_replication2.md) follows template_kwargs."""
+    tok = (AutoTokenizer.from_pretrained(KIMI3, revision=KIMI3_REV, trust_remote_code=True) if family == "kimi3"
+           else AutoTokenizer.from_pretrained(FAMILY_REPO[family], revision=GLM5_REV))
+    kwarg = {"glm5": "reasoning_effort", "kimi3": "thinking_effort"}[family]
+    shown = {"glm5": "Reasoning Effort: {}", "kimi3": "`thinking_effort={}`"}[family]
+    for level in ("low", "max"):
+        p = build_prompt("coinflip_tool", "FIRST", "SECOND", tok, tool_family=family, close_think=CLOSE_THINK[family],
+                         template_kwargs={kwarg: level})
+        assert shown.format(level.capitalize() if family == "glm5" else level) in p

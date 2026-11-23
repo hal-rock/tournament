@@ -1,0 +1,48 @@
+# Kimi K3.1 Pro (Moonshot AI; 2.8T-parameter MoE, 104B active; MXFP4 routed experts, the rest BF16; 1,561 GB) in
+# replication round 2 (PLAN_replication2.md). No base is released (Kimi K3's isn't on the Hub), so this is the final model
+# alone, with every round-2 condition (replication.CONDITION_SETS["new_final"]). Onboarding notes:
+# replication/onboarding/kimi-k3.1-pro.md; tests/test_replication_kimi_k31.py checks this file.
+# - Needs 8x B300: the weights alone (1,454 GiB) exceed 8x B200's memory. vLLM >= 0.35 (nightly as of 2026-11-23), so it
+#   scores in its own venv (scripts/node_setup.sh, replication/round2_jobs.yaml).
+# - Format: Moonshot's encoder (encoding_k3.py), which the remote-code tokenizer's apply_chat_template runs. XML-like
+#   messages: <|open|>message role="user"<|sep|>...<|close|>message<|sep|><|end_of_msg|>. Our prompts tokenize the
+#   rendered text in one piece; the test checks that this gives the encoder's own segment-by-segment ids.
+# - Every prompt opens with a "thinking-effort" system message (the tokenizer's default, max), kept as a control the
+#   deployed model always sees (keep_system); a persona's system message follows it. Effort low, high or max is picked
+#   after loading by score_replication.choose_effort (P(<|close|>) right after the think opener).
+# - Always thinks (Kimi K3's card: "always has thinking enabled"). The encoder's thinking=False path isn't offered by the
+#   cards, so Assistant-turn readouts go after an empty think block, <|close|>think<|sep|><|open|>response<|sep|>, as a
+#   past turn with empty reasoning renders; the reasoning check (~inreasoning) reads inside the reasoning instead.
+# - Tools (toolframe family kimi3): a "tool-declare" system message before the effort one; the call in the Assistant's
+#   <tools> channel after an empty response; the result a role="tool" message.
+# - Raw text: "[BOS]", as for Kimi K2 (whose base trained it).
+# - Multimodal checkpoint: the vision tower isn't used (no image or video inputs allowed).
+# - Kimi Delta Attention layers: vLLM caches a hybrid model's prefixes only in ~1,280-token blocks, longer than any prompt
+#   here, so prefix caching saves nothing; it's left on, as for the other models.
+wandb_project: tournament
+group: replication2
+run_name: kimi-k3.1-pro
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+  - name: moonshotai/Kimi-K3.1-Pro
+    stage: instruct
+    revision: d9e99b0792a5e93b78ea9bea62a68167e36ddd9e
+    trust_remote_code: true
+    close_think: "<|close|>think<|sep|><|open|>response<|sep|>"
+    keep_system: true
+    effort: {kwarg: thinking_effort, values: [low, high, max], close: "<|close|>", pairs: 24}
+    tool_family: kimi3
+    doc_prefix: "[BOS]"
+    variants: {inreasoning: {close_think: false}}
+    download:
+      allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, generation_config.json,
+                       tokenizer_config.json, tiktoken.model, tokenization_kimi.py, encoding_k3.py, configuration_kimi_k3.py,
+                       preprocessor_config.json, kimi_k3_processor.py, kimi_k3_vision_processing.py, media_utils.py]
+      gb: 1561.4
+    vllm: {tensor_parallel_size: 8, max_model_len: 1536, gpu_memory_utilization: 0.9, enable_prefix_caching: true,
+           limit_mm_per_prompt: {image: 0, video: 0}}
+    conditions: new_final

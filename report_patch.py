@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import math
 import random
 import time
@@ -202,11 +203,11 @@ def line_positions(tok, text, line, method=None):
 
 # The prompt format of a replication config's entry (score_replication.render_condition), and the settings only this script
 # uses (`model:` next to `model_from:`).
-FORMAT_KEYS = ("turn_format", "close_think", "strip_think")
+FORMAT_KEYS = ("turn_format", "close_think", "strip_think", "keep_system", "template_kwargs")
 HF_KEYS = {"loader", "max_memory", "attn_implementation"}
 
 
-def resolve_model(cfg):
+def resolve_model(cfg, require_effort=True):
     """The config's model: `model` as it is, or with `model_from` the replication config's entry for that stage: name,
     revision, tokenizer_from / chat_template_from (each read at the revision the replication config pins for that repo, as
     score_replication.revision_of does), trust_remote_code and the prompt format; plus `model`'s HF settings."""
@@ -221,6 +222,11 @@ def resolve_model(cfg):
     revisions = {x["name"]: x.get("revision") for x in rep["models"]}
     m = {k: entry[k] for k in ("name", "revision", "tokenizer_from", "chat_template_from", "trust_remote_code", "sanity",
                                *FORMAT_KEYS) if k in entry}
+    if "effort" in entry:  # an always-thinking model (round 2): the reasoning-effort level its vLLM run chose and scored
+        chosen = Path("outputs/replication") / rep["run_name"] / f"{entry['stage']}.template_kwargs.json"
+        assert chosen.exists() or not require_effort, f"{chosen}: run the model's scoring (choose_effort) first"
+        if chosen.exists():
+            m["template_kwargs"] = json.loads(chosen.read_text())
     return {**m, "revisions": {r: revisions.get(r) for r in {m["name"], m.get("tokenizer_from", m["name"]),
                                                               m.get("chat_template_from", m["name"])}}, **hf}
 
@@ -251,6 +257,7 @@ def sanity_check(model, tok, m, uses_bos):
     pinned = m.get("sanity", {})
     answer = pinned.get("answer", SANITY[1])
     ids = list(pinned["ids"]) if "ids" in pinned else (
+        tok(pinned["text"], add_special_tokens=False).input_ids if "text" in pinned else
         ([tok.bos_token_id] if uses_bos else []) + tok(SANITY[0], add_special_tokens=False).input_ids)
     logits = model(input_ids=torch.tensor([ids], device=input_device(model)), use_cache=False).logits[0, -1].float()
     lp = torch.log_softmax(logits, -1)

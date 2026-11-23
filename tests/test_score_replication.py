@@ -194,3 +194,61 @@ def test_onpolicy_generates_on_the_open_turn_of_call_conditions_only(tmp_path, m
     assert int(r["prompt_tokens"]) == len(tok(build_prompt("coinflip_tool", tasks[i]["prompt"], tasks[j]["prompt"], tok,
                                                            tool_family="llama", tool_repo=llama),
                                               add_special_tokens=False).input_ids)
+
+
+def test_round2_effort_rule_variants_and_raw_text(tmp_path, monkeypatch):
+    """Round 2 (PLAN_replication2.md) on GLM-5.3's config: choose_effort scores P(</think>) right after the think opener at
+    each level, keeps the likeliest, saves it and renders every later prompt with it (a restart reads it back); a
+    "~inreasoning" condition is its base condition with close_think off; raw text opens with the document start."""
+    from transformers import AutoTokenizer
+    glm = yaml.safe_load(open("configs/replication/glm-5.3.yaml"))
+    (m,) = glm["models"]
+    tok = AutoTokenizer.from_pretrained(m["name"], revision=m["revision"])
+    (close,) = tok(m["effort"]["close"], add_special_tokens=False).input_ids
+    probes = {}
+
+    class Eff(FakeEngine):
+        def score(self, prompts, outcome_ids):
+            if tuple(outcome_ids) == (close, close):  # the effort probe: P(close) depends on the prompt's length
+                level = tok.decode(prompts[0]).split("Reasoning Effort: ")[1].split("<|")[0]
+                probes[level] = prompts
+            return super().score(prompts, outcome_ids)
+
+    monkeypatch.setattr(sr, "OUT_ROOT", tmp_path / "out")
+    monkeypatch.setattr(sr, "VllmEngine", Eff)
+    monkeypatch.setattr(sr, "sanity_check", lambda *a: None)
+    conds = ["assistant", "assistant~inreasoning", "raw_story_ai", "coinflip_tool@evil+roleplay"]
+    cfg = {**glm, "run_name": "fake", "top_k_tokens": 2, "models": [{**m, "conditions": conds}]}
+    path = tmp_path / "glm.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    sr.main([str(path), "--stage", "instruct", "--pilot", "2", "--no-wandb", "--wording", "0"])
+
+    out = tmp_path / "out" / "fake"
+    assert sorted(probes) == ["High", "Low", "Max"] and all(len(v) == 48 for v in probes.values())
+    p_close = {lvl: sum(math.exp(-1 - (len(p) % 7) / 10) for p in v) / 48 for lvl, v in probes.items()}
+    chosen = max(p_close, key=p_close.get).lower()
+    assert json.loads((out / "instruct.template_kwargs.json").read_text()) == {"reasoning_effort": chosen}
+    for v in probes.values():
+        assert all(tok.decode(p).endswith("<|assistant|><think>") for p in v)
+
+    tasks = sr.read_jsonl("data/tasks_n300_max500_seed0.jsonl")
+    i, j = sr.select_pairs(300, 15000, 0)[0]
+    rows = {c: _rows(out / "pilot" / f"instruct__{c}.csv.gz")[0] for c in conds}
+    kw = dict(keep_system=True, template_kwargs={"reasoning_effort": chosen}, tool_family="glm5")
+    a, b = tasks[i]["prompt"], tasks[j]["prompt"]
+    expect = {"assistant": build_prompt("assistant", a, b, tok, close_think="</think>", **kw),
+              "assistant~inreasoning": build_prompt("assistant", a, b, tok, close_think=False, **kw),
+              "raw_story_ai": build_prompt("raw_story_ai", a, b, tok, doc_prefix="[gMASK]<sop>"),
+              "coinflip_tool@evil+roleplay": build_prompt("coinflip_tool@evil+roleplay", a, b, tok, close_think="</think>",
+                                                          **kw)}
+    assert expect["assistant"].endswith("<think></think>I'll choose Task")
+    assert expect["assistant~inreasoning"].endswith("<|assistant|><think>I'll choose Task")
+    assert f"Reasoning Effort: {chosen.capitalize()}" in expect["coinflip_tool@evil+roleplay"]
+    for c in conds:
+        assert int(rows[c]["prompt_tokens"]) == len(tok(expect[c], add_special_tokens=False).input_ids), c
+
+    # A restart reuses the saved level without probing again.
+    probes.clear()
+    (out / "pilot" / "instruct__assistant.csv.gz").unlink()
+    sr.main([str(path), "--stage", "instruct", "--pilot", "2", "--no-wandb", "--wording", "0"])
+    assert probes == {} and (out / "pilot" / "instruct__assistant.csv.gz").exists()

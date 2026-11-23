@@ -27,6 +27,7 @@ class FakeModel:
 
     def __init__(self, U, origins, nonharm, bad=None):
         self.key, self.label, self.U, self.origins, self.nonharm, self.pilots = "fake", "Fake", U, origins, nonharm, set()
+        self.has_base = True
         self.cells = {k: dict(reliability=0.99, median_mass=0.9) for k in U}
         for k, v in (bad or {}).items():
             self.cells[k].update(v)
@@ -270,3 +271,32 @@ def test_status_grid(layout, monkeypatch, tmp_path):
     assert "| `instruct/coinflip@evil` | *pilot* |" in text and "| `instruct/coinflip@evil+user` | – |" in text
     assert "low mass" in text.split("`base/coinflip`")[1].split("\n")[0]
     assert "No replication models" in replication_status.render({}, now="now")
+
+
+def test_final_only_calls_without_a_base(tmp_path, monkeypatch):
+    """Round 2's models without a base (README, "Replication round 2", A): findings 1-3 are called on r(A_f, Y_f) >= 0.5 with
+    its CI above 0: here the coin and the prediction follow the Assistant and the user's choice doesn't."""
+    rng = np.random.default_rng(5)
+    tasks = [dict(id=f"t{i:02d}", origin=SOURCES[i % 5], topic="other", prompt="x" * (i + 1)) for i in range(30)]
+    tasks_file = tmp_path / "tasks.jsonl"
+    tasks_file.write_text("".join(json.dumps(t) + "\n" for t in tasks))
+    root = tmp_path / "replication"
+    monkeypatch.setattr(ra, "OUT", root)
+    monkeypatch.setattr(ra, "FIGURES", tmp_path / "figures")
+    monkeypatch.setattr(ra, "CONFIGS", tmp_path / "configs")
+    (root / "n").mkdir(parents=True)
+    (root / "n" / "run_config.yaml").write_text(yaml.safe_dump(dict(
+        run_name="n", tasks_file=str(tasks_file), models=[dict(name="org/N", stage="instruct", conditions="new_final")])))
+    ids = [t["id"] for t in tasks]
+    a = rng.normal(0, 2, 30)
+    utils = {"assistant": a, "coinflip": 0.5 * a + rng.normal(0, 0.3, 30), "user_choice": rng.normal(0, 2, 30),
+             "predict_user": a + rng.normal(0, 0.5, 30)}
+    for n, (cond, u) in enumerate(utils.items()):
+        write_results(root / "n" / "results" / f"instruct__{cond}.csv.gz", "instruct", cond, ids, u, seed=n)
+    model = ra.Model("n")
+    assert not model.has_base
+    _, S, rows = ra.analyze_model("n", n_boot=20, figures=False)
+    got = {r["finding"]: r for r in rows if r["persona"] in ("", None)}
+    assert got[1]["call"] == "replicates" and "no base" in got[1]["key_number"]
+    assert got[2]["call"] == "doesn't"
+    assert got[3]["call"] == "replicates" and got[3]["section_call"].startswith("final only")

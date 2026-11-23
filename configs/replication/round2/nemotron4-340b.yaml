@@ -1,0 +1,72 @@
+# Round 2 (PLAN_replication2.md) on mgoin/Nemotron-4-340B-Instruct-hf: the gate (its plain Assistant and coins re-scored
+# on the new node, against configs/replication/nemotron4-340b.yaml run) and round 2's new conditions (the length rules,
+# the raw-text stories), one load. Generated from the first round's instruct entry (same repo, revision, template
+# settings and vLLM settings). Raw-text document start: </s> and the dummy-prefix space: NeMo's pretraining separates
+# documents with EOD (</s>, trained row 0.60x; <s> was never an input) and SentencePiece starts each document with "▁",
+# which the HF tokenizer drops (replication/onboarding/nemotron4-340b.md), so the prefix carries it;
+# tests/test_replication_round2.py checks the ids against SentencePiece's. vLLM as in the first round except
+# max_model_len 1,536 (from 1,024): the tool coin prompts run to 872 tokens (DeepSeek V4 Flash).
+wandb_project: tournament
+group: replication2
+run_name: r2-nemotron4-340b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+seed: 0
+max_pairs: 15000
+system_prompt: none
+top_k_tokens: 5
+models:
+- name: mgoin/Nemotron-4-340B-Instruct-hf
+  stage: instruct
+  sanity:
+    ids:
+    - 1401
+    - 5614
+    - 1299
+    - 6451
+    - 1336
+    - 8045
+    - 252327
+    - 1300
+    - 1276
+    - 5614
+    - 1299
+    - 8851
+    - 1336
+    answer: Berlin
+  turn_format:
+    user: '▁<extra_id_0>System
+
+
+      <extra_id_1>User
+
+      '
+    system: '▁<extra_id_0>System
+
+      {system}
+
+      <extra_id_1>User
+
+      '
+    reply: '
+
+      <extra_id_1>Assistant
+
+      '
+  download:
+    allow_patterns:
+    - model-*.safetensors
+    - model.safetensors.index.json
+    - config.json
+    - generation_config.json
+    - tokenizer.model
+    - tokenizer_config.json
+    - special_tokens_map.json
+    gb: 682.1
+  vllm:
+    tensor_parallel_size: 8
+    dtype: bfloat16
+    max_model_len: 1536
+    gpu_memory_utilization: 0.9
+    enable_prefix_caching: true
+  conditions: round2_notool
+  doc_prefix: </s>▁
