@@ -65,6 +65,9 @@ def synthetic(tasks):
     U["raw_no_okay"] = 0.45 * a0 + e(0.2)
     U["raw_story_ai"] = 0.02 * a0 + e(0.3)
     U["raw_story_person"] = e(0.3)
+    U["predict_user"] = a0 + e(1)
+    U["assistant~inreasoning"] = a0 + e(0.1)
+    U["predict_user~inreasoning"] = e(1)  # disagrees
     return U
 
 
@@ -86,6 +89,8 @@ def test_new_model_calls(tmp_path, monkeypatch, tasks):
     assert got["D", "raw_story_ai", "relative slope"] == got["D", "raw_story_person", "relative slope"] == "absent"
     assert got["D", "raw_story_ai", "relative slope minus raw_no_okay"] == "below"
     assert S["D:raw_okay:rel_slope"][0] == pytest.approx(1.0, abs=0.15)
+    assert got["E", "A", "inside the reasoning vs after the empty block"] == "agrees"
+    assert got["E", "P", "inside the reasoning vs after the empty block"] == "differs"
     assert (tmp_path / "replication" / "round2" / "n" / "calls.csv").exists()
 
 

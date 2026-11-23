@@ -1,5 +1,6 @@
 """Replication round 2's new experiments (README, "Replication round 2", pre-registered 2026-11-23): B the tool's coin under
-roleplay, C the length rules with the user-reported and the tool's coin, D the raw-text stories. Findings 1-8 on the two new
+roleplay, C the length rules with the user-reported and the tool's coin, D the raw-text stories; and E, the new models'
+reasoning check (A and P read inside the reasoning against after the empty think block; "agrees" if r >= 0.95). Findings 1-8 on the two new
 models and the tool run's calls are replication_analysis.py's and tool_analysis.py's.
 
     uv run python round2_analysis.py [keys ...] [--n-boot 2000]
@@ -109,6 +110,10 @@ def readouts(key):
         src[f"T_{k}"] = (r2, f"coinflip_tool_ifchoose_{k}")
     for x in STORIES:
         src[x] = (r2, x)
+    # The reasoning check (new models): A and P read inside the reasoning, against after the empty think block.
+    src["P0"] = (key, "predict_user")
+    src["A_inr"] = (r2, "assistant~inreasoning")
+    src["P_inr"] = (r2, "predict_user~inreasoning")
     U, info = {}, {}
     for name, (s, cond) in src.items():
         got = take(s, cond)
@@ -198,6 +203,11 @@ def statistics(U, origins, nonharm, loglen):
         for m in ("r", "rel_slope"):
             if f"D:raw_story_ai:{m}" in out and f"D:raw_story_person:{m}" in out:
                 out[f"D:ai_minus_person:{m}"] = out[f"D:raw_story_ai:{m}"] - out[f"D:raw_story_person:{m}"]
+    # E. The reasoning check: utilities read inside the reasoning against after the empty think block.
+    for x, ref in (("A", "A0"), ("P", "P0")):
+        if has(ref, f"{x}_inr"):
+            out[f"E:{x}:r"] = pearson(U[ref], U[f"{x}_inr"])
+            out[f"E:{x}:sd_ratio"] = float(U[f"{x}_inr"].std() / U[ref].std())
     return out
 
 
@@ -298,6 +308,10 @@ def calls(S, info):
              else "absent" if abs(est) < REL_SLOPE else "unclear")
         row("D", x, "relative slope", c, f"{fmt(S, f'D:{x}:rel_slope')}; r(A_f, X_f) {fmt(S, f'D:{x}:r')}, within origin "
                                          f"{fmt(S, f'D:{x}:r_within')}")
+    for x, ref in (("A", "A0"), ("P", "P0")):  # E
+        if f"E:{x}:r" in S and not cell_problem(info, [ref, f"{x}_inr"]):
+            row("E", x, "inside the reasoning vs after the empty block", "agrees" if S[f"E:{x}:r"][0] >= 0.95
+                else "differs", f"r {fmt(S, f'E:{x}:r', 3)}, SD ratio {S[f'E:{x}:sd_ratio'][0]:.2f}")
     for x in ("raw_story_ai", "raw_story_person"):
         key = f"D:{x}:rel_slope_minus_no_okay"
         if key in S:

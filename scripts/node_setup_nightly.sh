@@ -20,6 +20,10 @@ uv pip install --python "$NIGHTLY_VENV/bin/python" "huggingface_hub[hf_xet]" tik
     pyyaml pytest -e ../mats-kit
 uv pip install --python "$NIGHTLY_VENV/bin/python" "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-crt==13.0.*" \
     "nvidia-nvvm==13.0.*" "nvidia-cuda-cccl==13.0.*"
+# FlashInfer's precompiled kernels as one package, matching the installed flashinfer. Without it vLLM fetches them on
+# demand, one small request at a time: ~800 files and a 37-minute load for DeepSeek V4 Flash on the round-2 node.
+FI=$("$NIGHTLY_VENV/bin/python" -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))')
+uv pip install --python "$NIGHTLY_VENV/bin/python" "flashinfer-cubin==$FI" --find-links https://flashinfer.ai/whl/flashinfer-cubin/
 CU13N=$("$NIGHTLY_VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/nvidia/cu13
 [ -e "$CU13N/lib64" ] || ln -s lib "$CU13N/lib64"
 [ -e "$CU13N/lib/libcudart.so" ] || ln -s libcudart.so.13 "$CU13N/lib/libcudart.so"

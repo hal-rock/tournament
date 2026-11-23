@@ -17,6 +17,10 @@ uv pip install --python "$VENV/bin/python" "vllm==0.33.0" "transformers==5.17.0"
 # nvcc/crt/nvvm/cccl must match the 13.0 runtime headers torch pulls in; unpinned they resolve to newer ones (user-models).
 uv pip install --python "$VENV/bin/python" "nvidia-cuda-nvcc==13.0.*" "nvidia-cuda-crt==13.0.*" "nvidia-nvvm==13.0.*" \
     "nvidia-cuda-cccl==13.0.*"
+# FlashInfer's precompiled kernels as one package, matching the installed flashinfer. Without it vLLM fetches them on
+# demand, one small request at a time: ~800 files and a 37-minute load for DeepSeek V4 Flash on the round-2 node.
+FI=$("$VENV/bin/python" -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))')
+uv pip install --python "$VENV/bin/python" "flashinfer-cubin==$FI" --find-links https://flashinfer.ai/whl/flashinfer-cubin/
 # FlashInfer's JIT links with -L$CUDA_HOME/lib64 -lcudart, but the pip CUDA tree has lib/ with only libcudart.so.13:
 # "ld: cannot find -lcudart" building fp4_quantization for B200 (DeepSeek V4 Flash, replication node 2026-11-11).
 CU13=$("$VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/nvidia/cu13
@@ -33,5 +37,5 @@ EOF
 if [ "${NIGHTLY:-1}" = "1" ]; then
     bash scripts/node_setup_nightly.sh || echo "NIGHTLY_SETUP_FAILED: Kimi K3.1 Pro's job will fail; fix and rerun"
 fi
-nvidia-smi topo -m | head -12
+nvidia-smi topo -m | head -12 || true  # || true: head closes the pipe early on big topologies (SIGPIPE, exit 141)
 df -h "${HF_HOME:-/root/hf_cache}" 2>/dev/null || df -h /root
