@@ -270,8 +270,8 @@ Ready for the node:
 - `replication.py`: round 2's condition sets. `score_replication.py`: per-condition variants (the reasoning check), raw-text
   document starts, the effort rule. `replication_runner.py`: a per-job interpreter. `scripts/node_setup.sh`: the vLLM nightly
   venv for Kimi K3.1 Pro.
-- Configs: the two new models, the six round-2 configs, GLM-5.3's patching config; `replication/round2_jobs.yaml`,
-  `replication/round2_patch_jobs.yaml`.
+- Configs: the two new models, the six round-2 configs, GLM-5.3's patching config; `replication/round2_jobs.yaml`
+  (GLM-5.3's patching last, waiting for the check-in).
 - Tests: `tests/test_replication_new_models.py`, `tests/test_replication_round2.py`, additions to `tests/test_toolframe.py`
   and `tests/test_score_replication.py`. GLM-5.3's weightless HF load check passes (`replication/patch_load_check.md`).
 - The README pre-registration.

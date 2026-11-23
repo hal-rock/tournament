@@ -5,12 +5,15 @@
 # - GLM-5.3, the first new model (check-in after it);
 # - Kimi K3.1 Pro, the largest and riskiest, in the vLLM nightly venv;
 # - the other first-round finals.
-# Finding 8's patching on GLM-5.3 (HF) is a separate list, replication/round2_patch_jobs.yaml, after the check-in.
+# - finding 8's patching on GLM-5.3 (HF), last: it keeps GLM's 756 GB on disk until then (the node downloads at ~300 MB/s,
+#   so a second download would cost ~45 min). It waits for outputs/coin_report/glm-5.3.questions, written after the
+#   check-in: the report questions the wording check picks (round 1's rule), or SKIP.
 # --onpolicy 50: the Assistant's own reply to each tool-call user turn (does it call flip_coin?), as in the tool run.
 # --wording 0 for the first-round models (their wordings are settled); the new models get the wording check by default.
-# Disk: the largest model is Kimi K3.1 Pro (1,561 GB); rent >= 5 TB and lower disk_budget_gb if the node has less.
+# Disk: the largest model is Kimi K3.1 Pro (1,561 GB). The node has 5.0 TB; 4.4 TB of weights at once leaves room for
+# the venvs and outputs.
 gpus: 8
-disk_budget_gb: 3800
+disk_budget_gb: 4400
 max_downloads: 2
 score_python: /root/vllm-env/bin/python
 jobs:
@@ -29,3 +32,19 @@ jobs:
      args: [--onpolicy, 50, --with-pilot, 24, --wording, 0]}
   - {name: r2-nemotron4-340b, config: configs/replication/round2/nemotron4-340b.yaml, stage: instruct,
      args: [--with-pilot, 24, --wording, 0]}
+  - name: patch-glm-5.3
+    gpus: 8
+    repos: [zai-org/GLM-5.3]
+    download:
+      zai-org/GLM-5.3:
+        allow_patterns: ["*.safetensors", model.safetensors.index.json, config.json, generation_config.json, tokenizer.json,
+                         tokenizer_config.json, chat_template.jinja]
+        gb: 755.7
+        revision: ba32f8c19c8738e2c57c71798c601d477a7bf844
+    done_marker: outputs/coin_report/glm-5.3.patch_done
+    cmd: >-
+      Q=outputs/coin_report/glm-5.3.questions; mkdir -p outputs/coin_report;
+      while [ ! -f $Q ]; do sleep 60; done;
+      if [ "$(cat $Q)" = SKIP ]; then touch outputs/coin_report/glm-5.3.patch_done;
+      else uv run --group gpu python report_patch.py configs/coin_report/glm-5.3.yaml --report $(cat $Q) --arms swap ctrl
+      && touch outputs/coin_report/glm-5.3.patch_done; fi
