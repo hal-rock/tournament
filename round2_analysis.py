@@ -374,6 +374,9 @@ def plot_cross_model(keys, outdir=Path("figures")):
     if not keys:
         return
     blue, orange, green, yellow = plotstyle.SERIES[:4]
+    # Cells the gates exclude (not interpretable, not run) aren't plotted.
+    calls = {k: {(r["experiment"], r["unit"], r["measure"]): r["call"] for r in read_calls(k)} for k in keys}
+    bad = lambda k, *key: calls[k].get(key) in ("not interpretable", "not run")
 
     def legend(fig, items, title):
         handles = [Line2D([], [], ls="none", marker="o", ms=7, color=c, label=lab) for lab, c in items]
@@ -387,6 +390,8 @@ def plot_cross_model(keys, outdir=Path("figures")):
         S = stats[k]
         for p in PERSONAS:
             if f"B:{p}:T_rp:w" not in S:
+                continue
+            if bad(k, "B", p, "T_rp fit on z(A_0), z(A_rp)"):
                 continue
             lab = f"{LABEL.get(k, k)}: {p}"
             rows_w.append((lab, {"T": S.get(f"B:{p}:T_rp:w"), "C": S.get(f"B:{p}:C_rp:w")}))
@@ -411,7 +416,8 @@ def plot_cross_model(keys, outdir=Path("figures")):
                 continue
             lab = f"{LABEL.get(k, k)}: {rule}"
             rows_f.append((lab, {"A": S.get(f"C:{rule}:A:follow")}))
-            rows_d.append((lab, {"C": S.get(f"C:{rule}:C:d_pr"), "T": S.get(f"C:{rule}:T:d_pr")}))
+            rows_d.append((lab, {"C": S.get(f"C:{rule}:C:d_pr"),
+                                 "T": None if bad(k, "C", rule, "d_pr (T)") else S.get(f"C:{rule}:T:d_pr")}))
         if "C:contrast:C" in S:
             rows_c.append((LABEL.get(k, k), {"C": S.get("C:contrast:C"), "T": S.get("C:contrast:T"),
                                               "A": S.get("C:contrast:A")}))
@@ -442,6 +448,59 @@ def plot_cross_model(keys, outdir=Path("figures")):
         legend(fig, [(lab, c) for _, lab, c in names], "The coinflip as raw text, against the chat Assistant (no base)")
         fig.tight_layout(rect=(0, 0, 1, 0.92))
         plotstyle.save(fig, "replication2_stories", outdir)
+
+
+# ------------------------------------------------------------------------------------------------------ summary tables
+
+def read_calls(key):
+    path = OUT / "round2" / key / "calls.csv"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return list(csv.DictReader(f))
+
+
+def summary_tables(keys):
+    """Markdown tables of every model's calls and key numbers, one per experiment, for the README
+    (outputs/replication/round2/summary.md)."""
+    keys = [k for k in keys if read_stats(k)]
+    st = {k: read_stats(k) for k in keys}
+    calls = {k: {(r["experiment"], r["unit"], r["measure"]): r["call"] for r in read_calls(k)} for k in keys}
+    f = lambda S, n, prec=2: f"{S[n][0]:+.{prec}f} [{S[n][1]:+.{prec}f}, {S[n][2]:+.{prec}f}]" if n in S else "-"
+    lines = ["### B. The tool's coin under roleplay: call (w_rp(T)); tool minus user-reported Δw_rp", "",
+             "| model | " + " | ".join(PERSONAS) + " |", "|---|" + "---|" * len(PERSONAS)]
+    for k in keys:
+        cells = []
+        for p in PERSONAS:
+            c = calls[k].get(("B", p, "T_rp fit on z(A_0), z(A_rp)"), "-")
+            w = f" (w {st[k][f'B:{p}:T_rp:w'][0]:.2f})" if f"B:{p}:T_rp:w" in st[k] and c in ("persona", "mix") else ""
+            d = calls[k].get(("B", p, "w_rp(T) - w_rp(C)"))
+            cells.append(f"{c}{w}" + (f"; Δw {d}" if d else ""))
+        lines.append(f"| {LABEL.get(k, k)} | " + " | ".join(cells) + " |")
+    lines += ["", "### C. Length rules: following (A); d_pr (C, T); tool minus user-reported d_pr", "",
+              "| model | rule | A follows | d_pr C | d_pr T | T - C | contrast C | contrast T |",
+              "|---|---|---|---|---|---|---|---|"]
+    for k in keys:
+        for rule in RULES:
+            S = st[k]
+            t_bad = calls[k].get(("C", rule, "d_pr (T)")) in ("not interpretable", "not run")
+            cell = lambda n, m: ("not interpretable" if t_bad and ("T" in m.split("(")[-1] or "tool" in m)
+                                 else f"{f(S, n)} {calls[k].get(('C', rule, m), '')}".strip())
+            lines.append(f"| {LABEL.get(k, k)} | {rule} | {f(S, f'C:{rule}:A:follow')} | {cell(f'C:{rule}:C:d_pr', 'd_pr (C)')} | "
+                         f"{cell(f'C:{rule}:T:d_pr', 'd_pr (T)')} | {cell(f'C:{rule}:d_pr_T_minus_C', 'd_pr, tool minus user-reported')} | "
+                         + (f"{f(S, 'C:contrast:C')} | {'not interpretable' if t_bad else f(S, 'C:contrast:T')} |"
+                            if rule == "shorter" else " | |"))
+    lines += ["", "### D. Raw-text stories: relative slope [CI] and call; r(A_f, X_f)", "",
+              "| model | " + " | ".join(STORIES) + " |", "|---|" + "---|" * len(STORIES)]
+    for k in keys:
+        S = st[k]
+        lines.append(f"| {LABEL.get(k, k)} | " + " | ".join(
+            f"{f(S, f'D:{x}:rel_slope')} {calls[k].get(('D', x, 'relative slope'), '')}; r {S[f'D:{x}:r'][0]:.2f}"
+            if f"D:{x}:rel_slope" in S else "-" for x in STORIES) + " |")
+    text = "\n".join(lines) + "\n"
+    (OUT / "round2").mkdir(parents=True, exist_ok=True)
+    (OUT / "round2" / "summary.md").write_text(text)
+    return text
 
 
 # -------------------------------------------------------------------------------------------------------------- main
@@ -480,7 +539,9 @@ def main(argv=None):
     every = []
     for key in keys:
         every += analyze(key, a.n_boot)[1]
-    plot_cross_model([k for k in FIRST_ROUND + NEW if (OUT / "round2" / k / "stats.csv").exists()])
+    done = [k for k in FIRST_ROUND + NEW if (OUT / "round2" / k / "stats.csv").exists()]
+    plot_cross_model(done)
+    summary_tables(done)
     if every and not a.keys:
         with open(OUT / "round2" / "calls.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(every[0]))

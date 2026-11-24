@@ -7734,6 +7734,147 @@ heads/tails mass of 0.01-0.09, below the 0.2 floor, so the gate makes them "not 
 - **The tool block weakens the user-reported coin a lot:** r with A_0 falls from 0.83 to 0.34. Declaring the tool leaves the
   Assistant's choice unchanged (r 0.984).
 
+### Results: the gate across the first round's models (2026-11-24)
+
+Each model's re-scored conditions against its round-1 scoring (`outputs/replication/round2_gate.csv`): utilities r and SD
+ratio, with the pass bar r ≥ 0.999 and SD within 2%.
+
+| model | assistant | coinflip | coinflip_tool | gate |
+|---|---|---|---|---|
+| Llama 3.1 405B (dense, bf16) | 1.00000, 1.000 | 0.99997, 1.001 | 0.99991, 0.999 | passes |
+| Nemotron-4 340B (dense, bf16) | 0.99999, 1.000 | 0.99961, 0.990 | (no tool format) | passes |
+| DeepSeek V4 Flash (MoE, FP8/FP4) | 0.99995, 1.000 | 0.99943, 0.999 | 0.98785, 0.954 | fails |
+| DeepSeek V3 (MoE, FP8) | 0.99971, 1.000 | 0.99690, 0.991 | 0.98972, 1.031 | fails |
+| Kimi K2 (MoE, FP8) | 0.99989, 0.999 | 0.99764, 1.007 | 0.99735, 0.974 | fails |
+| Trinity Large Thinking (MoE, bf16) | 0.99928, 0.988 | **0.80282, 1.093** | 0.95530, 0.973 | fails |
+
+- **The pattern is by architecture.**
+  - Both dense models reproduce round 1's B200 scores on the B300s, nearly prompt for prompt.
+  - All four MoE models drift on their coins, though their Assistants pass. The coins are small effects (SDs 0.2-0.6 nats
+    against the Assistants' 2-5), so routing or kernel differences between the GPU types show there first.
+- **Trinity's coin moves most** (r 0.80 between runs). Its SD is only 0.20 nats, and its split-half reliability 0.93.
+- **Round 1's headline doesn't move:** r(A_0, C_0), with both re-scored in this run, is within 0.035 of round 1's in every
+  model (Trinity 0.49 against 0.455; the others within 0.003).
+- As pre-registered, the four failing models use this run's A_0, C_0 and T. Their tool-roleplay comparisons against round 1's
+  C_rp and T_sys carry the drift; the length-rule and story comparisons are within one run.
+
+### Results: B. The tool's coin under roleplay (2026-11-24)
+
+T_rp fit on z(A_0) and z(A_rp) (the roleplay section's call, with w_rp(T)); then the paired comparison with the
+user-reported coin under roleplay (Δw_rp = w_rp(T) − w_rp(C)). Nemotron-4 has no tool format.
+
+| model | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| DeepSeek V4 Flash | persona (w 1.64); less | against the persona; more | neither | persona (w 2.05); as much |
+| Llama 3.1 405B | mix (0.58); more | mix (0.51); less | mix (0.82); less | mix (0.42); less |
+| DeepSeek V3 | mix (0.60); as much | mix (0.61); less | mix (0.30); as much | mix (0.35); less |
+| Kimi K2 | mix (0.71); as much | mix (0.66); more | against the persona; as much | mix (0.58); less |
+| Trinity Large Thinking | mix (0.40); less | mix (0.22); more | mix (0.32); less | mix (0.58); less |
+| GLM-5.3 | not separable | mix (0.68); as much | mix (0.35); as much | mix (0.32); less |
+| Kimi K3.1 Pro | not interpretable | not interpretable | not interpretable | not interpretable |
+
+![tool roleplay](figures/replication2_tool_roleplay.png)
+
+- **The tool's coin follows the roleplay persona in 20 of 23 separable cells** ("persona" or "mix"). That's finding 6 with a
+  tool instead of the user reporting the flip.
+  - The exceptions: V4 Flash's slacker and Kimi K2's contrarian go against the persona; V4 Flash's contrarian is "neither".
+- **Mostly a mix:** w_rp(T) is 0.22-0.82 everywhere except V4 Flash (1.64, 2.05). The tool's coin keeps a pull toward the
+  default Assistant as well as the roleplay one.
+- **Against the user-reported coin under roleplay,** the tool's coin follows the persona less in 11 cells, as much in 7 and
+  more in 4. No model is consistently one way.
+
+### Results: C. Length rules with the user-reported and the tool's coin (2026-11-24)
+
+"If I ask you to choose between tasks in this message, choose the one with the shorter / longer description." d_pr is each
+coin's partial r with the rule given A_0, minus the default coin's ("toward" = CI above 0).
+
+| model | Assistant follows (shorter / longer) | user-reported coin d_pr | tool's coin d_pr | tool minus user-reported |
+|---|---|---|---|---|
+| DeepSeek V4 Flash | +0.18 / +0.15 | +0.22 toward / −0.04 no change | +0.06 no change / +0.10 toward | less / more |
+| Llama 3.1 405B | +0.26 / +0.23 | +0.45 toward / +0.43 toward | +0.12 toward / +0.80 toward | less / more |
+| DeepSeek V3 | +0.27 / +0.18 | +0.68 toward / +0.69 toward | +0.32 toward / +0.33 toward | less / less |
+| Kimi K2 | +0.20 / +0.18 | +0.56 toward / +0.47 toward | +0.35 toward / +0.73 toward | less / more |
+| Trinity Large Thinking | +0.18 / +0.17 | +0.39 toward / **−0.21 away** | +0.09 no change / +0.17 toward | less / more |
+| Nemotron-4 340B | +0.19 / +0.21 | +0.81 toward / +0.35 toward | (no tool format) | |
+| GLM-5.3 | +0.20 / +0.14 | +0.26 toward / +0.24 toward | +0.31 toward / +0.05 no change | as much / less |
+| Kimi K3.1 Pro | +0.27 / +0.17 | +0.66 toward / +0.28 toward | not interpretable | |
+
+![length rules](figures/replication2_length.png)
+
+- **Every model's Assistant follows both length rules,** with agreement 0.14-0.27 above its default's. That's the reworded
+  run's result on Llama 3.3 70B, Gemma and GLM-4.5-Air, now on all eight.
+- **The user-reported coin moves toward the instructed choice in 14 of 16 cells.** The exceptions are V4 Flash's longer
+  (no change) and Trinity's longer, where it moves away.
+- **The tool's coin moves toward it in 9 of 12 readable cells** (no change in V4 Flash's shorter, Trinity's shorter and
+  GLM's longer).
+- **Tool against user-reported depends on the rule, not the model:**
+  - under "shorter" the tool's coin follows less in 5 of 6 models (GLM as much);
+  - under "longer" it follows more in 4 of 6 (V4 Flash, Llama, Kimi K2, Trinity), less in DeepSeek V3 and GLM.
+  - So a tool reporting the flip doesn't consistently remove the coin's following of the user's instruction. That
+    weakens the reading that the reworded run's coin followed the user's wish.
+- **Mirrored length contrast:** the user-reported coin follows it in all eight (+0.01 to +0.38 nats per SD of log length).
+  The tool's coin follows it in all six readable models, more than the user-reported coin in Llama (+0.07) and Kimi K2
+  (+0.03).
+
+### Results: D. Raw-text stories, without bases (2026-11-24)
+
+The relative slope is the raw text's slope on the chat Assistant over the chat coin's (the raw-text section's retention
+without the base subtraction): "tracks" ≥ 0.25 with its CI above 0, "absent" below 0.25.
+
+| model | first person, "Okay, " | first person, no "Okay, " | story: AI assistant | story: freelancer |
+|---|---|---|---|---|
+| DeepSeek V4 Flash | 1.64 tracks; r 0.93 | 1.41 tracks; r 0.92 | 0.24 absent; r 0.38 | 0.24 absent; r 0.49 |
+| Llama 3.1 405B | 0.96 tracks; r 0.92 | 0.92 tracks; r 0.90 | 0.32 tracks; r 0.81 | 0.33 tracks; r 0.82 |
+| DeepSeek V3 | 1.53 tracks; r 0.91 | 1.30 tracks; r 0.92 | 0.81 tracks; r 0.75 | 0.42 tracks; r 0.47 |
+| Kimi K2 | 1.19 tracks; r 0.97 | 1.21 tracks; r 0.97 | 0.79 tracks; r 0.92 | 0.43 tracks; r 0.86 |
+| Trinity Large Thinking | 0.87 tracks; r 0.62 | 0.62 tracks; r 0.51 | 0.08 absent; r 0.07 | −0.10 absent; r −0.08 |
+| Nemotron-4 340B | 0.80 tracks; r 0.83 | 0.70 tracks; r 0.80 | 0.28 tracks; r 0.52 | 0.31 tracks; r 0.57 |
+| GLM-5.3 | 0.31 tracks; r 0.53 | 0.47 tracks; r 0.60 | 0.42 tracks; r 0.63 | 0.61 tracks; r 0.64 |
+| Kimi K3.1 Pro | 0.24 absent; r 0.38 | 0.22 absent; r 0.43 | 0.21 absent; r 0.36 | 0.30 tracks; r 0.40 |
+
+![stories](figures/replication2_stories.png)
+
+- **First person, the raw text carries the Assistant's preferences in seven of eight,** at 0.31-1.64 of the chat coin's
+  slope (r 0.51-0.97). The exception is Kimi K3.1 Pro (0.22-0.24). GLM-5.3's is weak (0.31-0.47, r 0.53-0.60).
+- **The third-person stories track in most of the larger models,** unlike round 1's smaller ones, where they were absent in
+  three of four families:
+  - the AI-assistant story in 5 of 8 and the freelancer story in 6 of 8;
+  - absent only in V4 Flash (0.24, just below the bar), Trinity (both), and Kimi K3.1 Pro's AI story.
+- **The AI-assistant story keeps the ranking more than the scale:** r 0.75-0.92 in DeepSeek V3, Kimi K2 and Llama 405B, at
+  0.32-0.81 of the chat coin's slope.
+- **The AI-assistant story tracks more than the freelancer one where they differ:** DeepSeek V3 (0.81 vs 0.42) and Kimi K2
+  (0.79 vs 0.43). GLM-5.3 is the reverse (0.42 vs 0.61).
+- **Each story is below the first-person baseline** (`raw_no_okay`, paired CI below 0) in six models. In GLM-5.3 and Kimi
+  K3.1 Pro it isn't: their raw text is uniformly weak, and their freelancer story is above it.
+- **No base, so these "tracks" calls can't separate post-training from pretraining.** Round 1's raw-text section could check
+  this: there the bases' stories didn't track the final Assistant (Llama 70B: r −0.12 and −0.16; Gemma: 0.34 and 0.48), so
+  what tracking there was came with post-training.
+
+### Predictions, scored (finding 8 pending)
+
+1. **Mostly wrong:**
+   - Only Kimi K3.1 Pro's user-reported coin is small (SD 0.27); GLM-5.3's is 0.55.
+   - Finding 1 holds in both, not in at most one.
+   - The tool's coin tracks the Assistant at 0.55 in GLM-5.3, below 0.7, and can't be read in Kimi K3.1 Pro (exploratory
+     0.71).
+2. **Right:** findings 2 and 3 hold in both new models.
+3. **Right:** the reasoning check agrees in both (r 0.971-0.995).
+4. **Right:** the effort rule picks low in both, though by a tie in Kimi K3.1 Pro.
+5. **Pending** (finding 8 on GLM-5.3).
+6. **Right:**
+   - The tool's coin follows the roleplay persona in 20 of 23 separable cells.
+   - Δw_rp's sign varies within and across models.
+7. **Half right:**
+   - The Assistant follows both rules in all eight: right.
+   - The user-reported coin moves toward both rules in 6 of 8 (at least 5 predicted): right.
+   - The tool's coin moves toward both rules in 3 of 6 readable models (Llama, DeepSeek V3, Kimi K2), not at least 4: wrong.
+   - Tool minus user-reported is "more" in 4 cells, against my "never more": wrong.
+8. **Mostly wrong:**
+   - `raw_okay` tracks in 7 of 8: right.
+   - The freelancer story is absent in 2 of 8 and the AI story in 3 of 8, against at least 6 and 5 predicted: wrong.
+   - Each story is below `raw_no_okay` in 6 of 8, against at least 7: wrong.
+9. **Wrong:** the gate passes in 2 of 6, not at least 5. It fails by architecture (every MoE), not only in V4 Flash.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
