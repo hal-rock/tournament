@@ -7618,7 +7618,7 @@ $96.78/hr. Jobs ran from `replication/round2_jobs.yaml`.
 |---|---|---|---|---|
 | DeepSeek V4 Flash (4 GPUs) | 15 min | 37 min (kernel downloads) | 22 min (17 conditions) | 59 min |
 | GLM-5.3 | 86 min | ~14 min | ~82 min (75 conditions) | 96 min |
-| Kimi K3.1 Pro | 133 min | 117 min (CPU-bound MXFP4 processing) | | |
+| Kimi K3.1 Pro | 133 min | 117 min (CPU-bound MXFP4 processing) | ~9.3 h (75 conditions, ~7 min each) | 11.2 h |
 
 **Gate** (`scripts/r2_gate.py`, `outputs/replication/round2_gate.csv`):
 
@@ -7685,6 +7685,54 @@ use them are "not interpretable".
 
 **Finding 8:** the coin's SD clears the pre-registered 0.5 bar, so GLM-5.3's patching runs with round 1's three questions,
 at the end of the node's job list.
+
+### Results: Kimi K3.1 Pro (2026-11-24)
+
+Results are in `outputs/replication/kimi-k3.1-pro/`. Every cell's split-half reliability is 0.94 or above.
+
+**The tool conditions can't be read.** Every tool-coin cell (`coinflip_tool`, its personas, its length rules) has a median
+heads/tails mass of 0.01-0.09, below the 0.2 floor, so the gate makes them "not interpretable".
+- Inside the tool's result (`{"result": "`), Kimi K3.1 Pro spreads its probability thin: on average "heads" 0.10, "A"
+  0.09, "a" 0.05, "tails" 0.05, "The" 0.03, "Computer" 0.02.
+- The prompts are its encoder's own rendering, and the prefilled call is the call it makes itself when its think block is
+  closed. It calls `flip_coin` in 49-50 of 50 greedy replies, first in 0-46 depending on the condition; otherwise after a
+  sentence such as "I'll flip the coin and complete the selected task."
+- So this is the model, not the format: it doesn't predict a tool's output as a coin result. Round 1's Kimi K2 (≥ 0.99) and
+  GLM-5.3 (0.98) do.
+- *Exploratory:* the heads/tails log-odds in those cells are still reliable (split-half 0.94-0.97). The tool's coin correlates
+  0.71 [0.66, 0.76] with the Assistant (0.45 within origin).
+
+**Checks:**
+- **Effort rule:** low, by a tie. P(`<|close|>` right after the think opener) rounds to 0.00000 at every level, so Kimi K3.1
+  Pro never closes its think block at once. GLM-5.3 did at 0.066.
+- **Reasoning check: agrees** all the same. The Assistant read inside the reasoning against after the empty block gives
+  r 0.984, SD ratio 0.85; the prediction of the user r 0.995, SD ratio 0.87.
+- **Wording check:** recorded for completeness; Hal skipped finding 8 on this model.
+- **Timing:** 117 min to load (CPU-bound MXFP4 weight processing), then ~7 min per condition. The persona and tool prompts
+  are the slow ones: vLLM caches nothing for this hybrid model at these lengths. The job took 11.2 h.
+
+![Kimi K3.1 Pro calls](figures/kimi-k3.1-pro/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant (final only) | replicates: r(A_f, C_f) 0.83 [0.80, 0.86] | | | |
+| 2. user's choice Assistant-like (final only) | replicates: r(A_f, U_f) 0.76 | | | |
+| 3. prediction of the user Assistant-like (final only) | replicates: r(A_f, P_f) 0.92; Δ +0.12 ("prediction") | | | |
+| 4. coin follows a user instruction | not separable | replicates (ρ_user 0.35) | replicates (0.96) | not separable |
+| 5. self-description less than instruction | not separable | replicates (Δρ -0.48) | **doesn't** (+0.11) | not separable |
+| 6. coin follows roleplay | not separable | replicates (w_r 0.78) | replicates (0.83) | not separable |
+| 7. prediction follows self-description more | not separable | replicates | replicates | not separable |
+
+**Observations:**
+- **Findings 1-3 hold in the final-only form.** Within origin the figures are 0.63, 0.69 and 0.87.
+- **The coin is small,** SD 0.27 nats against the Assistant's 3.06. It's like round 1's thinking model (Trinity, 0.20) and
+  unlike GLM-5.3 (0.55). Its harm gap is 0.39 nats against the Assistant's 6.26.
+- **Like GLM-5.3, its Assistant doesn't take on evil** (r 0.98 with its default under the system prompt and the user's
+  instruction), nor strategist (0.96).
+- **Contrarian's self-description pulls the coin at least as much as its instruction,** as in four of round 1's six models
+  (V4 Flash, Llama 405B, DeepSeek V3, Nemotron-4; in Kimi K2 and Trinity the ratio was undefined).
+- **The tool block weakens the user-reported coin a lot:** r with A_0 falls from 0.83 to 0.34. Declaring the tool leaves the
+  Assistant's choice unchanged (r 0.984).
 
 ## Tasks
 

@@ -294,7 +294,7 @@ def calls(S, info):
             row("C", "both", f"mirrored length contrast ({coin})",
                 three_way(S[key][1], S[key][2], "follows the length instruction", "against the length instruction",
                           "no length effect"), fmt(S, key))
-    if "C:contrast:T_minus_C" in S:
+    if "C:contrast:T_minus_C" in S and not cell_problem(info, [f"{c}_{r}" for c in "CT" for r in RULES]):
         key = "C:contrast:T_minus_C"
         row("C", "both", "contrast, tool minus user-reported", three_way(S[key][1], S[key][2], "the tool's coin follows more",
                                                                          "the tool's coin follows less", "as much"), fmt(S, key))
