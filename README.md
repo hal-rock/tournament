@@ -7849,7 +7849,7 @@ the default's share picking the longer task.)
   it in only 11-55% of pairs (most 11-34%).
   - Restricted to the 257 non-harmful tasks, agreement rises a little, to 0.66-0.79 (default Assistants 0.43-0.57).
   - In the first panels, long STRESS-TEST tasks stay low under "longer", and short BailBench tasks stay low under "shorter".
-- **The coins start from a preference for the longer task:** default coins pick it in 46-76% of the 4x+ pairs; Trinity is the
+- **The coins start from a preference for the longer task:** default coins pick it in 51-76% of the 4x+ pairs; Trinity (46%) is the
   exception.
   - So under "shorter", "toward the rule" (d_pr above 0) often still leaves the coin picking the longer task more often
     than not: V4 Flash 0.30, GLM-5.3 0.45.
