@@ -7854,6 +7854,19 @@ the default's share picking the longer task.)
   - So under "shorter", "toward the rule" (d_pr above 0) often still leaves the coin picking the longer task more often
     than not: V4 Flash 0.30, GLM-5.3 0.45.
   - Under "longer" the coins reach 0.73-0.93, Trinity aside (0.39).
+- **Length is read in characters, not tokens** (`scripts/length_measures.py`; Hal's question). The analysis measures length in
+  characters. Against words and each model's own tokens:
+  - The instructed Assistant's agreement is highest with characters for "shorter" in every model (0.64-0.74 against
+    0.58-0.69 with tokens), and similar across measures for "longer".
+  - **Mirrored test** on the scored pairs where two measures disagree about which description is longer:
+    (P(pick the token-longer task | "longer") − P(same | "shorter")) / 2. It cancels any content preference that correlates
+    with one measure, such as dense-token MATH tasks.
+  - The test is negative in all eight models: tokens vs characters −0.07 to −0.20 (V4 Flash −0.02), tokens vs words −0.03
+    to −0.16 (V4 Flash 0.00), words vs characters −0.04 to −0.09.
+  - So the models follow character length over words, and words over tokens. No CIs (pairs share tasks); 1,400-1,600
+    disagreeing pairs per model.
+  - Characters and tokens correlate 0.92-0.94 in log length here (~4.7 characters per token), so the measures differ on
+    near-equal pairs only.
 
 ### Results: D. Raw-text stories, without bases (2026-11-24)
 
