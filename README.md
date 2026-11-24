@@ -7816,6 +7816,45 @@ coin's partial r with the rule given A_0, minus the default coin's ("toward" = C
   The tool's coin follows it in all six readable models, more than the user-reported coin in Llama (+0.07) and Kimi K2
   (+0.03).
 
+**Exploratory, added after the results (Hal, 2026-11-24): how well the rules are followed, pair by pair.**
+`round2_length_figures.py` draws the reworded run's per-rule panels for each large model:
+- `figures/<key>/length_<rule>.png` for the user-reported coin, and `_tool.png` for the tool's coin;
+- all models in rows: `figures/replication2_length_<rule>[_tool].png`;
+- how often each pairwise pick follows the rule, by length ratio: `figures/replication2_pairs_length.png`, with the data in
+  `outputs/replication/round2/pairs_length.csv`.
+
+Each pick is the order-averaged log-odds of a scored pair, so no utility fit is involved.
+
+![pairs by length ratio](figures/replication2_pairs_length.png)
+
+| model | Assistant, > 4x (shorter / longer) | Assistant, < 1.25x | user-reported coin, > 4x | its default, > 4x | tool's coin, > 4x |
+|---|---|---|---|---|---|
+| DeepSeek V4 Flash | 0.83 / 0.79 | 0.57 / 0.50 | 0.30 / 0.81 | 0.24 / 0.76 | 0.36 / 0.70 |
+| Llama 3.1 405B | 0.88 / 0.93 | 0.58 / 0.54 | 0.61 / 0.93 | 0.37 / 0.63 | 0.65 / 0.88 |
+| DeepSeek V3 | 0.88 / 0.90 | 0.57 / 0.52 | 0.79 / 0.93 | 0.40 / 0.60 | 0.59 / 0.66 |
+| Kimi K2 | 0.85 / 0.84 | 0.56 / 0.53 | 0.64 / 0.90 | 0.49 / 0.51 | 0.77 / 0.78 |
+| Trinity Large Thinking | 0.77 / 0.88 | 0.56 / 0.52 | 0.68 / 0.39 | 0.54 / 0.46 | 0.44 / 0.65 |
+| Nemotron-4 340B | 0.82 / 0.90 | 0.56 / 0.52 | 0.69 / 0.88 | 0.35 / 0.65 | |
+| GLM-5.3 | 0.80 / 0.72 | 0.56 / 0.52 | 0.45 / 0.83 | 0.33 / 0.67 | 0.57 / 0.55 |
+| Kimi K3.1 Pro | 0.90 / 0.79 | 0.57 / 0.52 | 0.65 / 0.73 | 0.41 / 0.59 | not interpretable |
+
+(Shares of pairs whose pick follows the rule. "Its default" is the plain coin read against the same rule; for "shorter", 1 minus
+the default's share picking the longer task.)
+
+- **The Assistant follows clear length differences:** 0.72-0.93 of pairs more than 4x apart, about the earlier run's
+  0.82-0.94 on Llama 3.3 70B, Gemma 4 31B and GLM-4.5-Air.
+  - It's near chance when the lengths are close: 0.50-0.58 below 1.25x.
+  - 46% of pairs are under 2x apart, which keeps the overall agreement at 0.64-0.77.
+- **Harm overrides the rule:** where the rule favours a harmful task over a non-harmful one, the instructed Assistant follows
+  it in only 11-55% of pairs (most 11-34%).
+  - Restricted to the 257 non-harmful tasks, agreement rises a little, to 0.66-0.79 (default Assistants 0.43-0.57).
+  - In the first panels, long STRESS-TEST tasks stay low under "longer", and short BailBench tasks stay low under "shorter".
+- **The coins start from a preference for the longer task:** default coins pick it in 46-76% of the 4x+ pairs; Trinity is the
+  exception.
+  - So under "shorter", "toward the rule" (d_pr above 0) often still leaves the coin picking the longer task more often
+    than not: V4 Flash 0.30, GLM-5.3 0.45.
+  - Under "longer" the coins reach 0.73-0.93, Trinity aside (0.39).
+
 ### Results: D. Raw-text stories, without bases (2026-11-24)
 
 The relative slope is the raw text's slope on the chat Assistant over the chat coin's (the raw-text section's retention
