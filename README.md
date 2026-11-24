@@ -7850,7 +7850,31 @@ without the base subtraction): "tracks" ≥ 0.25 with its CI above 0, "absent" b
   this: there the bases' stories didn't track the final Assistant (Llama 70B: r −0.12 and −0.16; Gemma: 0.34 and 0.48), so
   what tracking there was came with post-training.
 
-### Predictions, scored (finding 8 pending)
+### Results: finding 8 on GLM-5.3 (2026-11-24)
+
+HF transformers on the round-2 node, with round 1's scope: the unpatched pass, `self`, `swap` and `ctrl` on the 1,000 report
+pilot pairs in both orders, three questions in one load (1.8 min), ~15 min per question. W&B runs `a0dxv4wj`, `biuioh6k`,
+`95rmx9l0`; rows in `outputs/coin_report/glm-5.3/`.
+- The self-patch changes no answer (max 0).
+- The prompts read at the effort level the vLLM run chose ("Reasoning Effort: Low").
+- The node's watchdog stopped it after the job list ended. The rows came back from W&B, where each run saves them.
+
+| question | share via " up" [95% CI] | κ [95% CI] | ctrl share | call |
+|---|---|---|---|---|
+| short preference (`coin_report_short_coin_bold`) | 2.8% [2.2, 3.6] | +0.035 [+0.019, +0.053] | +0.3% [−0.4, +1.0] | replicates |
+| guess (`coin_predict_think_bold`) | 6.6% [5.0, 8.2] | +0.022 [+0.005, +0.039] | +0.5% [−1.0, +1.9] | replicates |
+| Task A/B (control) | −0.0% [−0.7, +0.7] | −0.023 [−0.041, −0.004] | −0.3% [−1.0, +0.3] | null, as expected |
+
+![finding 8, six models](figures/replication_patching.png)
+
+- **Finding 8 replicates on GLM-5.3 for both questions.** As in all five of round 1's patched models, the guess reads " up"
+  more than the short preference (6.6% vs 2.8%).
+- **The control patch stays null** (CIs include 0). So the swap's effect follows the coin's content at " up", not the
+  disruption of patching.
+- **The Task A/B control's κ is slightly negative** (−0.023, CI below 0) while its share is 0.0%, as in DeepSeek V3
+  (−0.021).
+
+### Predictions, scored
 
 1. **Mostly wrong:**
    - Only Kimi K3.1 Pro's user-reported coin is small (SD 0.27); GLM-5.3's is 0.55.
@@ -7860,7 +7884,7 @@ without the base subtraction): "tracks" ≥ 0.25 with its CI above 0, "absent" b
 2. **Right:** findings 2 and 3 hold in both new models.
 3. **Right:** the reasoning check agrees in both (r 0.971-0.995).
 4. **Right:** the effort rule picks low in both, though by a tie in Kimi K3.1 Pro.
-5. **Pending** (finding 8 on GLM-5.3).
+5. **Half right:** finding 8 replicates on GLM-5.3 for the guess, as predicted, and for the short preference too (2.8%), against my "not".
 6. **Right:**
    - The tool's coin follows the roleplay persona in 20 of 23 separable cells.
    - Δw_rp's sign varies within and across models.
@@ -7874,6 +7898,50 @@ without the base subtraction): "tracks" ≥ 0.25 with its CI above 0, "absent" b
    - The freelancer story is absent in 2 of 8 and the AI story in 3 of 8, against at least 6 and 5 predicted: wrong.
    - Each story is below `raw_no_okay` in 6 of 8, against at least 7: wrong.
 9. **Wrong:** the gate passes in 2 of 6, not at least 5. It fails by architecture (every MoE), not only in V4 Flash.
+
+
+### Findings
+
+1. **The first round's findings 1-3 hold on GLM-5.3 and Kimi K3.1 Pro.** These are two always-thinking frontier models
+   without released bases, so the calls are final-only.
+   - Their user-reported coin, the user's choice and the prediction of the user each correlate 0.71-0.92 with the
+     Assistant's own choice.
+   - Without a base, this can't show that post-training produced it.
+2. **Thinking doesn't by itself make the coin small.** GLM-5.3's coin (SD 0.55 nats) is as large as round 1's non-thinking
+   models'; Kimi K3.1 Pro's (0.27) is small like Trinity's (0.20).
+3. **Both new models' Assistants refuse to take on the evil persona** (r 0.98 with their default, from the system prompt or
+   the user). So finding 4-7's evil cells can't be called on them, unlike round 1's models (where V4 Flash alone did this, and
+   only under the user's instruction).
+4. **Finding 8 replicates on GLM-5.3** for both questions (2.8% and 6.6% via " up"), with the guess reading " up" more, as in
+   every patched model so far.
+5. **A tool reporting the flip under a roleplay persona still follows the persona,** in 20 of 23 separable cells, mostly
+   mixed with the default Assistant. Against the user-reported coin it follows less or as much in most cells.
+6. **The length rules move the coin toward the instructed choice in nearly every model,** reported by the user (14 of 16
+   cells) or by a tool (9 of 12).
+   - The tool's coin follows less under "shorter" and more under "longer". It doesn't drop the following, so the coin's
+     following isn't only the model modelling the user's wish.
+   - Every Assistant follows both rules.
+7. **Third-person raw-text stories track the chat Assistant in most of the larger models** (the AI-assistant story in 5 of
+   8, the freelancer story in 6 of 8, r up to 0.92). Round 1's smaller models lost the effect in stories. The AI-assistant
+   story tracks more than the freelancer one where they differ (DeepSeek V3, Kimi K2).
+8. **Kimi K3.1 Pro can't be read at a tool's output:** it puts 1-9% of its probability on heads/tails there, so none of its
+   tool conditions can be called.
+9. **Scores reproduce across B200 and B300 for dense models; MoE models' coins drift** (utilities r 0.988-0.999 between runs
+   for the user-reported and tool coins; Trinity's user-reported coin 0.80), while their Assistants reproduce. Round 1's coin-Assistant correlations move by at most 0.035.
+
+### Caveats (from the results)
+
+- **No base for GLM-5.3 or Kimi K3.1 Pro, and none run for the stories:** every "tracks" here is about the final model's
+  state, not about what post-training did.
+- **The empty think block is off-path for both new models,** Kimi K3.1 Pro most (P(close at once) ~0). The reasoning check
+  agrees (r ≥ 0.97), but it compares two off-path readings of the same answer.
+- **The MoE models' coins aren't fully reproducible between runs.** The tool-roleplay comparisons use round 1's C_rp and
+  T_sys for them, so part of Δw_rp is engine noise, most for Trinity.
+- **Kimi K3.1 Pro's tool cells are excluded by the mass gate,** although their log-odds are reliable. The exploratory r(T, A_0)
+  of 0.71 is read in the tail of the distribution.
+- **The relative slope is a base-free stand-in for round 1's retention.** It can't separate a story's ranking inherited from
+  pretraining from one added after.
+- One phrasing per condition, greedy readouts, CIs over task sampling only.
 
 ## Tasks
 

@@ -21,7 +21,7 @@ import coin_report  # noqa: E402
 from matskit import plotstyle  # noqa: E402
 
 MODELS = {"llama-405b": "Llama 3.1 405B", "nemotron4-340b": "Nemotron-4 340B", "deepseek-v3": "DeepSeek V3",
-          "kimi-k2": "Kimi K2", "deepseek-v4-flash": "DeepSeek V4 Flash"}
+          "kimi-k2": "Kimi K2", "deepseek-v4-flash": "DeepSeek V4 Flash", "glm-5.3": "GLM-5.3"}
 QUESTIONS = {"coin_report_short_coin_bold": "short preference", "coin_predict_think_bold": "guess",
              "coin_report_ab": "Task A/B (control)"}
 STATS = ("swap: share", "kappa (swap+ctrl)", "swap: r(d, coin)", "ctrl: share", "r(report, coin)",
