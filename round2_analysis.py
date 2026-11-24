@@ -320,6 +320,130 @@ def calls(S, info):
     return rows
 
 
+# ----------------------------------------------------------------------------------------------------------- figures
+
+LABEL = {"deepseek-v4-flash": "DeepSeek V4 Flash", "llama-405b": "Llama 3.1 405B", "deepseek-v3": "DeepSeek V3",
+         "kimi-k2": "Kimi K2", "trinity-large": "Trinity Large Thinking", "nemotron4-340b": "Nemotron-4 340B",
+         "glm-5.3": "GLM-5.3", "kimi-k3.1-pro": "Kimi K3.1 Pro"}
+
+
+def read_stats(key):
+    path = OUT / "round2" / key / "stats.csv"
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return {r["stat"]: (float(r["estimate"]), float(r["lo"]), float(r["hi"])) for r in csv.DictReader(f)}
+
+
+def _dots(ax, rows, series, x_label, ref=None, ref_label=None):
+    """A dot-and-CI panel: rows [(label, {series: stat tuple or None})] top to bottom; one color per series, offset."""
+    import matplotlib.pyplot as plt  # noqa: F401
+    from matskit import plotstyle
+    from report import INK_2, RULE, style
+    n = len(series)
+    for i, (label, vals) in enumerate(rows):
+        for j, (name, color) in enumerate(series):
+            v = vals.get(name)
+            if v is None:
+                continue
+            y = -i - (j - (n - 1) / 2) * 0.22  # the first series on top, as in the legend
+            ax.plot([v[1], v[2]], [y, y], color=color, lw=1.8, solid_capstyle="round", zorder=2)
+            ax.plot(v[0], y, "o", ms=6, color=color, mec=plotstyle.SURFACE, mew=1.2, zorder=3)
+    ax.set_yticks([-i for i in range(len(rows))], [r[0] for r in rows], fontsize=8)
+    ax.set_ylim(-len(rows) + 0.4, 0.6)
+    ax.axvline(0, color=RULE, lw=0.8, zorder=0)
+    if ref is not None:
+        for r in (ref if isinstance(ref, (list, tuple)) else [ref]):
+            ax.axvline(r, color=INK_2, lw=1, ls=(0, (3, 3)), zorder=1)
+    ax.set_xlabel(x_label, fontsize=8.5)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.grid(axis="y", visible=False)
+    style(ax)
+
+
+def plot_cross_model(keys, outdir=Path("figures")):
+    """One figure per experiment across models (estimates with 95% CIs): replication2_tool_roleplay.png (B),
+    replication2_length.png (C), replication2_stories.png (D)."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matskit import plotstyle
+    from report import INK
+    plotstyle.setup()
+    stats = {k: read_stats(k) for k in keys}
+    keys = [k for k in keys if stats[k]]
+    if not keys:
+        return
+    blue, orange, green, yellow = plotstyle.SERIES[:4]
+
+    def legend(fig, items, title):
+        handles = [Line2D([], [], ls="none", marker="o", ms=7, color=c, label=lab) for lab, c in items]
+        fig.suptitle(title, fontsize=10.5, color=INK, x=0.01, ha="left", y=0.995)
+        fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.01, 0.965), ncol=len(items), frameon=False,
+                   fontsize=8.5)
+
+    # B. The tool's coin under roleplay: w_rp for the tool's and the user-reported coin, and the tool's b_per.
+    rows_w, rows_b = [], []
+    for k in keys:
+        S = stats[k]
+        for p in PERSONAS:
+            if f"B:{p}:T_rp:w" not in S:
+                continue
+            lab = f"{LABEL.get(k, k)}: {p}"
+            rows_w.append((lab, {"T": S.get(f"B:{p}:T_rp:w"), "C": S.get(f"B:{p}:C_rp:w")}))
+            rows_b.append((lab, {"T": S.get(f"B:{p}:T_rp:b_per"), "C": S.get(f"B:{p}:C_rp:b_per")}))
+    if rows_w:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 0.32 * len(rows_w) + 1.8), sharey=True)
+        series = [("T", blue), ("C", orange)]
+        _dots(axes[0], rows_b, series, "b_per: pull toward the roleplay Assistant (coin nats per SD)")
+        _dots(axes[1], [(l, {s: (v if v is None or abs(v[0]) < 5 else None) for s, v in d.items()}) for l, d in rows_w],
+              series, "w_rp = b_per / (b_def + b_per)", ref=[0, 1])
+        legend(fig, [("Tool reports the flip (T_rp)", blue), ("User reports the flip (C_rp)", orange)],
+               "The coin under the roleplay persona: fit on the default and the roleplay Assistant")
+        fig.tight_layout(rect=(0, 0, 1, 0.93))
+        plotstyle.save(fig, "replication2_tool_roleplay", outdir)
+
+    # C. Length rules: following (A), and each coin's move toward the rule (d_pr), per rule.
+    rows_f, rows_d, rows_c = [], [], []
+    for k in keys:
+        S = stats[k]
+        for rule in RULES:
+            if f"C:{rule}:A:follow" not in S:
+                continue
+            lab = f"{LABEL.get(k, k)}: {rule}"
+            rows_f.append((lab, {"A": S.get(f"C:{rule}:A:follow")}))
+            rows_d.append((lab, {"C": S.get(f"C:{rule}:C:d_pr"), "T": S.get(f"C:{rule}:T:d_pr")}))
+        if "C:contrast:C" in S:
+            rows_c.append((LABEL.get(k, k), {"C": S.get("C:contrast:C"), "T": S.get("C:contrast:T"),
+                                              "A": S.get("C:contrast:A")}))
+    if rows_f:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 0.34 * len(rows_f) + 1.8), sharey=True)
+        _dots(axes[0], rows_f, [("A", green)], "Assistant following: agreement with the rule minus the default's")
+        _dots(axes[1], rows_d, [("C", orange), ("T", blue)], "coin toward the rule: d_pr (partial r given A_0, minus the default coin's)")
+        legend(fig, [("Assistant's own choice", green), ("User reports the flip", orange), ("Tool reports the flip", blue)],
+               "\"If I ask you to choose between tasks in this message, choose the one with the shorter / longer description.\"")
+        fig.tight_layout(rect=(0, 0, 1, 0.93))
+        plotstyle.save(fig, "replication2_length", outdir)
+
+    # D. Raw-text stories: relative slope against the chat coin, and r with the chat Assistant.
+    names = [("raw_okay", "first person, \"Okay, \"", blue), ("raw_no_okay", "first person, no \"Okay, \"", green),
+             ("raw_story_ai", "story: AI assistant", orange), ("raw_story_person", "story: freelancer", yellow)]
+    rows_s, rows_r = [], []
+    for k in keys:
+        S = stats[k]
+        if not any(f"D:{x}:rel_slope" in S for x, _, _ in names):
+            continue
+        rows_s.append((LABEL.get(k, k), {x: S.get(f"D:{x}:rel_slope") for x, _, _ in names}))
+        rows_r.append((LABEL.get(k, k), {x: S.get(f"D:{x}:r") for x, _, _ in names}))
+    if rows_s:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 0.62 * len(rows_s) + 1.9), sharey=True)
+        series = [(x, c) for x, _, c in names]
+        _dots(axes[0], rows_s, series, "relative slope: slope on the chat Assistant / the chat coin's", ref=[0.25, 1])
+        _dots(axes[1], rows_r, series, "r with the chat Assistant's utilities")
+        legend(fig, [(lab, c) for _, lab, c in names], "The coinflip as raw text, against the chat Assistant (no base)")
+        fig.tight_layout(rect=(0, 0, 1, 0.92))
+        plotstyle.save(fig, "replication2_stories", outdir)
+
+
 # -------------------------------------------------------------------------------------------------------------- main
 
 def analyze(key, n_boot=N_BOOTSTRAP):
@@ -356,6 +480,7 @@ def main(argv=None):
     every = []
     for key in keys:
         every += analyze(key, a.n_boot)[1]
+    plot_cross_model([k for k in FIRST_ROUND + NEW if (OUT / "round2" / k / "stats.csv").exists()])
     if every and not a.keys:
         with open(OUT / "round2" / "calls.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(every[0]))

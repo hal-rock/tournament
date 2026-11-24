@@ -1016,14 +1016,16 @@ def analyze_model(key, n_boot=N_BOOTSTRAP, figures=True):
 
 
 def configured_keys():
-    """The replication's models, configs/replication/*.yaml without validate-*, in file order."""
-    keys = []
+    """The replication's models, configs/replication/*.yaml without validate-*, in file order; round 2's models without a
+    base (README, "Replication round 2") after the first round's."""
+    keys, no_base = [], []
     for path in sorted(CONFIGS.glob("*.yaml")):
         if path.stem.startswith("validate-"):
             continue
         cfg = yaml.safe_load(path.read_text()) or {}
-        keys.append(cfg.get("run_name", path.stem))
-    return keys
+        has_base = any(m.get("stage") == "base" for m in cfg.get("models", []))
+        (keys if has_base else no_base).append(cfg.get("run_name", path.stem))
+    return keys + no_base
 
 
 def read_stats(key):

@@ -7595,6 +7595,97 @@ the reworded run's measures:
   tool formats differ.
 - One phrasing per condition, greedy readouts, CIs over task sampling only.
 
+### Run (2026-11-23/24)
+
+**The node:** vast.ai instance 62231630, 8x B300 SXM6 (275 GB each, driver 610) in California, 5 TB of disk, 3 TB of RAM,
+$96.78/hr. Jobs ran from `replication/round2_jobs.yaml`.
+
+**Downloads were the bottleneck.**
+- A single Hugging Face stream got 23-32 MB/s; 32 streams got ~300 MB/s, the instance's listed bandwidth.
+- The first two models started downloading before setup. Each later model downloaded while the one before it computed.
+- GLM-5.3's patching job sits at the end of the list, so its weights stay on disk instead of being downloaded twice.
+
+**Engines:**
+- vLLM 0.33 (as round 1) for the first round's models and GLM-5.3.
+- The pinned main build `0.34.0rc1.dev1196+g4623da99f` for Kimi K3.1 Pro (`scripts/node_setup_nightly.sh`). An unpinned
+  nightly install took the 0.34.0 release, because PEP 440 ranks post-cut main builds below the release.
+- The first load on Blackwell fetched ~800 FlashInfer kernel files one at a time (37 min for V4 Flash). The matching
+  `flashinfer-cubin` package was installed from then on.
+
+**Timings:**
+
+| model | download | load | scoring (incl. pilot, on-policy) | job |
+|---|---|---|---|---|
+| DeepSeek V4 Flash (4 GPUs) | 15 min | 37 min (kernel downloads) | 22 min (17 conditions) | 59 min |
+| GLM-5.3 | 86 min | ~14 min | ~82 min (75 conditions) | 96 min |
+| Kimi K3.1 Pro | 133 min | 117 min (CPU-bound MXFP4 processing) | | |
+
+**Gate** (`scripts/r2_gate.py`, `outputs/replication/round2_gate.csv`):
+
+| model | condition | utilities r | SD ratio | per-prompt r, median \|diff\| | |
+|---|---|---|---|---|---|
+| DeepSeek V4 Flash | assistant | 0.99995 | 0.9997 | 0.996, 0.000 | pass |
+| | coinflip | 0.99943 | 0.9992 | 0.962, 0.000 | pass |
+| | coinflip_tool | 0.98785 | 0.9535 | 0.670, 0.250 | **fail** |
+
+- The plain Assistant and the user-reported coin reproduce round 1's B200 scores almost exactly. Most prompts give
+  identical log-odds.
+- The tool coin's prompts are the same token ids as round 1's: equal lengths for all 30,000, and the example prompt is
+  byte-identical. Yet its per-prompt log-odds move by up to ~1 nat. Its ranking agrees about as well as the two runs'
+  split-half reliabilities allow (0.986, 0.983), and its scale is 4.6% smaller.
+  - The likely cause is V4's FP8 KV cache and compressed attention combined with prefix caching on the tool conditions'
+    long shared prefix (the tool declaration).
+  - Round 1's V4 engine gate showed the same pattern, rankings equal and scale off by 3-5%.
+- V4 therefore uses its re-scored A_0, C_0 and T, as pre-registered.
+
+### Results: GLM-5.3 (2026-11-23)
+
+Results are in `outputs/replication/glm-5.3/`. Every cell passes the mass gate (median 0.65-1.00). Two tool-coin cells fall
+just below the reliability gate (split-half 0.894): `coinflip_tool@contrarian+self` and `@strategist+user`. The calls that
+use them are "not interpretable".
+
+**Checks:**
+- **Effort rule:** low. P(`</think>` at once) was 0.066 at low, 0.0025 at high and 0.0003 at max.
+- **Reasoning check: agrees.**
+  - The Assistant read inside the reasoning against after the empty block: r 0.990, SD ratio 0.74.
+  - The prediction of the user: r 0.971, SD ratio 0.72.
+- **On-policy tool calls:** 48-50 of 50 replies call `flip_coin` first, in every tool-call condition.
+- **Wording check:** the short preference `coin_report_short_coin_bold` (mass 0.99), the guess `coin_predict_think_bold`
+  (0.95), and Task A/B (1.00): round 1's wordings.
+
+![GLM-5.3 calls](figures/glm-5.3/summary.png)
+
+| finding | evil | slacker | contrarian | strategist |
+|---|---|---|---|---|
+| 1. coin tracks the Assistant (final only) | replicates: r(A_f, C_f) 0.72 [0.68, 0.76] | | | |
+| 2. user's choice Assistant-like (final only) | replicates: r(A_f, U_f) 0.72 | | | |
+| 3. prediction of the user Assistant-like (final only) | replicates: r(A_f, P_f) 0.71; Δ +0.15 ("prediction") | | | |
+| 4. coin follows a user instruction | not separable | doesn't (b_per +0.01) | replicates (ρ_user 0.30) | not separable |
+| 5. self-description less than instruction | not separable | doesn't (ratio undefined) | replicates (Δρ -0.22) | not separable |
+| 6. coin follows roleplay | not separable | replicates (w_r 0.71) | replicates | replicates (w_r 0.97) |
+| 7. prediction follows self-description more | not separable | replicates | replicates | not separable |
+
+**Observations:**
+- **Findings 1-3 hold in the final-only form.** The coin, the user's choice and the prediction of the user all correlate
+  ~0.72 with the Assistant. Within origin the figures are 0.57, 0.63 and 0.71.
+- **The coin is sizable** (SD 0.55 nats; the Assistant's is 3.21). It's larger than Trinity Large Thinking's (0.20) and OLMo 3.1
+  Think's (0.17), though GLM-5.3 always thinks too.
+- **GLM-5.3's Assistant doesn't take on the evil persona:**
+  - r 0.98 with its default under the system prompt, 0.96 under the user's instruction;
+  - strategist only partly (0.94);
+  - so most evil and strategist calls can't be made.
+- **The prediction of the user is closer to the user's choice than the Assistant's own choice is** (Δ +0.15), unlike the
+  first round's models (-0.12 to +0.04).
+- **The tool run** (`outputs/replication/glm-5.3/analysis_tool/`):
+  - The tool's coin tracks the Assistant less than the user-reported coin: r(T, A_0) 0.55 against r(C_0, A_0) 0.72.
+  - Against the user-reported coin with the tool declared (0.58), call 1 is "same".
+  - Declaring the tool leaves the Assistant's choice unchanged (r 0.985).
+  - No Δρ_self call can be made: evil and strategist aren't separable, slacker is unstable, contrarian isn't interpretable.
+- Round 2's new experiments for GLM-5.3 are in the sections below, with every model.
+
+**Finding 8:** the coin's SD clears the pre-registered 0.5 bar, so GLM-5.3's patching runs with round 1's three questions,
+at the end of the node's job list.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent
