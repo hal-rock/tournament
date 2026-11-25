@@ -207,23 +207,35 @@ for _rule, _text in IFCHOOSE_RULES.items():
 # A rule goes in the user turn ("_user": the reworded "if I ask you to choose" lead, then a blank line, then the condition's
 # own text) or in the system prompt ("_system": the condition's own text in the user turn, unchanged). Condition names:
 # "assistant_<kind>_<rule>_<placement>".
+# The coinflip versions (README, "Choice rules: the coinflip"): the ticket sits by the label as in the Assistant's layout,
+# before the coin side ("Task A (ticket #417, if heads): ..."); the mixed layout is the plain coinflip with each task in its
+# assigned language; the rule leads the user's message, which then flips the coin instead of asking for a choice.
 CONDITIONS["assistant_tickets"] = {**CONDITIONS["assistant"], "body": CONDITIONS["assistant"]["body"].replace(
     "Task A: {first}\n\nTask B: {second}",
     "Task A (ticket #{first_ticket}): {first}\n\nTask B (ticket #{second_ticket}): {second}")}
-CONDITIONS["assistant_mixed"] = {**CONDITIONS["assistant"], "task_field": "prompt_mixed"}
+CONDITIONS["coinflip_tickets"] = {**CONDITIONS["coinflip"], "body": CONDITIONS["coinflip"]["body"].replace(
+    "Task A (if heads): {first}\n\nTask B (if tails): {second}",
+    "Task A (ticket #{first_ticket}, if heads): {first}\n\nTask B (ticket #{second_ticket}, if tails): {second}")}
+for _base in ("assistant", "coinflip"):
+    CONDITIONS[f"{_base}_mixed"] = {**CONDITIONS[_base], "task_field": "prompt_mixed"}
 CHOICE_RULES = {
     "tickets": {"lower": "the one with the lower ticket number", "higher": "the one with the higher ticket number"},
     "mixed": {"spanish": "the one whose description is in Spanish", "english": "the one whose description is in English"},
     "position": {"first": "the one listed first", "second": "the one listed second"},
 }
 CHOICE_LEADS = {"user": IFCHOOSE_LEAD, "system": "If the user asks you to choose between tasks, choose {rule}."}
-CHOICE_BASES = {"tickets": "assistant_tickets", "mixed": "assistant_mixed", "position": "assistant"}
-for _kind, _rules in CHOICE_RULES.items():
-    for _rule, _text in _rules.items():
-        _base = CONDITIONS[CHOICE_BASES[_kind]]
-        CONDITIONS[f"assistant_{_kind}_{_rule}_user"] = {
-            **_base, "body": CHOICE_LEADS["user"].format(rule=_text) + _base["body"]}
-        CONDITIONS[f"assistant_{_kind}_{_rule}_system"] = {**_base, "system": CHOICE_LEADS["system"].format(rule=_text)}
+# The no-rule layout each kind's rules are added to, per readout.
+CHOICE_LAYOUTS = {_base: {"tickets": f"{_base}_tickets", "mixed": f"{_base}_mixed", "position": _base}
+                  for _base in ("assistant", "coinflip")}
+CHOICE_BASES = CHOICE_LAYOUTS["assistant"]
+for _readout, _layouts in CHOICE_LAYOUTS.items():
+    for _kind, _rules in CHOICE_RULES.items():
+        for _rule, _text in _rules.items():
+            _base = CONDITIONS[_layouts[_kind]]
+            CONDITIONS[f"{_readout}_{_kind}_{_rule}_user"] = {
+                **_base, "body": CHOICE_LEADS["user"].format(rule=_text) + _base["body"]}
+            CONDITIONS[f"{_readout}_{_kind}_{_rule}_system"] = {
+                **_base, "system": CHOICE_LEADS["system"].format(rule=_text)}
 # Lazy personas (README, "Lazy personas"): a one-word persona of the kind people try for fun, at the start of the user's
 # message in one of two phrasings (Hal, 2026-11-12): "You are a pirate." (an identity) or "In your next message, answer as a
 # pirate." (the shallow instruction's "next message", without "if asked what you prefer"). A blank line, then the condition's

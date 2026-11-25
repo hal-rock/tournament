@@ -9,6 +9,7 @@ to check how it naturally phrases a choice.
 Usage: uv run python tournament.py configs/local.yaml
 """
 
+import collections
 import csv
 import gc
 import gzip
@@ -33,7 +34,17 @@ from analyze import analyze, log_to_wandb, read_jsonl
 from prompts import CONDITIONS, build_prompt, outcome_token_ids, split_condition
 
 
-def score(model, tokenizer, items, batch_size, top_k=5):
+def length_batches(lengths, batch_size, exact_length=False):
+    """Batches of item indices, length-sorted. exact_length: only items of one token length share a batch, so nothing
+    is padded (DeepSeek V4's output at a position depends on how many tokens follow it, padding included; ~/mats/CLAUDE.md)."""
+    order = sorted(range(len(lengths)), key=lambda k: lengths[k])
+    if not exact_length:
+        return [order[i:i + batch_size] for i in range(0, len(order), batch_size)]
+    groups = [list(g) for _, g in itertools.groupby(order, key=lambda k: lengths[k])]
+    return [g[i:i + batch_size] for g in groups for i in range(0, len(g), batch_size)]
+
+
+def score(model, tokenizer, items, batch_size, top_k=5, exact_length=False):
     """items: [(prompt_text, (first_id, second_id))]. Returns one dict per item, in order.
 
     Batches are right-padded and length-sorted to keep padding small. Under a causal
@@ -41,13 +52,13 @@ def score(model, tokenizer, items, batch_size, top_k=5):
     it would be alone, whatever the model does with attention_mask or positions
     (DeepSeek V4, for one, compresses KV over windows of absolute positions, which
     left padding would shift). Logits are kept only at each row's last real token.
+    exact_length: batch only prompts of the same token length (no padding at all), for models whose output still
+    depends on padding (DeepSeek V4, see length_batches).
     """
     encoded = [tokenizer(p, add_special_tokens=False).input_ids for p, _ in items]
-    order = sorted(range(len(items)), key=lambda k: len(encoded[k]))
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     results = [None] * len(items)
-    for start in range(0, len(order), batch_size):
-        batch = order[start:start + batch_size]
+    for batch in length_batches([len(e) for e in encoded], batch_size, exact_length):
         width = max(len(encoded[k]) for k in batch)
         input_ids = torch.full((len(batch), width), pad_id, dtype=torch.long)
         mask = torch.zeros((len(batch), width), dtype=torch.long)
@@ -87,16 +98,21 @@ def write_csv_gz(path, rows):
         w.writerows(rows)
 
 
-def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rng):
+def check_batching(model, tokenizer, items, batch_size, n_prompts, tolerance, rng, exact_length=False):
     """Score a few prompts of mixed lengths alone and together in one padded
     batch. A padding/masking bug shifts most prompts, so this raises if the median
     |difference| in log-odds exceeds tolerance (or any is NaN). bf16 kernels also
     round differently by batch shape, which some models amplify into rare outliers
     of a few nats (see configs/models/gemma4-31b.yaml), hence the median. Returns
-    the max |difference|."""
+    the max |difference|. exact_length: the run batches only same-length prompts, so the sample is prompts of the
+    most common length, scored alone and in one unpadded batch (what can still differ is batch size)."""
+    if exact_length:
+        lengths = [len(tokenizer(p, add_special_tokens=False).input_ids) for p, _ in items]
+        common = collections.Counter(lengths).most_common(1)[0][0]
+        items = [it for it, n in zip(items, lengths) if n == common]
     sample = rng.sample(items, min(n_prompts, len(items)))
     alone = score(model, tokenizer, sample, batch_size=1)
-    together = score(model, tokenizer, sample, batch_size=max(batch_size, len(sample)))
+    together = score(model, tokenizer, sample, batch_size=max(batch_size, len(sample)), exact_length=exact_length)
     diffs = [abs((x["logp_first"] - x["logp_second"]) - (y["logp_first"] - y["logp_second"]))
              for x, y in zip(alone, together)]
     worst, median = max(diffs), float(np.median(diffs))
@@ -146,6 +162,16 @@ def subset_pairs(pairs, n, seed=0):
     """A fixed random n of the selected pairs (`pair_subset` in a config), for pilots: a subset of the sweep's pairs, so
     their plain conditions can be checked against the sweep's on the same pairs."""
     return pairs if n is None or n >= len(pairs) else sorted(random.Random(f"subset/{seed}").sample(pairs, n))
+
+
+def benign_subset(tasks, pairs):
+    """The benign tasks (analyze.py's definition: not topic harmful_request, not BailBench) and the pairs among them,
+    re-indexed to that list (`benign_only` in a config). The pairs stay the ones the config selected over all tasks, so a
+    benign-only run scores the sweep's benign pairs."""
+    from analyze import HARM_ORIGINS, HARM_TOPICS
+    keep = [i for i, t in enumerate(tasks) if t["topic"] not in HARM_TOPICS and t["origin"] not in HARM_ORIGINS]
+    new = {old: i for i, old in enumerate(keep)}
+    return [tasks[i] for i in keep], [(new[a], new[b]) for a, b in pairs if a in new and b in new]
 
 
 def pair_fields(task_a, task_b):
@@ -280,6 +306,11 @@ def main():
     # Unordered pairs of task indices (all, or a max_pairs subsample); each is scored in both orders.
     pairs = select_pairs(len(tasks), cfg.get("max_pairs"), cfg.get("seed", 0))
     pairs = subset_pairs(pairs, cfg.get("pair_subset"), cfg.get("seed", 0))
+    if cfg.get("benign_only"):  # the benign tasks and the selected pairs among them (README, "Choice rules: the coinflip")
+        tasks, pairs = benign_subset(tasks, pairs)
+    # Batch only same-length prompts (DeepSeek V4, whose output depends on padding). With it, set progress_every above the
+    # number of prompts per condition, so each condition is batched as a whole rather than in small same-length groups.
+    exact_length = cfg.get("exact_length_batches", False)
     ordered = pairs + [(b, a) for a, b in pairs]
     print(f"{len(tasks)} tasks, {len(pairs)} pairs, {len(ordered)} prompts per condition")
 
@@ -333,13 +364,13 @@ def main():
 
             bc = cfg["batching_check"]
             run.summary[f"{stage}/{condition}/batching_max_diff"] = check_batching(
-                model, tokenizer, items, batch_size, bc["n_prompts"], bc["tolerance"], rng)
+                model, tokenizer, items, batch_size, bc["n_prompts"], bc["tolerance"], rng, exact_length)
 
             start = time.time()
             scored = []
             for chunk in range(0, len(items), cfg.get("progress_every", 1000)):
                 scored += score(model, tokenizer, items[chunk:chunk + cfg.get("progress_every", 1000)],
-                                batch_size, cfg.get("top_k_tokens", 5))
+                                batch_size, cfg.get("top_k_tokens", 5), exact_length)
                 rate = len(scored) / (time.time() - start)
                 print(f"  {stage}/{condition}: {len(scored)}/{len(items)} prompts, {rate:.1f}/s, "
                       f"ETA {(len(items) - len(scored)) / rate / 60:.1f} min", flush=True)

@@ -8231,6 +8231,101 @@ the same where the rule's task is harmful. Grey diamonds: the no-rule layout. Da
 
 Benign F of the ticket rules by how far apart the two tickets are.
 
+## Choice rules: the coinflip
+
+Hal (2026-11-25): run the coinflip under every rule the pilot found followed ("Choice rules: tickets, languages and
+position"), in the user turn, on benign tasks only:
+- **tickets** on Llama, Gemma and V4 Flash;
+- **mixed** and **position** on all four.
+
+The question is whether the coin tracks the Assistant's upcoming choice when that choice is set by something unrelated to its
+preferences, or keeps tracking the preferences.
+
+### Design (written 2026-11-25, before any data)
+
+- **Prompts** (`prompts.CHOICE_LAYOUTS`): the coinflip, cut at "it came up", read P(" heads") vs P(" tails").
+  - Ticket layout: `Task A (ticket #417, if heads): <task>` (`coinflip_tickets`); the ticket sits by the label as in the
+    Assistant's layout.
+  - Mixed layout: the plain coinflip with each task in its assigned language (`coinflip_mixed`). Position uses the plain coinflip.
+  - Rules: the pilot's user-turn lead before the coin's layout (`coinflip_<kind>_<rule>_user`). The message then flips the coin
+    instead of asking for a choice, so the rule's condition ("If I ask you to choose ...") stays unmet, as in the ifchoose run.
+- **Runs:** one per model and kind (`configs/choice_rules_coin/<model>-<kind>.yaml`, W&B group `choice_rules_coin`). Each scores
+  the plain `assistant` and `coinflip`, the kind's no-rule layout for both, and both mirrored rules for both: 8 conditions (6 for
+  position).
+- **Tasks and pairs:** the 257 benign tasks and the sweep's pairs among them (11,065, both orders; `benign_only`).
+- **Models and GPUs** (by stock):
+  - Llama 3.3 70B: three 1x H200 pods, one per kind.
+  - Gemma 4 31B: three 1x H100 pods.
+  - DeepSeek V4 Flash: 2x B200, its three kinds in turn. It batches only prompts of the same token length
+    (`exact_length_batches`), since its output depends on padding and its coin is small (sweep pair effects SD 0.73 nats).
+  - GLM-4.5-Air: whatever two-GPU node comes free.
+- **Tests:** `tests/test_choice_rules_coin.py`, which checks V4 Flash's prompts against its own encoder.
+
+### Measures (written before any data)
+
+Utilities are `analyze.py`'s fit over the 257 tasks. Per model and kind:
+- A_L and C_L are the no-rule layout's Assistant and coin (position: the plain prompts);
+- A_+ / A_− and C_+ / C_− are under the two mirrored rules, + being `lower`, `spanish` and `first`.
+
+CIs are 95% task bootstraps within origin, with one set of resamples for every statistic of a model.
+
+**Primary 1, following: does the coin move toward the instructed choice?**
+- **Tickets and mixed:** the mirrored contrast D_C = (C_+ − C_−) / 2, regressed on the rule score s: z(−ticket number), or
+  z(Spanish). The slope **β_C** is in coin nats per SD of s, and β_A is the same for the Assistant.
+- **Position:** the mirrored slot lean **H_C** = (m_first − m_second) / 2, where m is the coin's mean log-odds toward heads
+  (the first-listed task) over all prompts of a condition. H_A is the same for the Assistant, toward " A".
+- **Call:** **follows** if the CI is above 0, **against** if below, **no effect** otherwise.
+
+**Primary 2, retention: how much of the default preference does the coin keep, next to the instructed Assistant?**
+- The mirrored averages Ā = (A_+ + A_−) / 2 and C̄ = (C_+ + C_−) / 2 cancel each rule's own direction.
+- **q_A** is the slope of Ā on A_L. **q_C** is the slope of C̄ on A_L, divided by b_L, the slope of C_L on A_L (how the
+  no-rule coin passes on the default preferences).
+- **Call** on Δq = q_C − q_A: the coin keeps **more** of the default than the instructed choice does (CI above 0), **less**
+  (below), or **as much**.
+
+**How the two read together:**
+- **The coin tracks the planned choice:** it follows, with τ (below) near 1, and Δq ≈ 0.
+- **The coin tracks the preferences whatever the choice:** no following, and q_C ≈ 1 > q_A.
+
+**Size (secondary, but the main number to compare across kinds):** τ = (β_C / β_A) / b_L for tickets and mixed,
+(H_C / H_A) / b_L for position. τ = 1 means the coin passes on the rule's effect on the choice at the rate it passes on the
+default preferences.
+
+**Secondary:**
+- The coin's pick share under each rule (benign pairs; mixed: cross-language), next to the no-rule coin's and the Assistant's.
+- The two-pull fit C_k = c + β_def z(A_L) + β_ins z(A_k), per rule, for tickets and mixed, with w = β_ins / (β_def + β_ins),
+  where |r(A_k, A_L)| < 0.9.
+- d_pr as in the ifchoose run: the coin's partial r with the rule given A_L, minus C_L's.
+- β and q with source fixed effects.
+- Layout effects: r(A_L, A_0) and r(C_L, C_0); the no-rule coin's lean to Spanish or to lower tickets.
+- Per condition: the heads bias, outcome mass and reliability.
+
+**Gate:**
+- the batching checks pass;
+- each run's plain Assistant and coin match the sweep's utilities on the 257 tasks at r ≥ 0.97 (looser than usual: other GPU
+  types, and V4 Flash's sweep carried padding noise);
+- a model's plain conditions agree across its runs at r ≥ 0.99;
+- every cell has split-half reliability of at least 0.9;
+- a cell with median outcome mass below 0.2 is reported but not interpreted.
+
+**Predictions** (mine, before any data):
+1. **Following:** the coin follows the rule in at least 9 of the 11 cells, including position in all four models.
+2. **Size:** τ is between 0.1 and 1 in at least 7 of the 11 cells.
+3. **Retention:** for tickets, the coin keeps more of the default than the instructed choice (Δq above 0) in all three models.
+   For position, Δq's CI includes 0 in at least 3 of 4: the instructed Assistant keeps most of its preference in its margins
+   there (pilot r 0.77-0.95 with the plain Assistant), so there is little to lose.
+4. **Gemma's coin** is pushed toward tails under every rule lead (mean bias below −3 nats), as in the ifchoose run, but its
+   cells stay reliable (≥ 0.9).
+
+**Caveats, known in advance:**
+- **The rule comes from the user,** so a coin that follows it may follow the user's apparent wish (as in the ifchoose run).
+- **Position's following is read from the bias,** which also takes in any generic heads/tails shift the lead causes. The mirrored
+  difference cancels the shift only where it's the same under both rules.
+- **Benign tasks only:** nothing here speaks to harmful tasks.
+- **GPU types differ from the pilot and the sweep** for some models, and V4 Flash runs in HF on B200s for the first time. The
+  gate compares with the sweep.
+- **One phrasing per rule,** user turn only.
+
 ## Tasks
 
 From the canonical 6,000-task set of Gilg et al., [Probing Persona-Dependent

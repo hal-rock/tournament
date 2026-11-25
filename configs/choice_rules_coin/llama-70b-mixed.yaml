@@ -1,0 +1,28 @@
+# Choice rules, the coinflip (README, "Choice rules: the coinflip"; Hal, 2026-11-25): the mixed rules in the user turn, for
+# the Assistant's choice and the coinflip, with the no-rule layout and the plain prompts as each run's own baselines.
+# Benign tasks only (257), the sweep's pairs among them (11,065), both orders. Tickets and languages:
+# data/choice_rules_assign.json.
+# 1x H200 or B200 without a KV cache (the pilot ran on a B300).
+wandb_project: tournament
+group: choice_rules_coin
+tags: [llama-70b, mixed]
+run_name: choice-rules-coin-llama-70b-mixed
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+choice_rules: true
+benign_only: true
+seed: 0
+require_gpu: true
+system_prompt: none
+# The sweep's 15,000 pairs, restricted to pairs of two benign tasks.
+max_pairs: 15000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 4000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [assistant, coinflip, assistant_mixed, coinflip_mixed, assistant_mixed_spanish_user, assistant_mixed_english_user, coinflip_mixed_spanish_user, coinflip_mixed_english_user]
