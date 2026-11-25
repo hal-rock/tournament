@@ -197,6 +197,33 @@ for _base in ("assistant", "coinflip"):
 for _rule, _text in IFCHOOSE_RULES.items():
     CONDITIONS[f"coinflip_tool_ifchoose_{_rule}"] = {**CONDITIONS["coinflip_tool"], "body": (
         IFCHOOSE_LEAD.format(rule=_text) + CONDITIONS["coinflip_tool"]["body"])}
+# Choice rules (README, "Choice rules: tickets, languages and position"; Hal, 2026-11-25): rules that move the Assistant's
+# choice by something unrelated to its preferences. choice_rules.py draws the per-task assignments and tournament.py adds
+# them to the tasks (choice_rules.decorate). Three kinds, each with a mirrored pair of rules:
+# - tickets: every task carries a random 3-digit ticket number next to its label, read from the task's tags
+#   ("{first_ticket}"); "assistant_tickets" is that layout with no rule.
+# - mixed: a random half of the tasks is in Spanish (the task's prompt_mixed field); "assistant_mixed" has no rule.
+# - position: the plain prompt; the rule names a slot, not a task.
+# A rule goes in the user turn ("_user": the reworded "if I ask you to choose" lead, then a blank line, then the condition's
+# own text) or in the system prompt ("_system": the condition's own text in the user turn, unchanged). Condition names:
+# "assistant_<kind>_<rule>_<placement>".
+CONDITIONS["assistant_tickets"] = {**CONDITIONS["assistant"], "body": CONDITIONS["assistant"]["body"].replace(
+    "Task A: {first}\n\nTask B: {second}",
+    "Task A (ticket #{first_ticket}): {first}\n\nTask B (ticket #{second_ticket}): {second}")}
+CONDITIONS["assistant_mixed"] = {**CONDITIONS["assistant"], "task_field": "prompt_mixed"}
+CHOICE_RULES = {
+    "tickets": {"lower": "the one with the lower ticket number", "higher": "the one with the higher ticket number"},
+    "mixed": {"spanish": "the one whose description is in Spanish", "english": "the one whose description is in English"},
+    "position": {"first": "the one listed first", "second": "the one listed second"},
+}
+CHOICE_LEADS = {"user": IFCHOOSE_LEAD, "system": "If the user asks you to choose between tasks, choose {rule}."}
+CHOICE_BASES = {"tickets": "assistant_tickets", "mixed": "assistant_mixed", "position": "assistant"}
+for _kind, _rules in CHOICE_RULES.items():
+    for _rule, _text in _rules.items():
+        _base = CONDITIONS[CHOICE_BASES[_kind]]
+        CONDITIONS[f"assistant_{_kind}_{_rule}_user"] = {
+            **_base, "body": CHOICE_LEADS["user"].format(rule=_text) + _base["body"]}
+        CONDITIONS[f"assistant_{_kind}_{_rule}_system"] = {**_base, "system": CHOICE_LEADS["system"].format(rule=_text)}
 # Lazy personas (README, "Lazy personas"): a one-word persona of the kind people try for fun, at the start of the user's
 # message in one of two phrasings (Hal, 2026-11-12): "You are a pirate." (an identity) or "In your next message, answer as a
 # pirate." (the shallow instruction's "next message", without "if asked what you prefer"). A blank line, then the condition's
@@ -513,7 +540,7 @@ def _render(messages, template_tokenizer, has_reply, system_prompt, turn_format,
 
 def build_prompt(condition, first, second, template_tokenizer, system_prompt="none", prefill=True,
                  turn_format=None, close_think=False, strip_think=False, doc_prefix=None, tool_family=None,
-                 tool_repo=None, keep_system=False, template_kwargs=None):
+                 tool_repo=None, keep_system=False, template_kwargs=None, fields=None):
     """Render one prompt as text, ending right where the outcome token goes.
 
     system_prompt: "default" keeps whatever the template injects, "none" drops
@@ -529,7 +556,8 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
     the repo of its reference encoder (toolframe.py).
     keep_system, template_kwargs: see _render (always-thinking models' reasoning-effort block and its level).
     A condition "<condition>@<persona>[+placement]" adds the persona (see PLACEMENTS); as the system prompt, it replaces
-    system_prompt (which must then be "none").
+    system_prompt (which must then be "none"). So does a condition whose spec has its own "system" (the choice rules).
+    fields: more values for the condition's body, e.g. {"first_ticket": 417, "second_ticket": 233} (choice rules).
     """
     condition, persona, placement = parse_condition(condition)
     lead = ""
@@ -543,7 +571,10 @@ def build_prompt(condition, first, second, template_tokenizer, system_prompt="no
             lead = (PERSONAS if placement == "user" else PERSONAS_SELF)[persona] + "\n\n"
     spec = CONDITIONS[condition]
     assert not (spec.get("raw") and persona), "raw-text conditions take no persona"
-    body = lead + spec["body"].format(first=first.strip(), second=second.strip())
+    if spec.get("system") is not None:
+        assert system_prompt == "none" and persona is None, f"{condition} sets its own system prompt"
+        system_prompt = spec["system"]
+    body = lead + spec["body"].format(first=first.strip(), second=second.strip(), **(fields or {}))
     if spec.get("raw"):
         assert doc_prefix is not None, f"{condition} is raw text and needs the model's doc_prefix"
         assert system_prompt == "none", "raw-text conditions have no system prompt"

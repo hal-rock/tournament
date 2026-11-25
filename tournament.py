@@ -30,7 +30,7 @@ from transformers import (ApertusConfig, ApertusForCausalLM, AutoModelForCausalL
 from transformers.utils import cached_file
 
 from analyze import analyze, log_to_wandb, read_jsonl
-from prompts import build_prompt, outcome_token_ids
+from prompts import CONDITIONS, build_prompt, outcome_token_ids, split_condition
 
 
 def score(model, tokenizer, items, batch_size, top_k=5):
@@ -142,6 +142,18 @@ def select_pairs(n_tasks, max_pairs=None, seed=0):
     return sorted(random.Random(f"pairs/{seed}").sample(pairs, max_pairs))
 
 
+def subset_pairs(pairs, n, seed=0):
+    """A fixed random n of the selected pairs (`pair_subset` in a config), for pilots: a subset of the sweep's pairs, so
+    their plain conditions can be checked against the sweep's on the same pairs."""
+    return pairs if n is None or n >= len(pairs) else sorted(random.Random(f"subset/{seed}").sample(pairs, n))
+
+
+def pair_fields(task_a, task_b):
+    """Per-task values a condition's body can name, as "{first_<tag>}" and "{second_<tag>}" (choice rules' tickets)."""
+    return ({f"first_{k}": v for k, v in task_a.get("tags", {}).items()}
+            | {f"second_{k}": v for k, v in task_b.get("tags", {}).items()})
+
+
 class ApertusPrunedHeadForCausalLM(ApertusForCausalLM):
     """Apertus 1.5's text model, as in ../coinflip (coinflip.py). The checkpoints are multimodal (`apertus1p5`), which
     released transformers can't read, but the text part is Apertus 1.0's `ApertusModel` unchanged, with input
@@ -242,6 +254,9 @@ def load_model(name, device, dtype, revision=None, max_memory=None, loader=None,
 def main():
     cfg = yaml.safe_load(open(sys.argv[1]))
     tasks = read_jsonl(cfg["tasks_file"])
+    if cfg.get("choice_rules"):  # ticket numbers and mixed-language text (README, "Choice rules")
+        import choice_rules
+        tasks = choice_rules.decorate(tasks)
     system_prompt = cfg.get("system_prompt", "none")
     batch_size = cfg["batch_size"]
     rng = random.Random(cfg.get("seed", 0))
@@ -264,6 +279,7 @@ def main():
 
     # Unordered pairs of task indices (all, or a max_pairs subsample); each is scored in both orders.
     pairs = select_pairs(len(tasks), cfg.get("max_pairs"), cfg.get("seed", 0))
+    pairs = subset_pairs(pairs, cfg.get("pair_subset"), cfg.get("seed", 0))
     ordered = pairs + [(b, a) for a, b in pairs]
     print(f"{len(tasks)} tasks, {len(pairs)} pairs, {len(ordered)} prompts per condition")
 
@@ -305,9 +321,12 @@ def main():
 
         for condition in m["conditions"]:
             outcome_ids = tuple(outcome_token_ids(condition, tokenizer))
-            items = [(build_prompt(condition, tasks[a]["prompt"], tasks[b]["prompt"], template_tokenizer, system_prompt,
+            # Which text of each task the condition shows: "prompt", or the choice rules' mixed-language "prompt_mixed".
+            field = CONDITIONS[split_condition(condition)[0]].get("task_field", "prompt")
+            items = [(build_prompt(condition, tasks[a][field], tasks[b][field], template_tokenizer, system_prompt,
                                    turn_format=m.get("turn_format"), close_think=m.get("close_think", False),
-                                   strip_think=m.get("strip_think", False), doc_prefix=m.get("doc_prefix")),
+                                   strip_think=m.get("strip_think", False), doc_prefix=m.get("doc_prefix"),
+                                   fields=pair_fields(tasks[a], tasks[b])),
                       outcome_ids) for a, b in ordered]
             examples[f"{stage}/{condition}"] = items[0][0]
             print(f"\n[{stage}/{condition}] example prompt:\n{items[0][0]}\n", flush=True)

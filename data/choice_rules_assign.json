@@ -1,0 +1,1252 @@
+{
+ "seed": 0,
+ "max_abs_r": 0.05,
+ "tries": {
+  "ticket": 4,
+  "lang": 1
+ },
+ "correlations": {
+  "log_length": {
+   "ticket": -0.0153,
+   "spanish": -0.0036
+  },
+  "harmful": {
+   "ticket": 0.0033,
+   "spanish": 0.0068
+  },
+  "llama-70b/assistant": {
+   "ticket": 0.0045,
+   "spanish": -0.0208
+  },
+  "llama-70b/coinflip": {
+   "ticket": 0.0203,
+   "spanish": 0.0111
+  },
+  "gemma4-31b/assistant": {
+   "ticket": -0.0086,
+   "spanish": 0.0037
+  },
+  "gemma4-31b/coinflip": {
+   "ticket": 0.0142,
+   "spanish": -0.0247
+  },
+  "glm-4.5-air/assistant": {
+   "ticket": -0.0081,
+   "spanish": 0.0248
+  },
+  "glm-4.5-air/coinflip": {
+   "ticket": -0.0178,
+   "spanish": 0.0231
+  },
+  "deepseek-v4-flash/assistant": {
+   "ticket": -0.0208,
+   "spanish": 0.0089
+  },
+  "deepseek-v4-flash/coinflip": {
+   "ticket": -0.0201,
+   "spanish": 0.0208
+  }
+ },
+ "tasks": {
+  "alpaca_4751": {
+   "ticket": 258,
+   "lang": "en"
+  },
+  "competition_math_6754": {
+   "ticket": 498,
+   "lang": "es"
+  },
+  "competition_math_6333": {
+   "ticket": 677,
+   "lang": "en"
+  },
+  "competition_math_6922": {
+   "ticket": 158,
+   "lang": "es"
+  },
+  "wildchat_57017": {
+   "ticket": 549,
+   "lang": "es"
+  },
+  "alpaca_8499": {
+   "ticket": 182,
+   "lang": "en"
+  },
+  "bailbench_467": {
+   "ticket": 636,
+   "lang": "es"
+  },
+  "bailbench_1350": {
+   "ticket": 781,
+   "lang": "en"
+  },
+  "competition_math_3538": {
+   "ticket": 798,
+   "lang": "es"
+  },
+  "alpaca_2670": {
+   "ticket": 315,
+   "lang": "es"
+  },
+  "alpaca_1038": {
+   "ticket": 550,
+   "lang": "es"
+  },
+  "alpaca_9155": {
+   "ticket": 719,
+   "lang": "en"
+  },
+  "wildchat_49152": {
+   "ticket": 313,
+   "lang": "en"
+  },
+  "bailbench_1419": {
+   "ticket": 570,
+   "lang": "en"
+  },
+  "stresstest_68_191_value2": {
+   "ticket": 134,
+   "lang": "es"
+  },
+  "wildchat_56413": {
+   "ticket": 695,
+   "lang": "es"
+  },
+  "wildchat_12151": {
+   "ticket": 633,
+   "lang": "es"
+  },
+  "competition_math_6623": {
+   "ticket": 844,
+   "lang": "en"
+  },
+  "wildchat_15203": {
+   "ticket": 286,
+   "lang": "es"
+  },
+  "wildchat_7336": {
+   "ticket": 568,
+   "lang": "en"
+  },
+  "alpaca_5041": {
+   "ticket": 236,
+   "lang": "es"
+  },
+  "alpaca_2322": {
+   "ticket": 682,
+   "lang": "en"
+  },
+  "alpaca_5601": {
+   "ticket": 862,
+   "lang": "en"
+  },
+  "alpaca_11405": {
+   "ticket": 601,
+   "lang": "en"
+  },
+  "alpaca_3889": {
+   "ticket": 163,
+   "lang": "es"
+  },
+  "competition_math_5432": {
+   "ticket": 481,
+   "lang": "en"
+  },
+  "alpaca_9230": {
+   "ticket": 179,
+   "lang": "es"
+  },
+  "wildchat_275": {
+   "ticket": 451,
+   "lang": "en"
+  },
+  "alpaca_4770": {
+   "ticket": 281,
+   "lang": "en"
+  },
+  "bailbench_1327": {
+   "ticket": 821,
+   "lang": "es"
+  },
+  "bailbench_237": {
+   "ticket": 618,
+   "lang": "en"
+  },
+  "alpaca_13667": {
+   "ticket": 161,
+   "lang": "es"
+  },
+  "competition_math_1513": {
+   "ticket": 917,
+   "lang": "es"
+  },
+  "alpaca_7270": {
+   "ticket": 308,
+   "lang": "es"
+  },
+  "wildchat_32037": {
+   "ticket": 548,
+   "lang": "es"
+  },
+  "competition_math_9807": {
+   "ticket": 713,
+   "lang": "en"
+  },
+  "bailbench_470": {
+   "ticket": 120,
+   "lang": "es"
+  },
+  "bailbench_1449": {
+   "ticket": 189,
+   "lang": "en"
+  },
+  "wildchat_78450": {
+   "ticket": 627,
+   "lang": "es"
+  },
+  "bailbench_1399": {
+   "ticket": 252,
+   "lang": "es"
+  },
+  "bailbench_613": {
+   "ticket": 354,
+   "lang": "en"
+  },
+  "competition_math_6403": {
+   "ticket": 333,
+   "lang": "en"
+  },
+  "alpaca_5276": {
+   "ticket": 629,
+   "lang": "es"
+  },
+  "alpaca_14692": {
+   "ticket": 324,
+   "lang": "en"
+  },
+  "bailbench_758": {
+   "ticket": 215,
+   "lang": "es"
+  },
+  "alpaca_438": {
+   "ticket": 603,
+   "lang": "es"
+  },
+  "wildchat_48041": {
+   "ticket": 933,
+   "lang": "en"
+  },
+  "competition_math_2960": {
+   "ticket": 385,
+   "lang": "en"
+  },
+  "competition_math_6253": {
+   "ticket": 133,
+   "lang": "es"
+  },
+  "competition_math_1337": {
+   "ticket": 248,
+   "lang": "es"
+  },
+  "wildchat_65027": {
+   "ticket": 722,
+   "lang": "es"
+  },
+  "bailbench_774": {
+   "ticket": 456,
+   "lang": "en"
+  },
+  "wildchat_76453": {
+   "ticket": 928,
+   "lang": "es"
+  },
+  "wildchat_68213": {
+   "ticket": 809,
+   "lang": "es"
+  },
+  "alpaca_446": {
+   "ticket": 909,
+   "lang": "en"
+  },
+  "wildchat_33464": {
+   "ticket": 198,
+   "lang": "es"
+  },
+  "stresstest_1_764_neutral": {
+   "ticket": 872,
+   "lang": "es"
+  },
+  "stresstest_81_459_value1": {
+   "ticket": 173,
+   "lang": "es"
+  },
+  "competition_math_835": {
+   "ticket": 489,
+   "lang": "en"
+  },
+  "wildchat_47639": {
+   "ticket": 148,
+   "lang": "es"
+  },
+  "alpaca_8064": {
+   "ticket": 166,
+   "lang": "es"
+  },
+  "stresstest_34_1093_value2": {
+   "ticket": 280,
+   "lang": "en"
+  },
+  "competition_math_5197": {
+   "ticket": 537,
+   "lang": "es"
+  },
+  "alpaca_9854": {
+   "ticket": 589,
+   "lang": "en"
+  },
+  "competition_math_773": {
+   "ticket": 102,
+   "lang": "es"
+  },
+  "stresstest_52_417_value1": {
+   "ticket": 369,
+   "lang": "es"
+  },
+  "stresstest_54_1076_neutral": {
+   "ticket": 501,
+   "lang": "en"
+  },
+  "alpaca_2634": {
+   "ticket": 380,
+   "lang": "en"
+  },
+  "wildchat_1638": {
+   "ticket": 669,
+   "lang": "es"
+  },
+  "wildchat_16554": {
+   "ticket": 317,
+   "lang": "es"
+  },
+  "stresstest_64_353_value2": {
+   "ticket": 358,
+   "lang": "en"
+  },
+  "competition_math_6880": {
+   "ticket": 684,
+   "lang": "es"
+  },
+  "bailbench_1513": {
+   "ticket": 689,
+   "lang": "es"
+  },
+  "alpaca_5372": {
+   "ticket": 639,
+   "lang": "en"
+  },
+  "competition_math_11688": {
+   "ticket": 227,
+   "lang": "es"
+  },
+  "competition_math_6448": {
+   "ticket": 683,
+   "lang": "en"
+  },
+  "competition_math_9037": {
+   "ticket": 232,
+   "lang": "en"
+  },
+  "alpaca_2302": {
+   "ticket": 434,
+   "lang": "en"
+  },
+  "bailbench_1177": {
+   "ticket": 866,
+   "lang": "en"
+  },
+  "competition_math_4714": {
+   "ticket": 553,
+   "lang": "en"
+  },
+  "alpaca_7930": {
+   "ticket": 219,
+   "lang": "en"
+  },
+  "stresstest_46_1382_value2": {
+   "ticket": 319,
+   "lang": "es"
+  },
+  "bailbench_1072": {
+   "ticket": 778,
+   "lang": "es"
+  },
+  "wildchat_27085": {
+   "ticket": 405,
+   "lang": "es"
+  },
+  "competition_math_1972": {
+   "ticket": 991,
+   "lang": "en"
+  },
+  "competition_math_12115": {
+   "ticket": 621,
+   "lang": "en"
+  },
+  "wildchat_24432": {
+   "ticket": 887,
+   "lang": "es"
+  },
+  "stresstest_99_988_value1": {
+   "ticket": 865,
+   "lang": "es"
+  },
+  "alpaca_10874": {
+   "ticket": 413,
+   "lang": "es"
+  },
+  "bailbench_294": {
+   "ticket": 420,
+   "lang": "es"
+  },
+  "competition_math_4981": {
+   "ticket": 406,
+   "lang": "en"
+  },
+  "stresstest_33_610_neutral": {
+   "ticket": 495,
+   "lang": "es"
+  },
+  "wildchat_24515": {
+   "ticket": 693,
+   "lang": "en"
+  },
+  "alpaca_7233": {
+   "ticket": 305,
+   "lang": "es"
+  },
+  "alpaca_2030": {
+   "ticket": 301,
+   "lang": "es"
+  },
+  "alpaca_14218": {
+   "ticket": 325,
+   "lang": "en"
+  },
+  "stresstest_26_913_neutral": {
+   "ticket": 644,
+   "lang": "es"
+  },
+  "competition_math_6048": {
+   "ticket": 604,
+   "lang": "es"
+  },
+  "wildchat_61217": {
+   "ticket": 430,
+   "lang": "es"
+  },
+  "alpaca_3400": {
+   "ticket": 450,
+   "lang": "en"
+  },
+  "wildchat_63431": {
+   "ticket": 704,
+   "lang": "es"
+  },
+  "alpaca_3454": {
+   "ticket": 559,
+   "lang": "en"
+  },
+  "stresstest_73_989_value1": {
+   "ticket": 129,
+   "lang": "es"
+  },
+  "alpaca_3871": {
+   "ticket": 299,
+   "lang": "es"
+  },
+  "wildchat_53100": {
+   "ticket": 800,
+   "lang": "en"
+  },
+  "competition_math_11278": {
+   "ticket": 363,
+   "lang": "es"
+  },
+  "alpaca_10443": {
+   "ticket": 375,
+   "lang": "es"
+  },
+  "alpaca_7136": {
+   "ticket": 886,
+   "lang": "es"
+  },
+  "wildchat_49339": {
+   "ticket": 955,
+   "lang": "es"
+  },
+  "competition_math_3572": {
+   "ticket": 580,
+   "lang": "es"
+  },
+  "wildchat_2176": {
+   "ticket": 869,
+   "lang": "es"
+  },
+  "wildchat_33509": {
+   "ticket": 908,
+   "lang": "en"
+  },
+  "alpaca_3573": {
+   "ticket": 702,
+   "lang": "es"
+  },
+  "competition_math_9810": {
+   "ticket": 435,
+   "lang": "en"
+  },
+  "wildchat_35388": {
+   "ticket": 159,
+   "lang": "en"
+  },
+  "bailbench_766": {
+   "ticket": 796,
+   "lang": "es"
+  },
+  "bailbench_1184": {
+   "ticket": 890,
+   "lang": "es"
+  },
+  "alpaca_11430": {
+   "ticket": 476,
+   "lang": "es"
+  },
+  "competition_math_2380": {
+   "ticket": 391,
+   "lang": "en"
+  },
+  "alpaca_3369": {
+   "ticket": 642,
+   "lang": "es"
+  },
+  "wildchat_61500": {
+   "ticket": 795,
+   "lang": "en"
+  },
+  "competition_math_3660": {
+   "ticket": 320,
+   "lang": "en"
+  },
+  "competition_math_1762": {
+   "ticket": 466,
+   "lang": "es"
+  },
+  "stresstest_32_1172_value2": {
+   "ticket": 992,
+   "lang": "es"
+  },
+  "alpaca_5094": {
+   "ticket": 631,
+   "lang": "es"
+  },
+  "wildchat_58152": {
+   "ticket": 516,
+   "lang": "es"
+  },
+  "competition_math_3281": {
+   "ticket": 779,
+   "lang": "es"
+  },
+  "stresstest_55_1464_value1": {
+   "ticket": 592,
+   "lang": "es"
+  },
+  "bailbench_438": {
+   "ticket": 823,
+   "lang": "en"
+  },
+  "wildchat_18494": {
+   "ticket": 737,
+   "lang": "en"
+  },
+  "wildchat_1291": {
+   "ticket": 508,
+   "lang": "es"
+  },
+  "stresstest_22_145_value2": {
+   "ticket": 512,
+   "lang": "en"
+  },
+  "bailbench_1230": {
+   "ticket": 811,
+   "lang": "es"
+  },
+  "alpaca_12331": {
+   "ticket": 712,
+   "lang": "en"
+  },
+  "stresstest_91_1353_value2": {
+   "ticket": 718,
+   "lang": "en"
+  },
+  "wildchat_42061": {
+   "ticket": 100,
+   "lang": "en"
+  },
+  "competition_math_9388": {
+   "ticket": 395,
+   "lang": "en"
+  },
+  "alpaca_8957": {
+   "ticket": 812,
+   "lang": "en"
+  },
+  "wildchat_37569": {
+   "ticket": 697,
+   "lang": "en"
+  },
+  "wildchat_1003": {
+   "ticket": 440,
+   "lang": "en"
+  },
+  "competition_math_7563": {
+   "ticket": 959,
+   "lang": "en"
+  },
+  "competition_math_7737": {
+   "ticket": 628,
+   "lang": "en"
+  },
+  "wildchat_8515": {
+   "ticket": 874,
+   "lang": "en"
+  },
+  "wildchat_48159": {
+   "ticket": 785,
+   "lang": "en"
+  },
+  "alpaca_6327": {
+   "ticket": 538,
+   "lang": "es"
+  },
+  "wildchat_628": {
+   "ticket": 539,
+   "lang": "en"
+  },
+  "wildchat_48563": {
+   "ticket": 903,
+   "lang": "en"
+  },
+  "competition_math_8224": {
+   "ticket": 801,
+   "lang": "en"
+  },
+  "wildchat_37021": {
+   "ticket": 541,
+   "lang": "es"
+  },
+  "bailbench_101": {
+   "ticket": 105,
+   "lang": "es"
+  },
+  "stresstest_24_825_value2": {
+   "ticket": 564,
+   "lang": "en"
+  },
+  "competition_math_9344": {
+   "ticket": 653,
+   "lang": "en"
+  },
+  "competition_math_5254": {
+   "ticket": 583,
+   "lang": "es"
+  },
+  "alpaca_12295": {
+   "ticket": 471,
+   "lang": "es"
+  },
+  "alpaca_5476": {
+   "ticket": 596,
+   "lang": "es"
+  },
+  "competition_math_349": {
+   "ticket": 634,
+   "lang": "en"
+  },
+  "wildchat_15591": {
+   "ticket": 940,
+   "lang": "en"
+  },
+  "bailbench_1628": {
+   "ticket": 123,
+   "lang": "en"
+  },
+  "competition_math_7995": {
+   "ticket": 118,
+   "lang": "es"
+  },
+  "competition_math_2440": {
+   "ticket": 748,
+   "lang": "en"
+  },
+  "alpaca_10269": {
+   "ticket": 742,
+   "lang": "es"
+  },
+  "stresstest_21_1240_value1": {
+   "ticket": 757,
+   "lang": "es"
+  },
+  "competition_math_9893": {
+   "ticket": 107,
+   "lang": "es"
+  },
+  "alpaca_8476": {
+   "ticket": 157,
+   "lang": "en"
+  },
+  "competition_math_3148": {
+   "ticket": 994,
+   "lang": "es"
+  },
+  "wildchat_18689": {
+   "ticket": 569,
+   "lang": "en"
+  },
+  "competition_math_7788": {
+   "ticket": 924,
+   "lang": "es"
+  },
+  "competition_math_6953": {
+   "ticket": 967,
+   "lang": "es"
+  },
+  "competition_math_783": {
+   "ticket": 563,
+   "lang": "es"
+  },
+  "wildchat_49060": {
+   "ticket": 486,
+   "lang": "es"
+  },
+  "stresstest_78_99_neutral": {
+   "ticket": 582,
+   "lang": "es"
+  },
+  "bailbench_28": {
+   "ticket": 517,
+   "lang": "en"
+  },
+  "wildchat_65333": {
+   "ticket": 484,
+   "lang": "en"
+  },
+  "stresstest_27_1202_neutral": {
+   "ticket": 694,
+   "lang": "en"
+  },
+  "competition_math_4961": {
+   "ticket": 692,
+   "lang": "es"
+  },
+  "wildchat_44409": {
+   "ticket": 993,
+   "lang": "en"
+  },
+  "alpaca_4352": {
+   "ticket": 370,
+   "lang": "en"
+  },
+  "competition_math_2002": {
+   "ticket": 374,
+   "lang": "en"
+  },
+  "alpaca_5865": {
+   "ticket": 671,
+   "lang": "es"
+  },
+  "wildchat_48195": {
+   "ticket": 889,
+   "lang": "es"
+  },
+  "wildchat_4521": {
+   "ticket": 953,
+   "lang": "en"
+  },
+  "bailbench_1117": {
+   "ticket": 397,
+   "lang": "es"
+  },
+  "alpaca_9300": {
+   "ticket": 922,
+   "lang": "en"
+  },
+  "alpaca_10893": {
+   "ticket": 403,
+   "lang": "es"
+  },
+  "wildchat_31094": {
+   "ticket": 110,
+   "lang": "en"
+  },
+  "alpaca_9775": {
+   "ticket": 103,
+   "lang": "en"
+  },
+  "alpaca_2023": {
+   "ticket": 259,
+   "lang": "en"
+  },
+  "stresstest_98_197_value1": {
+   "ticket": 679,
+   "lang": "en"
+  },
+  "wildchat_48670": {
+   "ticket": 765,
+   "lang": "en"
+  },
+  "competition_math_4554": {
+   "ticket": 951,
+   "lang": "es"
+  },
+  "competition_math_5256": {
+   "ticket": 888,
+   "lang": "es"
+  },
+  "stresstest_76_319_neutral": {
+   "ticket": 453,
+   "lang": "es"
+  },
+  "competition_math_10216": {
+   "ticket": 870,
+   "lang": "en"
+  },
+  "alpaca_1399": {
+   "ticket": 239,
+   "lang": "en"
+  },
+  "stresstest_40_749_value2": {
+   "ticket": 288,
+   "lang": "en"
+  },
+  "alpaca_3140": {
+   "ticket": 339,
+   "lang": "es"
+  },
+  "wildchat_10199": {
+   "ticket": 164,
+   "lang": "es"
+  },
+  "stresstest_68_95_value2": {
+   "ticket": 525,
+   "lang": "es"
+  },
+  "wildchat_35316": {
+   "ticket": 480,
+   "lang": "en"
+  },
+  "stresstest_67_1216_neutral": {
+   "ticket": 918,
+   "lang": "en"
+  },
+  "competition_math_3681": {
+   "ticket": 721,
+   "lang": "es"
+  },
+  "competition_math_11813": {
+   "ticket": 503,
+   "lang": "en"
+  },
+  "competition_math_6259": {
+   "ticket": 477,
+   "lang": "es"
+  },
+  "wildchat_37482": {
+   "ticket": 197,
+   "lang": "en"
+  },
+  "wildchat_79474": {
+   "ticket": 211,
+   "lang": "en"
+  },
+  "competition_math_4938": {
+   "ticket": 504,
+   "lang": "es"
+  },
+  "competition_math_10074": {
+   "ticket": 711,
+   "lang": "en"
+  },
+  "alpaca_8634": {
+   "ticket": 240,
+   "lang": "en"
+  },
+  "competition_math_12276": {
+   "ticket": 756,
+   "lang": "es"
+  },
+  "wildchat_60253": {
+   "ticket": 576,
+   "lang": "en"
+  },
+  "wildchat_37341": {
+   "ticket": 207,
+   "lang": "es"
+  },
+  "competition_math_2294": {
+   "ticket": 356,
+   "lang": "es"
+  },
+  "bailbench_886": {
+   "ticket": 289,
+   "lang": "en"
+  },
+  "wildchat_12537": {
+   "ticket": 442,
+   "lang": "es"
+  },
+  "bailbench_934": {
+   "ticket": 725,
+   "lang": "en"
+  },
+  "stresstest_70_384_neutral": {
+   "ticket": 763,
+   "lang": "en"
+  },
+  "stresstest_46_700_value1": {
+   "ticket": 937,
+   "lang": "es"
+  },
+  "stresstest_43_28_value1": {
+   "ticket": 768,
+   "lang": "es"
+  },
+  "alpaca_11504": {
+   "ticket": 250,
+   "lang": "es"
+  },
+  "stresstest_66_720_value2": {
+   "ticket": 465,
+   "lang": "en"
+  },
+  "alpaca_11850": {
+   "ticket": 162,
+   "lang": "es"
+  },
+  "stresstest_84_1233_neutral": {
+   "ticket": 561,
+   "lang": "es"
+  },
+  "wildchat_38384": {
+   "ticket": 970,
+   "lang": "es"
+  },
+  "bailbench_1426": {
+   "ticket": 577,
+   "lang": "en"
+  },
+  "stresstest_98_325_value1": {
+   "ticket": 551,
+   "lang": "en"
+  },
+  "competition_math_9300": {
+   "ticket": 974,
+   "lang": "es"
+  },
+  "wildchat_32372": {
+   "ticket": 590,
+   "lang": "es"
+  },
+  "stresstest_1_523_value1": {
+   "ticket": 187,
+   "lang": "es"
+  },
+  "wildchat_22653": {
+   "ticket": 863,
+   "lang": "en"
+  },
+  "stresstest_9_1471_neutral": {
+   "ticket": 176,
+   "lang": "es"
+  },
+  "competition_math_9730": {
+   "ticket": 214,
+   "lang": "en"
+  },
+  "alpaca_13966": {
+   "ticket": 566,
+   "lang": "es"
+  },
+  "wildchat_30291": {
+   "ticket": 661,
+   "lang": "en"
+  },
+  "alpaca_604": {
+   "ticket": 734,
+   "lang": "es"
+  },
+  "alpaca_5262": {
+   "ticket": 594,
+   "lang": "en"
+  },
+  "stresstest_83_297_value2": {
+   "ticket": 841,
+   "lang": "en"
+  },
+  "wildchat_50277": {
+   "ticket": 218,
+   "lang": "en"
+  },
+  "competition_math_1243": {
+   "ticket": 309,
+   "lang": "en"
+  },
+  "alpaca_2304": {
+   "ticket": 546,
+   "lang": "en"
+  },
+  "alpaca_6410": {
+   "ticket": 635,
+   "lang": "en"
+  },
+  "competition_math_7099": {
+   "ticket": 777,
+   "lang": "en"
+  },
+  "alpaca_4785": {
+   "ticket": 649,
+   "lang": "es"
+  },
+  "stresstest_54_350_neutral": {
+   "ticket": 266,
+   "lang": "en"
+  },
+  "alpaca_596": {
+   "ticket": 688,
+   "lang": "es"
+  },
+  "wildchat_69308": {
+   "ticket": 802,
+   "lang": "en"
+  },
+  "alpaca_8921": {
+   "ticket": 774,
+   "lang": "es"
+  },
+  "bailbench_334": {
+   "ticket": 925,
+   "lang": "en"
+  },
+  "competition_math_11312": {
+   "ticket": 792,
+   "lang": "es"
+  },
+  "alpaca_9902": {
+   "ticket": 571,
+   "lang": "es"
+  },
+  "alpaca_13796": {
+   "ticket": 436,
+   "lang": "en"
+  },
+  "stresstest_85_614_value1": {
+   "ticket": 160,
+   "lang": "es"
+  },
+  "competition_math_9660": {
+   "ticket": 905,
+   "lang": "es"
+  },
+  "stresstest_35_290_neutral": {
+   "ticket": 662,
+   "lang": "es"
+  },
+  "wildchat_33461": {
+   "ticket": 916,
+   "lang": "en"
+  },
+  "competition_math_4458": {
+   "ticket": 337,
+   "lang": "es"
+  },
+  "alpaca_12997": {
+   "ticket": 948,
+   "lang": "es"
+  },
+  "alpaca_529": {
+   "ticket": 843,
+   "lang": "en"
+  },
+  "competition_math_10723": {
+   "ticket": 706,
+   "lang": "en"
+  },
+  "wildchat_59001": {
+   "ticket": 816,
+   "lang": "es"
+  },
+  "alpaca_5938": {
+   "ticket": 923,
+   "lang": "en"
+  },
+  "wildchat_35075": {
+   "ticket": 790,
+   "lang": "es"
+  },
+  "stresstest_46_1290_neutral": {
+   "ticket": 117,
+   "lang": "en"
+  },
+  "competition_math_2482": {
+   "ticket": 749,
+   "lang": "en"
+  },
+  "wildchat_46059": {
+   "ticket": 558,
+   "lang": "en"
+  },
+  "competition_math_6100": {
+   "ticket": 464,
+   "lang": "en"
+  },
+  "competition_math_11190": {
+   "ticket": 202,
+   "lang": "en"
+  },
+  "competition_math_1289": {
+   "ticket": 302,
+   "lang": "es"
+  },
+  "alpaca_3816": {
+   "ticket": 949,
+   "lang": "en"
+  },
+  "stresstest_98_692_value2": {
+   "ticket": 422,
+   "lang": "en"
+  },
+  "stresstest_84_1399_value1": {
+   "ticket": 348,
+   "lang": "en"
+  },
+  "bailbench_418": {
+   "ticket": 496,
+   "lang": "es"
+  },
+  "alpaca_12029": {
+   "ticket": 224,
+   "lang": "en"
+  },
+  "wildchat_65686": {
+   "ticket": 150,
+   "lang": "en"
+  },
+  "wildchat_73314": {
+   "ticket": 284,
+   "lang": "en"
+  },
+  "wildchat_58488": {
+   "ticket": 209,
+   "lang": "en"
+  },
+  "competition_math_2490": {
+   "ticket": 599,
+   "lang": "en"
+  },
+  "stresstest_56_308_neutral": {
+   "ticket": 708,
+   "lang": "en"
+  },
+  "wildchat_54112": {
+   "ticket": 875,
+   "lang": "es"
+  },
+  "competition_math_4424": {
+   "ticket": 366,
+   "lang": "es"
+  },
+  "competition_math_12079": {
+   "ticket": 460,
+   "lang": "en"
+  },
+  "wildchat_53121": {
+   "ticket": 180,
+   "lang": "es"
+  },
+  "alpaca_10607": {
+   "ticket": 965,
+   "lang": "en"
+  },
+  "bailbench_143": {
+   "ticket": 267,
+   "lang": "es"
+  },
+  "alpaca_8782": {
+   "ticket": 696,
+   "lang": "en"
+  },
+  "competition_math_819": {
+   "ticket": 270,
+   "lang": "es"
+  },
+  "bailbench_1084": {
+   "ticket": 941,
+   "lang": "en"
+  },
+  "alpaca_14204": {
+   "ticket": 140,
+   "lang": "es"
+  },
+  "competition_math_4047": {
+   "ticket": 638,
+   "lang": "es"
+  },
+  "stresstest_71_25_value2": {
+   "ticket": 136,
+   "lang": "en"
+  },
+  "alpaca_8989": {
+   "ticket": 939,
+   "lang": "es"
+  },
+  "wildchat_33214": {
+   "ticket": 557,
+   "lang": "es"
+  },
+  "stresstest_56_796_neutral": {
+   "ticket": 690,
+   "lang": "en"
+  },
+  "wildchat_73001": {
+   "ticket": 109,
+   "lang": "es"
+  },
+  "wildchat_13446": {
+   "ticket": 268,
+   "lang": "es"
+  },
+  "stresstest_25_593_neutral": {
+   "ticket": 907,
+   "lang": "es"
+  },
+  "stresstest_11_61_neutral": {
+   "ticket": 307,
+   "lang": "en"
+  },
+  "alpaca_14355": {
+   "ticket": 853,
+   "lang": "en"
+  },
+  "competition_math_10757": {
+   "ticket": 154,
+   "lang": "en"
+  },
+  "wildchat_28486": {
+   "ticket": 595,
+   "lang": "es"
+  },
+  "wildchat_3427": {
+   "ticket": 371,
+   "lang": "en"
+  }
+ }
+}

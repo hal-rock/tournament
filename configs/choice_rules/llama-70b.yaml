@@ -1,0 +1,29 @@
+# Choice rules pilot (README, "Choice rules: tickets, languages and position"; Hal, 2026-11-25): does the Assistant follow
+# rules unrelated to its preferences? Random ticket numbers (lower / higher), a random half of the tasks in Spanish
+# (Spanish / English) and position (listed first / second), each rule in the user turn and in the system prompt, plus the
+# plain prompt and the ticket and mixed-language layouts with no rule. Assistant only, final model, 2,000 of the sweep's
+# 15,000 pairs in both orders. The per-task tickets and languages are data/choice_rules_assign.json (choice_rules.py).
+# 1x H200 without a KV cache, as in the ifchoose runs (configs/ifchoose/llama-70b-*.yaml). ~220 GB of disk.
+wandb_project: tournament
+group: choice_rules
+tags: [llama-70b]
+run_name: choice-rules-llama-70b
+tasks_file: data/tasks_n300_max500_seed0.jsonl
+choice_rules: true
+seed: 0
+require_gpu: true
+system_prompt: none
+# The sweep's 15,000 pairs, then a fixed 2,000 of them.
+max_pairs: 15000
+pair_subset: 2000
+batch_size: 32
+top_k_tokens: 5
+progress_every: 2000
+batching_check: {n_prompts: 16, tolerance: 0.5}
+
+models:
+  - name: unsloth/Llama-3.3-70B-Instruct
+    stage: instruct
+    max_memory: {0: 139GiB}
+    use_cache: false
+    conditions: [assistant, assistant_tickets, assistant_tickets_lower_user, assistant_tickets_higher_user, assistant_tickets_lower_system, assistant_tickets_higher_system, assistant_mixed, assistant_mixed_spanish_user, assistant_mixed_english_user, assistant_mixed_spanish_system, assistant_mixed_english_system, assistant_position_first_user, assistant_position_second_user, assistant_position_first_system, assistant_position_second_system]

@@ -37,7 +37,8 @@ GLM_BASE = "zai-org/GLM-4.5-Air-Base"
 DEEPSEEK = "deepseek-ai/DeepSeek-V4-Flash"
 DEEPSEEK_BASE = "deepseek-ai/DeepSeek-V4-Flash-Base"
 # DeepSeek V4 has no Jinja template; its configs give the turn markers (chat mode).
-DEEPSEEK_TURNS = {"user": "<｜begin▁of▁sentence｜><｜User｜>", "reply": "<｜Assistant｜></think>"}
+DEEPSEEK_TURNS = {"user": "<｜begin▁of▁sentence｜><｜User｜>", "reply": "<｜Assistant｜></think>",
+                  "system": "<｜begin▁of▁sentence｜>{system}<｜User｜>"}
 TURN_FORMAT = {DEEPSEEK: DEEPSEEK_TURNS, DEEPSEEK_BASE: DEEPSEEK_TURNS}
 QWEN_REPLY = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 # Where the Assistant's reply starts. Hybrid-thinking templates get their non-thinking
@@ -68,9 +69,13 @@ def runs_on(condition, name):
 RAW_CONDITIONS = [c for c in CONDITIONS if CONDITIONS[c].get("raw")]
 
 
+# Per-task values some bodies name (the choice rules' ticket numbers); other bodies ignore them.
+FIELDS = {"first_ticket": 101, "second_ticket": 202}
+
+
 def render(condition, tok, first="FIRST", second="SECOND", **kw):
     return build_prompt(condition, first, second, tok, turn_format=TURN_FORMAT.get(tok.name_or_path),
-                        doc_prefix=DOC_PREFIX.get(tok.name_or_path), **kw)
+                        doc_prefix=DOC_PREFIX.get(tok.name_or_path), fields=FIELDS, **kw)
 
 
 @pytest.fixture(scope="module", params=list(REPLY_HEADER))
@@ -230,8 +235,10 @@ def test_deepseek_matches_reference_encoding():
     spec.loader.exec_module(enc)
     tok = AutoTokenizer.from_pretrained(DEEPSEEK)
     for condition in CHAT_CONDITIONS:
-        body = CONDITIONS[condition]["body"].format(first="FIRST", second="SECOND")
-        reference = enc.encode_messages([{"role": "user", "content": body}], thinking_mode="chat")
+        body = CONDITIONS[condition]["body"].format(first="FIRST", second="SECOND", **FIELDS)
+        system = CONDITIONS[condition].get("system")  # the choice rules' system-prompt placement
+        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": body}]
+        reference = enc.encode_messages(messages, thinking_mode="chat")
         if CONDITIONS[condition]["prefill"] is None:
             assert reference.startswith(render(condition, tok))
         else:
