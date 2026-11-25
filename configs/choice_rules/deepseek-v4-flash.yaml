@@ -22,7 +22,11 @@ pair_subset: 2000
 batch_size: 32
 top_k_tokens: 5
 progress_every: 2000
-batching_check: {n_prompts: 16, tolerance: 0.5}
+# Tolerance 1.0, not 0.5 (deviation, 2026-11-25): V4 Flash's log-odds come in steps of 0.125-0.25 nats (bf16 logits at
+# their magnitude; every sweep value is a multiple of 0.125), so batch-shape rounding moves a prompt by one or two steps.
+# The first launch failed at a median of exactly 0.5 after passing 0.25 / 0.375 / 0.375. A padding bug shifts most
+# prompts by several nats, which 1.0 still catches.
+batching_check: {n_prompts: 16, tolerance: 1.0}
 
 models:
   - name: deepseek-ai/DeepSeek-V4-Flash

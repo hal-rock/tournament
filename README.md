@@ -8021,6 +8021,18 @@ here on. This first step is a pilot of **the Assistant's following only**, on fo
 models and rules that are followed well. Following is compared on **benign pairs** and on pairs with a harmful task, since
 harm overrode the length rules; Hal is happy to restrict later runs to benign tasks if that's cleaner.
 
+**The rules are followed, in the user turn, on benign tasks.**
+- **Following:** Llama, Gemma and DeepSeek V4 Flash follow all three kinds at 0.92-1.00 of benign pairs, most at 0.99-1.00.
+  GLM-4.5-Air follows mixed and position (0.92-0.99) but not tickets (0.87-0.89), where its own preferences still win some
+  pairs.
+- **Placement:** the user turn is better than or as good as the system prompt in all 12 model × kind cells.
+- **Harm:** following drops where the rule's task is harmful, in most models and all kinds, so the coin runs should use
+  benign tasks only.
+- **Tickets give near-pure rule utilities:** under the rule, Llama's, Gemma's and V4 Flash's utilities rank-correlate
+  0.86-0.95 with the ticket order and only 0.13-0.33 with their default Assistant (GLM: 0.60 and 0.64).
+
+See Results.
+
 ### Design (written 2026-11-25, before any data)
 
 - **Assignments** (`choice_rules.py assign`, `data/choice_rules_assign.json`, seed 0):
@@ -8100,6 +8112,124 @@ from BailBench.
 - **2,000 pairs:** each task is in ~13 pairs, so utilities are noisier than the sweep's.
 - **The rule still comes from the user or the operator,** so a coin that follows it may follow their wish; the system placement
   at least moves it off the person who flips the coin.
+
+### Results (2026-11-25)
+
+Runs, group `choice_rules`:
+
+| model | run | GPU | cost |
+|---|---|---|---|
+| Llama 3.3 70B | `18xviuol` | 1x B300 | $6.23 |
+| Gemma 4 31B | `5zyffxyp` | 1x H100 SXM | $2.91 |
+| GLM-4.5-Air | `1w8z7shg` | 1x B300 | $4.85 |
+| DeepSeek V4 Flash | `7req4esn` | 2x H200 SXM | $15.17 (both launches) |
+
+$29.16 in all. Full printout in `outputs/choice_rules/report.txt`, every statistic in `outputs/choice_rules/pilot.csv`, the
+decisions in `outputs/choice_rules/decisions.json` (`uv run python choice_rules.py pilot`).
+
+**Deviation (V4 Flash's batching tolerance).** V4 Flash's first launch stopped at its fourth condition: the batched-vs-unbatched
+check gave a median of exactly 0.5 nats against the tolerance of 0.5.
+- **Why:** V4 Flash's log-odds come in steps of 0.125-0.25 nats (every sweep value is a multiple of 0.125). Its output at a
+  position also depends on how many tokens follow (`~/mats/CLAUDE.md`), and right padding adds tokens. Over the 15 conditions
+  the medians were 0.25-1.0 nats; the sweep passed 0.5 by luck.
+- **What changed:** the tolerance became 1.0 for V4 Flash only (`configs/choice_rules/deepseek-v4-flash.yaml`), and all 15
+  conditions were rerun on the same pod. A padding bug shifts most prompts by several nats, which 1.0 still catches.
+- **Effect:** small. Following is a sign, and V4 Flash's user-turn rules are followed at 0.92-1.00. Its single-prompt readouts
+  are noisy at the 0.5-nat scale, though, which matters for its coin (below).
+
+**Gate: passes for all four.** The re-scored plain Assistant matches the sweep's pair effects at r 1.000 (Llama, Gemma), 0.999
+(GLM) and 0.997 (V4 Flash), across GPU types. Median outcome mass is 1.00 in every cell.
+
+**1. With the rule in the user turn, following is near-perfect in three models; GLM misses on tickets.** Benign F, user turn
+(system prompt in brackets; no rule in the last column of each kind):
+
+| | tickets lower / higher | none | mixed Spanish / English | none | position first / second | none |
+|---|---|---|---|---|---|---|
+| Llama 3.3 70B | 0.99 / 0.99 (0.92 / 0.96) | 0.48 | 1.00 / 1.00 (1.00 / 1.00) | 0.44 | 1.00 / 1.00 (0.97 / 0.99) | 0.49 |
+| Gemma 4 31B | 1.00 / 1.00 (1.00 / 0.99) | 0.50 | 1.00 / 1.00 (1.00 / 0.96) | 0.49 | 1.00 / 1.00 (0.99 / 1.00) | 0.48 |
+| GLM-4.5-Air | 0.87 / 0.89 (0.79 / 0.92) | 0.51 | 0.99 / 0.92 (0.99 / 0.93) | 0.51 | 0.98 / 0.99 (0.93 / 0.99) | 0.51 |
+| DeepSeek V4 Flash | 1.00 / 1.00 (0.94 / 0.98) | 0.50 | 0.99 / 0.92 (0.92 / 0.90) | 0.43 | 0.98 / 0.99 (0.77 / 0.99) | 0.50 |
+
+("none" is the no-rule layout's share for the first rule of the pair: the lower ticket, the Spanish task, the first-listed
+task.)
+- **Close tickets aren't harder.** F barely depends on the ticket gap: pairs under 10 apart are followed at 0.90-1.00 in the
+  user turn (`figures/choice_rules_ticket_gap.png`). Comparing numbers is not the problem.
+- **GLM's ticket misses are preference.** Its F is 0.86-0.88 even for tickets over 150 apart, and its ticket-rule utilities
+  still correlate 0.63-0.65 with its default Assistant (Spearman with the ticket order 0.60-0.61).
+- **Under the ticket rule the utilities are mostly the rule.** Spearman with the ticket order is 0.86 (Llama), 0.93-0.95
+  (Gemma) and 0.88-0.89 (V4 Flash); r with the default Assistant falls to 0.31-0.32, 0.13-0.17 and 0.30-0.33. Some
+  preference remains, in margins more than in picks. These utilities include the harmful tasks (see 3).
+- **The no-rule layouts are neutral, as drawn:** the ticket layout picks the lower ticket in 0.48-0.51 of benign pairs; the
+  mixed layout leans slightly to English in Llama and V4 Flash (0.56-0.57), with every CI including 0.5.
+
+**2. Placement: the user turn is better or as good in all 12 model × kind cells.** The paired difference (user − system, benign F
+averaged over the mirrored rules) has its CI above 0 in 9 cells. The other three are ties: GLM mixed (−0.005 [−0.019,
++0.007], user chosen by P̄), Gemma position (+0.003 [−0.000, +0.007]) and Llama mixed (+0.001 [0.000, 0.004], both at the
+ceiling). The largest gaps are V4 Flash's position (+0.11; its
+system-prompt "listed first" is followed at only 0.77), Llama's tickets (+0.06) and V4 Flash's mixed and tickets (+0.04).
+By decision rule 1, **the user turn for every model and kind.**
+
+**3. Harm overrides the rules, unevenly.** Benign F minus F where the rule's task is harmful, user turn:
+
+| | tickets lower / higher | mixed Spanish / English | position first / second |
+|---|---|---|---|
+| Llama | +0.35 / +0.36 | +0.02 / +0.27 | +0.50 / +0.37 |
+| Gemma | +0.01 / +0.05 | +0.17 / +0.31 | +0.36 / +0.07 |
+| GLM | +0.55 / +0.54 | +0.06 / +0.63 | +0.46 / +0.21 |
+| V4 Flash | +0.18 / +0.08 | +0.21 / +0.53 | +0.46 / +0.08 |
+
+- Gemma follows the ticket rule into harmful tasks almost always (0.95-0.99); GLM rarely (0.32-0.35).
+- **Exploratory: a harmful task in Spanish is picked more readily than one in English.** When the rule picks a harmful Spanish
+  task over a benign English one, F is 0.78-0.98; when it picks a harmful English task over a benign Spanish one, 0.29-0.73. In
+  every model, including Llama and Gemma, whose benign following is 1.00 for both rules.
+- **Exploratory: "listed first" gives way more than "listed second"** when the named task is harmful (0.50-0.64 against
+  0.63-0.93).
+
+**4. Label pull (exploratory).** Order-averaging cancels any lean toward " A" or " B", but the ticket rules have one: "lower"
+leans toward " A" relative to "higher" by (lower − higher) / 2 = +2.27 nats in Llama, +1.25 in V4 Flash, +0.38 in Gemma and
++0.31 in GLM (user turn), more in the system prompt (Llama +3.6, Gemma +2.3). It's the alphabetical rule's label reading
+("lower" ≈ A), much weaker, and it doesn't touch F or the utilities. Any coin readout should stay order-averaged.
+
+**Decision rules:**
+1. **Placement:** the user turn, everywhere (above).
+2. **Followed well enough (≥ 0.90 for both mirrored rules, benign pairs, user turn):** every kind in Llama, Gemma and V4 Flash;
+   mixed and position in GLM. **GLM's tickets fail** (0.87 / 0.89).
+3. **Benign-only coin runs: recommended for all three kinds.** F drops by more than 0.10 where the rule's task is harmful in 3 of
+   4 models for tickets (mean of the two rules: GLM 0.55, Llama 0.36, V4 Flash 0.13; Gemma 0.03) and in all four for mixed and
+   position.
+
+**Predictions:**
+1. **Fails in one model.** Tickets ≥ 0.95 in Llama, Gemma and V4 Flash; GLM 0.87 / 0.89.
+2. **Fails in two.** Mixed ≥ 0.95 in Llama and Gemma; GLM and V4 Flash follow "English" at 0.92.
+3. **Mostly holds.** Position F ≥ 0.98 in all four; P̄ ≥ 0.9 except GLM's "second" (0.89).
+4. **Half right.** The two placements are within 0.05 in 10 of 12 cells, but the user turn is better across the board, not
+   neither.
+5. **Fails.** Where the rule's task is harmful, F was below 0.6 in only one model for tickets (GLM) and two for mixed English
+   (GLM, V4 Flash); Gemma follows tickets into harm. Harm overrode these rules less than it did the length rules.
+6. **Holds, weakly.** The ticket layout picks the lower ticket in 0.48-0.51; the mixed layout leans English in 3 of 4 by point
+   estimate (Gemma 0.51), with no CI excluding 0.5.
+7. **Half right.** Pairs under 10 apart are followed at ≥ 0.83 everywhere, but F doesn't rise with the gap: it's flat.
+
+**What this means for the coin runs.**
+- **Each rule works as a manipulation, in the user turn, on benign tasks,** in all four models except GLM's tickets. The
+  instructed choice is then a known quantity: the ticket order, the language, or the slot.
+- **Tickets are the cleanest per-task utility** for Llama, Gemma and V4 Flash: graded, set by us, and uncorrelated with the
+  default (the assignments' |r| ≤ 0.021). The two-pull fit that kept failing on length should be identifiable here.
+- **Position** needs no utility: does the coin still track the Assistant's default preferences when the planned choice carries
+  no information about the tasks? All four models qualify.
+- **Mixed** qualifies in all four, but with two levels only, and the languages shift the coin's reading itself (the "Other
+  languages" run found Gemma's Spanish coin unreadable).
+- **V4 Flash's coin** is small, and its batch-shape noise is 0.25-1.0 nats per prompt; its coin runs would need length-exact
+  batches (no padding) or unbatched scoring.
+
+![following](figures/choice_rules_following.png)
+
+Benign F per rule, user turn (blue circles) and system prompt (orange squares), with 95% task-bootstrap CIs; hollow markers are
+the same where the rule's task is harmful. Grey diamonds: the no-rule layout. Dashed line: the 0.90 bar.
+
+![ticket gap](figures/choice_rules_ticket_gap.png)
+
+Benign F of the ticket rules by how far apart the two tickets are.
 
 ## Tasks
 

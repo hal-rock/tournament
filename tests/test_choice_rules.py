@@ -184,3 +184,30 @@ def test_deepseek_v4_against_its_encoder():
                 {"role": "user", "content": body}]
             assert render(m, condition, a, b, None) == encoder.encode_messages(msgs, thinking_mode="chat") + c["prefill"]
         assert outcome_token_ids(condition, tok) == outcome_token_ids("assistant", tok)
+
+
+def test_following_measures_on_synthetic_log_odds():
+    """A model that leans 3 nats to the rule's task plus 5 nats to " A" follows every pair (the order average cancels the
+    label pull, which is reported separately); one that only pulls to " A" follows half; position reads each prompt."""
+    tasks = TASKS
+    pairs = subset_pairs(select_pairs(300, 15000, 0), 200, 0)
+    for kind, rule in (("tickets", "lower"), ("tickets", "higher"), ("mixed", "spanish"), ("mixed", "english")):
+        lo, label_only = {}, {}
+        for a, b in pairs:
+            target = choice_rules.rule_target(kind, rule, a, b, tasks)
+            for x, y in ((a, b), (b, a)):
+                lean = 0.0 if target is None else (3.0 if target == x else -3.0)
+                lo[(tasks[x]["id"], tasks[y]["id"])] = lean + 5.0
+                label_only[(tasks[x]["id"], tasks[y]["id"])] = 5.0
+        recs = choice_rules.items(kind, rule, lo, tasks, pairs)
+        assert recs and all(r["follow"] == 1.0 and abs(r["pull"] - 5.0) < 1e-9 for r in recs)
+        if kind == "mixed":
+            assert len(recs) == sum(tasks[a]["lang"] != tasks[b]["lang"] for a, b in pairs)
+        assert all(r["follow"] == 0.5 for r in choice_rules.items(kind, rule, label_only, tasks, pairs))
+    first = {(tasks[x]["id"], tasks[y]["id"]): 2.0 for a, b in pairs for x, y in ((a, b), (b, a))}
+    assert all(r["follow"] == 1.0 for r in choice_rules.items("position", "first", first, tasks, pairs))
+    assert all(r["follow"] == 0.0 for r in choice_rules.items("position", "second", first, tasks, pairs))
+    boot = choice_rules.Bootstrap(300, n=50)
+    recs = choice_rules.items("position", "first", first, tasks, pairs)
+    point, resampled = boot.mean(recs, "follow")
+    assert point == 1.0 and np.allclose(resampled, 1.0)
