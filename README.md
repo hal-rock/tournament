@@ -8241,6 +8241,16 @@ position"), in the user turn, on benign tasks only:
 The question is whether the coin tracks the Assistant's upcoming choice when that choice is set by something unrelated to its
 preferences, or keeps tracking the preferences.
 
+**In three of four models the coin stops tracking the default preferences once a rule sets the choice.**
+- **Llama 3.3 70B and DeepSeek V4 Flash:** the coin follows every rule (V4 Flash's picks the rule's ticket in 97-99% of
+  pairs) and keeps as little of the default preference as the instructed choice does, or less.
+- **Gemma 4 31B:** the coin drops its preferences under every rule. It follows the language rule, but goes *against* the ticket
+  and position rules.
+- **GLM-4.5-Air is the exception:** its coin follows the rules but keeps its default preferences in full, with the rule added
+  on top.
+
+See Results.
+
 ### Design (written 2026-11-25, before any data)
 
 - **Prompts** (`prompts.CHOICE_LAYOUTS`): the coinflip, cut at "it came up", read P(" heads") vs P(" tails").
@@ -8325,6 +8335,121 @@ default preferences.
 - **GPU types differ from the pilot and the sweep** for some models, and V4 Flash runs in HF on B200s for the first time. The
   gate compares with the sweep.
 - **One phrasing per rule,** user turn only.
+
+### Results (2026-11-26)
+
+Runs, group `choice_rules_coin`:
+
+| model | tickets | mixed | position | GPUs | cost |
+|---|---|---|---|---|---|
+| Llama 3.3 70B | `rrzt7qes` | `p6x3xsg9` | `az90w0zd` | 1x H200 each | $10.74, $10.20, $7.71 |
+| Gemma 4 31B | `2kcogm5z` | `07z7f8b0` | `dh9bl3yq` | 1x H100 each | $5.83, $5.68, $4.35 |
+| GLM-4.5-Air | | `jxax2zh0` | `429aktya` | 3x H100, shared with V4 Flash's mixed run | $71.21 for the three runs |
+| DeepSeek V4 Flash | `z45x00qy` | `2zqdnl0x` | `1c3euz7j` | 2x B200 (tickets, position); 3x H100 (mixed) | $71.44 for the B200 pair |
+
+$187.16 in all. Printout in `outputs/choice_rules_coin/report.txt`, per-cell numbers in `cells.csv` / `cells.json`
+(`uv run python choice_rules_coin.py`).
+
+**Deviations (GPUs, from stock):**
+- **GLM** ran on 3x H100 with its weights spread evenly (`max_memory` 71/71/72 GiB) at batch 8. The default split ran out of
+  memory at batch 32, and an even split at 66/69/69 GiB didn't hold the ~205 GiB of weights.
+- **V4 Flash's mixed run** moved to that pod once GLM finished, to run alongside its position run. Its plain prompts agree
+  with its B200 runs at r 0.998 (coin) and 1.000 (Assistant).
+- **Same-length batches didn't remove V4 Flash's batch noise:** batched vs alone, prompts of one length still differed by a
+  median 0.125-0.625 nats (all within the 1.0 tolerance). Its outputs depend on batch size, not only on padding. The
+  per-task utilities average this out (reliability 0.981-0.993).
+
+**Gate: passes in all 11 cells.**
+- The plain Assistant and coin match the sweep's utilities at r 0.996-0.999.
+- Each model's plain prompts agree across its runs at r ≥ 0.998.
+- Split-half reliability is 0.946-0.995.
+- Median outcome mass is 0.79-1.00, except GLM's coin at 0.43 (" **", as in earlier runs).
+
+**1. The coin follows the rule in 9 of 11 cells; Gemma's goes against it on tickets and position.** τ is the coin's move toward
+the instructed choice, relative to how it passes on the default preferences (1 = as fully). Pick shares are the share of
+benign pairs (mixed: cross-language) whose order-averaged coin lean goes to the rule's task.
+
+| | tickets | mixed | position |
+|---|---|---|---|
+| Llama 3.3 70B | follows, τ 0.34 [0.30, 0.39] | follows, τ 0.26 [0.23, 0.28] | follows, τ 0.90 [0.83, 0.99] |
+| Gemma 4 31B | **against**, τ −0.13 [−0.17, −0.10] | follows, τ 0.47 [0.43, 0.52] | **against**, τ −0.65 [−0.72, −0.59] |
+| GLM-4.5-Air | | follows, τ 1.14 [1.04, 1.27] | follows, τ 4.53 [4.15, 5.04] |
+| DeepSeek V4 Flash | follows, τ 1.13 [1.04, 1.25] | follows, τ 0.58 [0.51, 0.67] | follows, τ 0.79 [0.71, 0.89] |
+
+Coin pick shares, no rule → under the first rule / the rule's task under the second (the instructed Assistant: 0.93-1.00
+throughout):
+
+| | tickets (lower / higher) | mixed (Spanish / English) |
+|---|---|---|
+| Llama | 0.46 → 0.74 / 0.87 | 0.48 → 0.84 / 0.99 |
+| Gemma | 0.48 → **0.36 / 0.34** | 0.56 → 1.00 / 0.81 |
+| GLM | | 0.50 → 0.98 / 0.68 |
+| V4 Flash | 0.49 → 0.97 / 0.99 | 0.61 → 0.96 / 0.63 |
+
+Position, the coin's mean log-odds toward heads (the first-listed task), no rule / "first" / "second": Llama +1.98 / +4.00 /
+−0.51; Gemma −0.61 / **−5.05 / +1.58**; GLM −0.84 / +0.01 / −3.09; V4 Flash +0.43 / +1.21 / +0.26.
+
+- **V4 Flash's coin picks the rule's ticket nearly as often as its Assistant does** (0.97-0.99), at τ 1.13.
+- **GLM's τ is large because its Assistant is unsure.** Its instructed Assistant leans only 2.7-4.2 nats, and its coin
+  normally passes on little (b_L 0.08-0.09), yet the coin moves 0.29-1.55 nats.
+
+**2. Retention: in three of four models the coin keeps less of the default preference than the instructed Assistant does.**
+
+| | tickets: q_A → q_C | mixed | position |
+|---|---|---|---|
+| Llama | 0.29 → 0.00, **less** | 0.28 → 0.05, **less** | 0.29 → 0.18, **less** |
+| Gemma | 0.08 → −0.09, **less** | 0.13 → −0.04, **less** | 0.10 → −0.07, **less** |
+| GLM | | 0.37 → 0.94, **more** | 0.42 → 0.95, **more** |
+| V4 Flash | 0.34 → 0.32, as much | 0.65 → 0.38, **less** | 0.38 → 0.23, **less** |
+
+(q_A: the slope of the instructed Assistant's mirrored average on its no-rule utilities. q_C: the same for the coin, relative to
+the no-rule coin's slope. Δq's CI excludes 0 in every cell but V4 Flash tickets.)
+
+- **Llama and V4 Flash:** the coin's tracking of the default preference drops to the instructed choice's level or below.
+  Llama's falls to 0.00-0.05 under tickets and mixed, while its Assistant's margins keep 0.28-0.29. So the coin follows the
+  pick, not the residual preference in how confidently the Assistant picks.
+- **Gemma:** the coin's default preferences vanish under every rule (q_C −0.09 to −0.04), whatever direction it then moves.
+- **GLM:** the coin keeps its default preferences in full (0.94-0.95) and adds the rule on top. In the two-pull fits, GLM's
+  β_def stays positive under both rules (+0.08, +0.18), while Llama's and Gemma's are negative.
+
+**3. Exploratory: Gemma's reversal isn't a slot artifact.** Gemma's coin leans to tails under every rule lead (mean −3.3 to
+−9.9 nats, except "second": +1.6), so the per-order numbers mix that lean with the rule. Split by which side the rule's task
+is on, under "lower ticket" heads is less likely when the lower ticket is the heads task (mean log-odds −5.04) than when it's
+the tails task (−3.64). The coin moves away from the instructed task on either side. Under the language rules the same split
+goes the other way: −3.94 against −11.22 for "Spanish", toward the instructed task. Why rules about a label or slot reverse
+Gemma's coin while a rule about the task's language doesn't is open.
+
+**Predictions:**
+1. **Half right.** The coin follows in 9 of 11 cells, but not in position in all four (Gemma goes against).
+2. **Fails.** τ is between 0.1 and 1 in 6 of 11 cells (predicted ≥ 7). It's above 1 in GLM (both) and V4 Flash tickets,
+   and below 0 in Gemma's tickets and position.
+3. **Fails.**
+   - Tickets: the coin keeps *less* of the default than the instructed choice in Llama and Gemma, and as much in V4 Flash
+     (predicted more in all three).
+   - Position: no model's Δq CI includes 0 (predicted ≥ 3 of 4). Three keep less and GLM more.
+4. **Mostly holds.** Gemma's coin leans below −3 nats under 5 of its 6 rules ("second": +1.58). Every Gemma cell is
+   reliable (≥ 0.946).
+
+**What this means for Hal's question.** When the rule sets the choice by something unrelated to preference, the coin no longer
+tracks the Assistant's default preferences in three of the four models:
+- **Llama and V4 Flash:** the coin tracks the instructed choice.
+- **Gemma:** the coin drops its preferences and moves with the instruction, though not always in its direction.
+
+**GLM is the exception:** its coin keeps the default preferences in full and adds the rule. In the models where the coin
+follows the rule, it seems to read the upcoming choice, not stable task preferences.
+
+The open confound remains: the rule comes from the user, the person who reports the coin. That fits the following in Llama,
+V4 Flash and GLM, but not Gemma's reversals.
+
+![summary](figures/choice_rules_coin_summary.png)
+
+Left: τ per cell, with 95% CIs (dashed line: 1, the default pass-through). Right: retention of the default preference by the
+instructed Assistant (q_A, orange circles) and the coin (q_C, blue diamonds).
+
+![contrasts](figures/choice_rules_coin_contrasts.png)
+
+Tickets and mixed: each task's mirrored coin contrast against the Assistant's, with the fitted slope (solid) and the default
+pass-through b_L (dashed); τ is their ratio. Position: the coin's mean log-odds toward heads with no rule and under each rule.
 
 ## Tasks
 

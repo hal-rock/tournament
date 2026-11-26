@@ -2,7 +2,8 @@
 # the Assistant's choice and the coinflip, with the no-rule layout and the plain prompts as each run's own baselines.
 # Benign tasks only (257), the sweep's pairs among them (11,065), both orders. Tickets and languages:
 # data/choice_rules_assign.json.
-# 2x H200 / B200 or 1x B300 (the pilot ran on a B300). No tickets: GLM's Assistant missed the ticket
+# Ran on 3x H100 SXM (no larger node in stock): weights (~205 GiB with the MTP layer) spread evenly by max_memory, batch 8, after
+# the default split put ~72 GiB on GPU 1 and ran out of memory in the experts at batch 32. No tickets: GLM's Assistant missed the ticket
 # rules in the pilot (0.87 / 0.89).
 wandb_project: tournament
 group: choice_rules_coin
@@ -16,7 +17,7 @@ require_gpu: true
 system_prompt: none
 # The sweep's 15,000 pairs, restricted to pairs of two benign tasks.
 max_pairs: 15000
-batch_size: 32
+batch_size: 8
 top_k_tokens: 5
 progress_every: 4000
 batching_check: {n_prompts: 16, tolerance: 0.5}
@@ -24,4 +25,5 @@ batching_check: {n_prompts: 16, tolerance: 0.5}
 models:
   - name: zai-org/GLM-4.5-Air
     stage: instruct
+    max_memory: {0: 71GiB, 1: 71GiB, 2: 72GiB}
     conditions: [assistant, coinflip, assistant_mixed, coinflip_mixed, assistant_mixed_spanish_user, assistant_mixed_english_user, coinflip_mixed_spanish_user, coinflip_mixed_english_user]

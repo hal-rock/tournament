@@ -128,3 +128,63 @@ def test_deepseek_v4_coin_against_its_encoder():
                     assert p + "<｜Assistant｜></think>" == reference
                 else:
                     assert p == reference + c["prefill"]
+
+
+def _write_run(tmp, tasks, pairs, utilities, leans=None):
+    """A fake run dir: utilities.csv, per-condition results whose log-odds are u_first - u_second (+ a lean toward the
+    first-listed outcome), and a summary with reliabilities."""
+    import csv as _csv
+    import gzip as _gzip
+    import json as _json
+    (tmp / "analysis").mkdir(parents=True)
+    (tmp / "results").mkdir()
+    ids = [t["id"] for t in tasks]
+    with open(tmp / "analysis" / "utilities.csv", "w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["id"] + [f"instruct/{c}" for c in utilities])
+        for k, i in enumerate(ids):
+            w.writerow([i] + [utilities[c][k] for c in utilities])
+    for c, u in utilities.items():
+        with _gzip.open(tmp / "results" / f"instruct__{c}.csv.gz", "wt", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["model", "stage", "condition", "first", "second", "logp_first", "logp_second", "log_odds",
+                        "outcome_mass", "prompt_tokens"])
+            for a, b in pairs + [(b, a) for a, b in pairs]:
+                lo = u[a] - u[b] + (leans or {}).get(c, 0.0)
+                w.writerow(["m", "instruct", c, ids[a], ids[b], 0.0, -lo, lo, 1.0, 10])
+    (tmp / "analysis" / "summary.json").write_text(_json.dumps({f"instruct/{c}/reliability": 0.99 for c in utilities}))
+
+
+@pytest.mark.parametrize("kind", ["tickets", "position"])
+@pytest.mark.parametrize("coin_follows", [True, False])
+def test_coin_measures_on_synthetic_utilities(tmp_path, monkeypatch, kind, coin_follows):
+    """A coin that is exactly b x the instructed Assistant gives tau = 1 and dq = 0; a coin that ignores the rule (b x the
+    no-rule Assistant under every rule) gives tau = 0, q_C = 1 and dq = 1 - q_A."""
+    import numpy as np
+    import choice_rules_coin as crc
+    rng = np.random.default_rng(1)
+    pairs = PAIRS[:3000]
+    A_L = rng.normal(0, 3, len(TASKS))
+    s = -np.array([t["tags"]["ticket"] for t in TASKS], float)
+    s = (s - s.mean()) / s.std()
+    shift = 5 * s if kind == "tickets" else 0 * s
+    A_p, A_m = 0.3 * A_L + shift, 0.3 * A_L - shift
+    b = 0.2
+    c = crc.conditions(kind)
+    C = (lambda x: b * x) if coin_follows else (lambda x: b * A_L)
+    U = {c["A_L"]: A_L, c["C_L"]: b * A_L, c["A_p"]: A_p, c["A_m"]: A_m, c["C_p"]: C(A_p), c["C_m"]: C(A_m),
+         "assistant": A_L, "coinflip": b * A_L}
+    H = 4.0
+    leans = {c["A_p"]: H, c["A_m"]: -H}
+    if coin_follows:
+        leans.update({c["C_p"]: b * H, c["C_m"]: -b * H})
+    _write_run(tmp_path, TASKS, pairs, U, leans if kind == "position" else None)
+    monkeypatch.setattr(crc, "sweep_utilities", lambda model, ids: {"assistant": A_L, "coinflip": b * A_L})
+    boot = crc.OriginBootstrap([t["origin"] for t in TASKS], n=50)
+    o = crc.analyze_cell("llama-70b", kind, tmp_path, TASKS, pairs, boot)
+    assert abs(o["b_L"]["est"] - b) < 1e-6 and abs(o["q_A"]["est"] - 0.3) < 1e-6
+    if coin_follows:
+        assert abs(o["tau"]["est"] - 1) < 1e-6 and abs(o["dq"]["est"]) < 1e-6 and o["follow_call"] == "follows"
+    else:
+        assert abs(o["tau"]["est"]) < 1e-6 and abs(o["q_C"]["est"] - 1) < 1e-6 and abs(o["dq"]["est"] - 0.7) < 1e-6
+    assert o["gate"]["r_sweep_A"] > 0.999
